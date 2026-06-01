@@ -59,6 +59,7 @@ html,body{margin:0; padding:0;}
 .cm-tabs{display:flex; gap:6px; background:#ece4d4; padding:5px; border-radius:12px;}
 .cm-tabs button{flex:1; border:0; background:transparent; padding:10px 4px; border-radius:9px; font-size:14px; font-weight:500; color:var(--muted); cursor:pointer; font-family:inherit;}
 .cm-tabs button.on{background:#fff; color:var(--navy); box-shadow:0 1px 4px rgba(21,35,63,.10);}
+.cm-tabs button:disabled{opacity:.4; cursor:not-allowed;}
 
 .cm-done{color:var(--green); font-weight:700; font-size:16px; text-align:center; padding:14px;}
 .cm-sentlist{margin-top:18px; border-top:1px dashed var(--line); padding-top:14px;}
@@ -414,6 +415,8 @@ function StudentHome({ cls, me, onLogout }) {
     return () => unsub();
   }, [cls.id, me.id]);
 
+  const activeTab = att ? tab : "att";
+
   return (
     <div className="cm-stack">
       <div className="cm-card cm-welcome">
@@ -429,22 +432,28 @@ function StudentHome({ cls, me, onLogout }) {
       {showPin && <ChangePin cls={cls} me={me} onDone={() => setShowPin(false)} />}
 
       <div className="cm-tabs">
-        <button className={tab === "att" ? "on" : ""} onClick={() => setTab("att")}>출석</button>
-        <button className={tab === "q" ? "on" : ""} onClick={() => setTab("q")}>질문</button>
-        <button className={tab === "hw" ? "on" : ""} onClick={() => setTab("hw")}>과제</button>
-        <button className={tab === "fb" ? "on" : ""} onClick={() => setTab("fb")}>피드백</button>
+        <button className={activeTab === "att" ? "on" : ""} onClick={() => setTab("att")}>출석</button>
+        <button className={activeTab === "q" ? "on" : ""} disabled={!att} onClick={() => att && setTab("q")}>질문</button>
+        <button className={activeTab === "hw" ? "on" : ""} disabled={!att} onClick={() => att && setTab("hw")}>과제</button>
+        <button className={activeTab === "fb" ? "on" : ""} disabled={!att} onClick={() => att && setTab("fb")}>피드백</button>
       </div>
 
-      {tab === "att" && (
+      {activeTab === "att" && (
         <div className="cm-card">
           <h3 className="cm-h3">출석체크</h3>
-          {att ? (<div className="cm-done">✓ {hhmm(att.time)}에 출석했어요</div>)
-            : (<button className="cm-btn cm-btn-primary cm-big" onClick={() => checkIn(cls.id, todayStr, me)}>출석하기</button>)}
+          {att ? (
+            <div className="cm-done">✓ {hhmm(att.time)}에 출석했어요</div>
+          ) : (
+            <>
+              <button className="cm-btn cm-btn-primary cm-big" onClick={() => checkIn(cls.id, todayStr, me)}>출석하기</button>
+              <div className="cm-hint" style={{ marginTop: 14, textAlign: "center" }}>출석체크를 해야 질문 · 과제 · 피드백을 쓸 수 있어요.</div>
+            </>
+          )}
         </div>
       )}
-      {tab === "q" && <QuestionForm cls={cls} me={me} />}
-      {tab === "hw" && <StudentHomework cls={cls} me={me} />}
-      {tab === "fb" && <FeedbackForm cls={cls} />}
+      {activeTab === "q" && <QuestionForm cls={cls} me={me} />}
+      {activeTab === "hw" && <StudentHomework cls={cls} me={me} />}
+      {activeTab === "fb" && <FeedbackForm cls={cls} />}
     </div>
   );
 }
