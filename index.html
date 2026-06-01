@@ -156,6 +156,7 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 <!-- Firebase (compat) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 
 <script>
   // ===== Firebase 설정값 =====
@@ -792,7 +793,19 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+// ===== 익명 로그인 후 앱 시작 (인증이 아직 안 켜졌어도 화면은 뜨게 함) =====
+const rootEl = document.getElementById("root");
+let rendered = false;
+function renderApp() {
+  if (rendered) return;
+  rendered = true;
+  ReactDOM.createRoot(rootEl).render(<App />);
+}
+try {
+  firebase.auth().signInAnonymously().catch(() => {});
+  firebase.auth().onAuthStateChanged((u) => { if (u) renderApp(); });
+} catch (e) { /* auth 미설정 */ }
+setTimeout(renderApp, 4000);
 </script>
 </body>
 </html>
