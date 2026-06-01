@@ -173,26 +173,33 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 </script>
 
 <script type="text/babel" data-presets="react">
+
 const { useState, useEffect, useRef } = React;
 const db = window.db;
 
-// ---- 설정값 (실제 운영 시 여기만 수정) ----
-const CLASS_NAME = "고1S 월금반";
-const ROSTER = [
-  { id: "s1", name: "김서진" },
-  { id: "s2", name: "임서윤" },
-  { id: "s3", name: "김태윤" },
-  { id: "s4", name: "박성준" },
-  { id: "s5", name: "양성은" },
-  { id: "s6", name: "안성빈" },
+// ---- 반/명단 설정 (실제 운영 시 여기만 수정) ----
+const CLASSES = [
+  { id: "s-mongeum", name: "고1S 월금반", roster: [
+    { id: "s1", name: "김서진" }, { id: "s2", name: "임서윤" }, { id: "s3", name: "김태윤" },
+    { id: "s4", name: "박성준" }, { id: "s5", name: "양성은" }, { id: "s6", name: "안성빈" },
+  ]},
+  { id: "s-hwamok", name: "고1S 화목반", roster: [
+    { id: "s1", name: "박범의" }, { id: "s2", name: "민우영" }, { id: "s3", name: "윤지섭" }, { id: "s4", name: "안현준" },
+  ]},
+  { id: "jasago", name: "고1자사고반", roster: [
+    { id: "s1", name: "마서준" }, { id: "s2", name: "김하준" }, { id: "s3", name: "김중원" },
+    { id: "s4", name: "진현겸" }, { id: "s5", name: "공하빈" },
+  ]},
 ];
+const findClass = (id) => CLASSES.find((c) => c.id === id);
+
 const BOOKS = [
   { name: "수평교 + 최고난도", total: 404 },
   { name: "기출백서", total: 302 },
   { name: "BASECAMP공수1-2", total: 455 },
 ];
-const DEFAULT_PIN = "1234"; // 학생 최초 PIN (학생이 직접 변경 가능)
-const ADMIN_PIN = "2030"; // 선생님 화면 진입 PIN
+const DEFAULT_PIN = "1234";
+const ADMIN_PIN = "2030";
 
 const todayStr = new Date().toISOString().slice(0, 10);
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
@@ -202,59 +209,44 @@ function fmtDate(d) {
 }
 const hhmm = (ts) => new Date(ts).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
 
-// ===== Firestore 데이터 계층 =====
-const daysCol = () => db.collection("days");
-const dayDoc = (date) => daysCol().doc(date);
-const touchDay = (date) => dayDoc(date).set({ updated: Date.now() }, { merge: true });
+// ===== Firestore (반별로 분리: classes/{cid}/days/{date}/...) =====
+const classDoc = (cid) => db.collection("classes").doc(cid);
+const daysCol = (cid) => classDoc(cid).collection("days");
+const dayDoc = (cid, date) => daysCol(cid).doc(date);
+const touchDay = (cid, date) => dayDoc(cid, date).set({ updated: Date.now() }, { merge: true });
+const attCol = (cid, date) => dayDoc(cid, date).collection("attendance");
+const qCol = (cid, date) => dayDoc(cid, date).collection("questions");
+const hwCol = (cid, date) => dayDoc(cid, date).collection("homework");
+const fbCol = (cid, date) => dayDoc(cid, date).collection("feedback");
 
-const attCol = (date) => dayDoc(date).collection("attendance");
-const qCol = (date) => dayDoc(date).collection("questions");
-const hwCol = (date) => dayDoc(date).collection("homework");
-const fbCol = (date) => dayDoc(date).collection("feedback");
-
-async function checkIn(date, me) {
-  await attCol(date).doc(me.id).set({ name: me.name, time: Date.now() });
-  touchDay(date);
+async function checkIn(cid, date, me) {
+  await attCol(cid, date).doc(me.id).set({ name: me.name, time: Date.now() });
+  touchDay(cid, date);
 }
-async function addQuestion(date, q) {
-  await qCol(date).add(q);
-  touchDay(date);
-}
-async function resolveQuestion(date, qid) {
-  await qCol(date).doc(qid).update({ resolved: true });
-}
-async function getMyHw(date, sid) {
-  const d = await hwCol(date).doc(sid).get();
+async function addQuestion(cid, date, q) { await qCol(cid, date).add(q); touchDay(cid, date); }
+async function resolveQuestion(cid, date, qid) { await qCol(cid, date).doc(qid).update({ resolved: true }); }
+async function getMyHw(cid, date, sid) {
+  const d = await hwCol(cid, date).doc(sid).get();
   return d.exists ? (d.data().books || {}) : {};
 }
-async function saveHwBook(date, me, bookName, arr) {
-  await hwCol(date).doc(me.id).set({ name: me.name, books: { [bookName]: arr } }, { merge: true });
-  touchDay(date);
+async function saveHwBook(cid, date, me, bookName, arr) {
+  await hwCol(cid, date).doc(me.id).set({ name: me.name, books: { [bookName]: arr } }, { merge: true });
+  touchDay(cid, date);
 }
-async function addFeedback(date, f) {
-  await fbCol(date).add(f);
-  touchDay(date);
-}
-async function listDays() {
-  const s = await daysCol().get();
+async function addFeedback(cid, date, f) { await fbCol(cid, date).add(f); touchDay(cid, date); }
+async function listDays(cid) {
+  const s = await daysCol(cid).get();
   const arr = [];
   s.forEach((d) => arr.push(d.id));
   if (!arr.includes(todayStr)) arr.push(todayStr);
   return arr.sort().reverse();
 }
-
-const studentsCol = () => db.collection("students");
-async function getStudentPin(sid) {
-  try {
-    const d = await studentsCol().doc(sid).get();
-    return d.exists ? (d.data().pin || null) : null;
-  } catch (e) {
-    return null;
-  }
+const studentsCol = (cid) => classDoc(cid).collection("students");
+async function getStudentPin(cid, sid) {
+  try { const d = await studentsCol(cid).doc(sid).get(); return d.exists ? (d.data().pin || null) : null; }
+  catch (e) { return null; }
 }
-async function saveStudentPin(sid, p) {
-  await studentsCol().doc(sid).set({ pin: p }, { merge: true });
-}
+async function saveStudentPin(cid, sid, p) { await studentsCol(cid).doc(sid).set({ pin: p }, { merge: true }); }
 
 // ===== 공용: 과제 번호표 =====
 function HwGrid({ total, set, bookName, onCellDown, onCellClick }) {
@@ -267,9 +259,7 @@ function HwGrid({ total, set, bookName, onCellDown, onCellClick }) {
       interactive ? (
         <button key={n} className={cls} data-n={n} data-book={bookName}
           onPointerDown={(e) => onCellDown(n, e)} onClick={() => onCellClick(n)}>{n}</button>
-      ) : (
-        <span key={n} className={cls}>{n}</span>
-      )
+      ) : (<span key={n} className={cls}>{n}</span>)
     );
   }
   return <div className="cm-grid">{cells}</div>;
@@ -287,121 +277,70 @@ function BookHwCard({ book, initial, onChange }) {
   const set = setRef.current;
   const commit = () => onChange(Array.from(setRef.current).sort((a, b) => a - b));
 
-  function applyPaint(n) {
-    if (paintVal.current) setRef.current.add(n);
-    else setRef.current.delete(n);
-    rerender();
-  }
-  function toggleSingle(n) {
-    if (setRef.current.has(n)) setRef.current.delete(n);
-    else setRef.current.add(n);
-    rerender();
-    commit();
-  }
+  function applyPaint(n) { if (paintVal.current) setRef.current.add(n); else setRef.current.delete(n); rerender(); }
+  function toggleSingle(n) { if (setRef.current.has(n)) setRef.current.delete(n); else setRef.current.add(n); rerender(); commit(); }
   function startMousePaint(n) {
     paintVal.current = !setRef.current.has(n);
     applyPaint(n);
     const move = (ev) => {
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
-      if (el && el.getAttribute && el.getAttribute("data-book") === book.name) {
-        const dn = el.getAttribute("data-n");
-        if (dn) applyPaint(parseInt(dn, 10));
-      }
+      if (el && el.getAttribute && el.getAttribute("data-book") === book.name) { const dn = el.getAttribute("data-n"); if (dn) applyPaint(parseInt(dn, 10)); }
     };
     const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      paintVal.current = null;
-      suppressClick.current = true;
-      setTimeout(() => { suppressClick.current = false; }, 50);
-      commit();
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      paintVal.current = null; suppressClick.current = true;
+      setTimeout(() => { suppressClick.current = false; }, 50); commit();
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
   }
   function startTouchLongPress(n, x, y) {
     const longTimer = setTimeout(() => {
-      window.removeEventListener("pointermove", cancelMove);
-      window.removeEventListener("pointerup", earlyUp);
-      enterTouchPaint(n);
+      window.removeEventListener("pointermove", cancelMove); window.removeEventListener("pointerup", earlyUp); enterTouchPaint(n);
     }, 420);
     const cancelMove = (ev) => {
       if (Math.abs(ev.clientX - x) > 8 || Math.abs(ev.clientY - y) > 8) {
-        clearTimeout(longTimer);
-        window.removeEventListener("pointermove", cancelMove);
-        window.removeEventListener("pointerup", earlyUp);
+        clearTimeout(longTimer); window.removeEventListener("pointermove", cancelMove); window.removeEventListener("pointerup", earlyUp);
       }
     };
-    const earlyUp = () => {
-      clearTimeout(longTimer);
-      window.removeEventListener("pointermove", cancelMove);
-    };
-    window.addEventListener("pointermove", cancelMove);
-    window.addEventListener("pointerup", earlyUp, { once: true });
+    const earlyUp = () => { clearTimeout(longTimer); window.removeEventListener("pointermove", cancelMove); };
+    window.addEventListener("pointermove", cancelMove); window.addEventListener("pointerup", earlyUp, { once: true });
   }
   function enterTouchPaint(n) {
-    setPainting(true);
-    paintVal.current = !setRef.current.has(n);
-    applyPaint(n);
-    suppressClick.current = true;
+    setPainting(true); paintVal.current = !setRef.current.has(n); applyPaint(n); suppressClick.current = true;
     if (navigator.vibrate) navigator.vibrate(15);
     const touchMove = (ev) => {
-      ev.preventDefault();
-      const t = ev.touches[0];
-      if (!t) return;
+      ev.preventDefault(); const t = ev.touches[0]; if (!t) return;
       const el = document.elementFromPoint(t.clientX, t.clientY);
-      if (el && el.getAttribute && el.getAttribute("data-book") === book.name) {
-        const dn = el.getAttribute("data-n");
-        if (dn) applyPaint(parseInt(dn, 10));
-      }
+      if (el && el.getAttribute && el.getAttribute("data-book") === book.name) { const dn = el.getAttribute("data-n"); if (dn) applyPaint(parseInt(dn, 10)); }
     };
     const end = () => {
-      window.removeEventListener("touchmove", touchMove);
-      window.removeEventListener("touchend", end);
-      paintVal.current = null;
-      setPainting(false);
-      commit();
-      setTimeout(() => { suppressClick.current = false; }, 80);
+      window.removeEventListener("touchmove", touchMove); window.removeEventListener("touchend", end);
+      paintVal.current = null; setPainting(false); commit(); setTimeout(() => { suppressClick.current = false; }, 80);
     };
-    window.addEventListener("touchmove", touchMove, { passive: false });
-    window.addEventListener("touchend", end, { once: true });
+    window.addEventListener("touchmove", touchMove, { passive: false }); window.addEventListener("touchend", end, { once: true });
   }
   function onCellDown(n, e) {
-    if (e.pointerType === "touch") {
-      startTouchLongPress(n, e.clientX, e.clientY);
-    } else {
-      e.preventDefault();
-      startMousePaint(n);
-    }
+    if (e.pointerType === "touch") { startTouchLongPress(n, e.clientX, e.clientY); }
+    else { e.preventDefault(); startMousePaint(n); }
   }
-  function onCellClick(n) {
-    if (suppressClick.current) { suppressClick.current = false; return; }
-    toggleSingle(n);
-  }
+  function onCellClick(n) { if (suppressClick.current) { suppressClick.current = false; return; } toggleSingle(n); }
   function addRange() {
-    const a = parseInt(from, 10);
-    const z = parseInt(to, 10);
+    const a = parseInt(from, 10), z = parseInt(to, 10);
     if (isNaN(a) || isNaN(z)) return;
     for (let n = Math.min(a, z); n <= Math.max(a, z); n++) setRef.current.add(n);
-    setFrom(""); setTo("");
-    rerender(); commit();
+    setFrom(""); setTo(""); rerender(); commit();
   }
 
   return (
     <div className="cm-card">
       <div className="cm-book-head">
-        <h3 className="cm-h3" style={{ margin: 0 }}>
-          {book.name}
-          {painting && <span className="cm-paintbadge">● 칠하기 모드</span>}
-        </h3>
+        <h3 className="cm-h3" style={{ margin: 0 }}>{book.name}{painting && <span className="cm-paintbadge">● 칠하기 모드</span>}</h3>
         <span className="cm-book-count">{set.size} / {book.total}</span>
       </div>
       <div className="cm-rangebar">
-        <input className="cm-input" placeholder="시작" inputMode="numeric" value={from}
-          onChange={(e) => setFrom(e.target.value.replace(/\D/g, ""))} />
+        <input className="cm-input" placeholder="시작" inputMode="numeric" value={from} onChange={(e) => setFrom(e.target.value.replace(/\D/g, ""))} />
         <span className="cm-tilde">~</span>
-        <input className="cm-input" placeholder="끝" inputMode="numeric" value={to}
-          onChange={(e) => setTo(e.target.value.replace(/\D/g, ""))} />
+        <input className="cm-input" placeholder="끝" inputMode="numeric" value={to} onChange={(e) => setTo(e.target.value.replace(/\D/g, ""))} />
         <button className="cm-btn cm-btn-ghost cm-rangebtn" onClick={addRange}>한번에 완료</button>
       </div>
       <HwGrid total={book.total} set={set} bookName={book.name} onCellDown={onCellDown} onCellClick={onCellClick} />
@@ -409,17 +348,34 @@ function BookHwCard({ book, initial, onChange }) {
   );
 }
 
+// ===== 반 선택 (학생) =====
+function ClassPicker({ onPick }) {
+  return (
+    <div className="cm-stack"><div className="cm-card">
+      <h3 className="cm-h3">반 선택</h3>
+      <div className="cm-daylist">
+        {CLASSES.map((c) => (
+          <button key={c.id} className="cm-day" onClick={() => onPick(c)}>
+            <div className="cm-day-left"><span className="cm-day-date">{c.name}</span></div>
+            <span className="cm-day-arrow">›</span>
+          </button>
+        ))}
+      </div>
+    </div></div>
+  );
+}
+
 // ===== 학생 화면 =====
-function StudentView() {
+function StudentView({ cls, onBack }) {
   const [me, setMe] = useState(null);
-  const [pinName, setPinName] = useState(ROSTER[0].id);
+  const [pinName, setPinName] = useState(cls.roster[0].id);
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
 
   async function login() {
-    const u = ROSTER.find((r) => r.id === pinName);
+    const u = cls.roster.find((r) => r.id === pinName);
     if (!u) return;
-    const real = (await getStudentPin(u.id)) || DEFAULT_PIN;
+    const real = (await getStudentPin(cls.id, u.id)) || DEFAULT_PIN;
     if (pin !== real) { setErr("PIN이 올바르지 않습니다"); return; }
     setErr(""); setPin(""); setMe(u);
   }
@@ -428,31 +384,32 @@ function StudentView() {
     return (
       <div className="cm-card">
         <h2 className="cm-h2">입장하기</h2>
+        <div style={{ color: "#7c8294", fontSize: 13, marginTop: -8, marginBottom: 6 }}>{cls.name}</div>
         <label className="cm-label">이름</label>
         <select className="cm-input" value={pinName} onChange={(e) => setPinName(e.target.value)}>
-          {ROSTER.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          {cls.roster.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select>
         <label className="cm-label">PIN</label>
         <input className="cm-input" type="password" inputMode="numeric" maxLength={4} placeholder="4자리"
-          value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-          onKeyDown={(e) => e.key === "Enter" && login()} />
+          value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} onKeyDown={(e) => e.key === "Enter" && login()} />
         {err && <div className="cm-err">{err}</div>}
         <button className="cm-btn cm-btn-primary" onClick={login}>입장</button>
+        {onBack && <button className="cm-link" style={{ marginTop: 12, display: "block", textAlign: "center", width: "100%" }} onClick={onBack}>← 다른 반 선택</button>}
       </div>
     );
   }
-  return <StudentHome me={me} onLogout={() => setMe(null)} />;
+  return <StudentHome cls={cls} me={me} onLogout={() => setMe(null)} />;
 }
 
-function StudentHome({ me, onLogout }) {
+function StudentHome({ cls, me, onLogout }) {
   const [tab, setTab] = useState("att");
   const [att, setAtt] = useState(null);
   const [showPin, setShowPin] = useState(false);
 
   useEffect(() => {
-    const unsub = attCol(todayStr).doc(me.id).onSnapshot((d) => setAtt(d.exists ? d.data() : null));
+    const unsub = attCol(cls.id, todayStr).doc(me.id).onSnapshot((d) => setAtt(d.exists ? d.data() : null));
     return () => unsub();
-  }, [me.id]);
+  }, [cls.id, me.id]);
 
   return (
     <div className="cm-stack">
@@ -466,7 +423,7 @@ function StudentHome({ me, onLogout }) {
           <button className="cm-link" onClick={onLogout}>나가기</button>
         </div>
       </div>
-      {showPin && <ChangePin me={me} onDone={() => setShowPin(false)} />}
+      {showPin && <ChangePin cls={cls} me={me} onDone={() => setShowPin(false)} />}
 
       <div className="cm-tabs">
         <button className={tab === "att" ? "on" : ""} onClick={() => setTab("att")}>출석</button>
@@ -478,58 +435,67 @@ function StudentHome({ me, onLogout }) {
       {tab === "att" && (
         <div className="cm-card">
           <h3 className="cm-h3">출석체크</h3>
-          {att ? (
-            <div className="cm-done">✓ {hhmm(att.time)}에 출석했어요</div>
-          ) : (
-            <button className="cm-btn cm-btn-primary cm-big" onClick={() => checkIn(todayStr, me)}>출석하기</button>
-          )}
+          {att ? (<div className="cm-done">✓ {hhmm(att.time)}에 출석했어요</div>)
+            : (<button className="cm-btn cm-btn-primary cm-big" onClick={() => checkIn(cls.id, todayStr, me)}>출석하기</button>)}
         </div>
       )}
-      {tab === "q" && <QuestionForm me={me} />}
-      {tab === "hw" && <StudentHomework me={me} />}
-      {tab === "fb" && <FeedbackForm />}
+      {tab === "q" && <QuestionForm cls={cls} me={me} />}
+      {tab === "hw" && <StudentHomework cls={cls} me={me} />}
+      {tab === "fb" && <FeedbackForm cls={cls} />}
     </div>
   );
 }
 
-function QuestionForm({ me }) {
+function ChangePin({ cls, me, onDone }) {
+  const [p1, setP1] = useState("");
+  const [p2, setP2] = useState("");
+  const [msg, setMsg] = useState("");
+  async function save() {
+    if (p1.length !== 4) { setMsg("PIN은 4자리로 입력해줘"); return; }
+    if (p1 !== p2) { setMsg("두 번 입력한 PIN이 달라"); return; }
+    try { await saveStudentPin(cls.id, me.id, p1); setMsg("비밀번호가 변경됐어요"); setTimeout(onDone, 800); }
+    catch (e) { setMsg("저장에 실패했어요. 잠시 후 다시 시도해줘"); }
+  }
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">비밀번호 변경</h3>
+      <label className="cm-label">새 PIN (숫자 4자리)</label>
+      <input className="cm-input" type="password" inputMode="numeric" maxLength={4} value={p1} onChange={(e) => setP1(e.target.value.replace(/\D/g, ""))} />
+      <label className="cm-label">새 PIN 다시 입력</label>
+      <input className="cm-input" type="password" inputMode="numeric" maxLength={4} value={p2} onChange={(e) => setP2(e.target.value.replace(/\D/g, ""))} />
+      {msg && <div className="cm-err">{msg}</div>}
+      <button className="cm-btn cm-btn-primary" onClick={save}>저장</button>
+      <button className="cm-link" style={{ marginTop: 12, display: "block", textAlign: "center", width: "100%" }} onClick={onDone}>취소</button>
+    </div>
+  );
+}
+
+function QuestionForm({ cls, me }) {
   const [book, setBook] = useState(BOOKS[0].name);
   const [num, setNum] = useState("");
   const [memo, setMemo] = useState("");
   const [sent, setSent] = useState([]);
-
   useEffect(() => {
-    const unsub = qCol(todayStr).where("sid", "==", me.id).onSnapshot((s) => {
-      const arr = [];
-      s.forEach((d) => arr.push({ qid: d.id, ...d.data() }));
-      arr.sort((a, b) => a.time - b.time);
-      setSent(arr);
+    const unsub = qCol(cls.id, todayStr).where("sid", "==", me.id).onSnapshot((s) => {
+      const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); arr.sort((a, b) => a.time - b.time); setSent(arr);
     });
     return () => unsub();
-  }, [me.id]);
-
+  }, [cls.id, me.id]);
   async function submit() {
     if (!num.trim()) return;
-    await addQuestion(todayStr, {
-      sid: me.id, name: me.name, book, num: num.trim(), memo: memo.trim(),
-      time: Date.now(), resolved: false,
-    });
+    await addQuestion(cls.id, todayStr, { sid: me.id, name: me.name, book, num: num.trim(), memo: memo.trim(), time: Date.now(), resolved: false });
     setNum(""); setMemo("");
   }
-
   return (
     <div className="cm-card">
       <h3 className="cm-h3">질문하기</h3>
       <label className="cm-label">교재</label>
-      <select className="cm-input" value={book} onChange={(e) => setBook(e.target.value)}>
-        {BOOKS.map((b) => <option key={b.name}>{b.name}</option>)}
-      </select>
+      <select className="cm-input" value={book} onChange={(e) => setBook(e.target.value)}>{BOOKS.map((b) => <option key={b.name}>{b.name}</option>)}</select>
       <label className="cm-label">문항 번호</label>
       <input className="cm-input" placeholder="예: 124  또는  124-(2)" value={num} onChange={(e) => setNum(e.target.value)} />
       <label className="cm-label">메모 (선택)</label>
       <input className="cm-input" placeholder="예: 적분 구간을 모르겠어요" value={memo} onChange={(e) => setMemo(e.target.value)} />
       <button className="cm-btn cm-btn-primary" onClick={submit}>선생님께 보내기</button>
-
       {sent.length > 0 && (
         <div className="cm-sentlist">
           <div className="cm-mini-h">내가 보낸 질문</div>
@@ -545,51 +511,39 @@ function QuestionForm({ me }) {
   );
 }
 
-function StudentHomework({ me }) {
+function StudentHomework({ cls, me }) {
   const [done, setDone] = useState(null);
-  useEffect(() => {
-    getMyHw(todayStr, me.id).then((d) => setDone(d));
-  }, [me.id]);
-
+  useEffect(() => { getMyHw(cls.id, todayStr, me.id).then((d) => setDone(d)); }, [cls.id, me.id]);
   function persistBook(bookName, arr) {
     setDone((prev) => ({ ...(prev || {}), [bookName]: arr }));
-    saveHwBook(todayStr, me, bookName, arr);
+    saveHwBook(cls.id, todayStr, me, bookName, arr);
   }
-
   if (!done) return <div className="cm-card cm-empty">불러오는 중…</div>;
   return (
     <>
       <div className="cm-card cm-hint">
         완료한 번호를 <b>누르거나, 마우스로 드래그</b>해서 칠하세요. 터치 화면에서는 칸을 <b>꾹 눌러 칠하기 모드</b>로 들어간 뒤 손가락을 끌면 됩니다. 같은 동작으로 다시 지울 수 있고, 범위 입력으로도 처리할 수 있어요.
       </div>
-      {BOOKS.map((b) => (
-        <BookHwCard key={b.name} book={b} initial={done[b.name] || []}
-          onChange={(arr) => persistBook(b.name, arr)} />
-      ))}
+      {BOOKS.map((b) => (<BookHwCard key={b.name} book={b} initial={done[b.name] || []} onChange={(arr) => persistBook(b.name, arr)} />))}
     </>
   );
 }
 
-function FeedbackForm() {
+function FeedbackForm({ cls }) {
   const [good, setGood] = useState("");
   const [bad, setBad] = useState("");
   const [done, setDone] = useState(false);
-
   async function submit() {
     if (!good.trim() && !bad.trim()) return;
-    await addFeedback(todayStr, { good: good.trim(), bad: bad.trim() });
+    await addFeedback(cls.id, todayStr, { good: good.trim(), bad: bad.trim() });
     setGood(""); setBad(""); setDone(true);
   }
-
   return (
     <div className="cm-card">
       <h3 className="cm-h3">오늘 수업 한줄 피드백</h3>
       <div className="cm-anon">익명이에요. 누가 썼는지 선생님도 알 수 없어요.</div>
       {done ? (
-        <div className="cm-fbthanks">
-          <div className="cm-done">✓ 제출됐어요. 고마워요!</div>
-          <button className="cm-link" onClick={() => setDone(false)}>하나 더 남기기</button>
-        </div>
+        <div className="cm-fbthanks"><div className="cm-done">✓ 제출됐어요. 고마워요!</div><button className="cm-link" onClick={() => setDone(false)}>하나 더 남기기</button></div>
       ) : (
         <>
           <label className="cm-label">인상 깊었던 부분</label>
@@ -603,85 +557,63 @@ function FeedbackForm() {
   );
 }
 
-function ChangePin({ me, onDone }) {
-  const [p1, setP1] = useState("");
-  const [p2, setP2] = useState("");
-  const [msg, setMsg] = useState("");
-
-  async function save() {
-    if (p1.length !== 4) { setMsg("PIN은 4자리로 입력해줘"); return; }
-    if (p1 !== p2) { setMsg("두 번 입력한 PIN이 달라"); return; }
-    try {
-      await saveStudentPin(me.id, p1);
-      setMsg("비밀번호가 변경됐어요");
-      setTimeout(onDone, 800);
-    } catch (e) {
-      setMsg("저장에 실패했어요. 잠시 후 다시 시도해줘");
-    }
-  }
-
-  return (
-    <div className="cm-card">
-      <h3 className="cm-h3">비밀번호 변경</h3>
-      <label className="cm-label">새 PIN (숫자 4자리)</label>
-      <input className="cm-input" type="password" inputMode="numeric" maxLength={4}
-        value={p1} onChange={(e) => setP1(e.target.value.replace(/\D/g, ""))} />
-      <label className="cm-label">새 PIN 다시 입력</label>
-      <input className="cm-input" type="password" inputMode="numeric" maxLength={4}
-        value={p2} onChange={(e) => setP2(e.target.value.replace(/\D/g, ""))} />
-      {msg && <div className="cm-err">{msg}</div>}
-      <button className="cm-btn cm-btn-primary" onClick={save}>저장</button>
-      <button className="cm-link" style={{ marginTop: 12, display: "block", textAlign: "center", width: "100%" }} onClick={onDone}>취소</button>
-    </div>
-  );
-}
-
 // ===== 선생님 화면 =====
 function AdminView() {
   const [ok, setOk] = useState(false);
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
+  const [cls, setCls] = useState(null);
+  const tryLogin = () => (pin === ADMIN_PIN ? setOk(true) : setErr("PIN이 올바르지 않습니다"));
 
   if (!ok) {
     return (
       <div className="cm-card">
         <h2 className="cm-h2">선생님 로그인</h2>
         <label className="cm-label">관리자 PIN</label>
-        <input className="cm-input" type="password" inputMode="numeric" value={pin}
-          onChange={(e) => setPin(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (pin === ADMIN_PIN ? setOk(true) : setErr("PIN이 올바르지 않습니다"))} />
+        <input className="cm-input" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} onKeyDown={(e) => e.key === "Enter" && tryLogin()} />
         {err && <div className="cm-err">{err}</div>}
-        <button className="cm-btn cm-btn-primary" onClick={() => (pin === ADMIN_PIN ? setOk(true) : setErr("PIN이 올바르지 않습니다"))}>들어가기</button>
+        <button className="cm-btn cm-btn-primary" onClick={tryLogin}>들어가기</button>
       </div>
     );
   }
-  return <AdminDays />;
+  if (!cls) {
+    return (
+      <div className="cm-stack"><div className="cm-card">
+        <h3 className="cm-h3">반 선택</h3>
+        <div className="cm-daylist">
+          {CLASSES.map((c) => (
+            <button key={c.id} className="cm-day" onClick={() => setCls(c)}>
+              <div className="cm-day-left"><span className="cm-day-date">{c.name}</span></div>
+              <span className="cm-day-arrow">›</span>
+            </button>
+          ))}
+        </div>
+      </div></div>
+    );
+  }
+  return <AdminDays cls={cls} onBack={() => setCls(null)} />;
 }
 
-function AdminDays() {
+function AdminDays({ cls, onBack }) {
   const [selected, setSelected] = useState(null);
   const [days, setDays] = useState(null);
+  const refresh = () => listDays(cls.id).then(setDays);
+  useEffect(() => { refresh(); }, [cls.id]);
 
-  const refresh = () => listDays().then(setDays);
-  useEffect(() => { refresh(); }, []);
-
-  if (selected) {
-    return <AdminDay date={selected} onBack={() => { setSelected(null); refresh(); }} />;
-  }
+  if (selected) return <AdminDay cls={cls} date={selected} onBack={() => { setSelected(null); refresh(); }} />;
   return (
     <div className="cm-stack">
+      <div className="cm-daybar">
+        <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
+        <div className="cm-daybar-date">{cls.name}</div>
+      </div>
       <div className="cm-card">
         <h3 className="cm-h3">날짜 선택</h3>
-        {!days ? (
-          <div className="cm-empty">불러오는 중…</div>
-        ) : (
+        {!days ? (<div className="cm-empty">불러오는 중…</div>) : (
           <div className="cm-daylist">
             {days.map((d) => (
               <button key={d} className={"cm-day" + (d === todayStr ? " today" : "")} onClick={() => setSelected(d)}>
-                <div className="cm-day-left">
-                  <span className="cm-day-date">{fmtDate(d)}</span>
-                  {d === todayStr && <span className="cm-day-badge">오늘</span>}
-                </div>
+                <div className="cm-day-left"><span className="cm-day-date">{fmtDate(d)}</span>{d === todayStr && <span className="cm-day-badge">오늘</span>}</div>
                 <span className="cm-day-arrow">›</span>
               </button>
             ))}
@@ -692,7 +624,7 @@ function AdminDays() {
   );
 }
 
-function AdminDay({ date, onBack }) {
+function AdminDay({ cls, date, onBack }) {
   const [attendance, setAttendance] = useState({});
   const [questions, setQuestions] = useState([]);
   const [hwDone, setHwDone] = useState({});
@@ -701,59 +633,43 @@ function AdminDay({ date, onBack }) {
 
   useEffect(() => {
     const unsubs = [
-      attCol(date).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data())); setAttendance(m); }),
-      qCol(date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); setQuestions(arr); }),
-      hwCol(date).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data().books || {})); setHwDone(m); }),
-      fbCol(date).onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ fid: d.id, ...d.data() })); setFeedback(arr); }),
+      attCol(cls.id, date).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data())); setAttendance(m); }),
+      qCol(cls.id, date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); setQuestions(arr); }),
+      hwCol(cls.id, date).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data().books || {})); setHwDone(m); }),
+      fbCol(cls.id, date).onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ fid: d.id, ...d.data() })); setFeedback(arr); }),
     ];
     return () => unsubs.forEach((u) => u && u());
-  }, [date]);
+  }, [cls.id, date]);
 
+  const roster = cls.roster;
   const presentIds = Object.keys(attendance);
   const waiting = questions.filter((q) => !q.resolved);
-  const hwStudents = ROSTER.filter((r) => hwDone[r.id] && BOOKS.some((b) => (hwDone[r.id][b.name] || []).length > 0));
+  const hwStudents = roster.filter((r) => hwDone[r.id] && BOOKS.some((b) => (hwDone[r.id][b.name] || []).length > 0));
 
-  if (detail) {
-    return <StudentDetail date={date} student={detail} hwDone={hwDone} onBack={() => setDetail(null)} />;
-  }
+  if (detail) return <StudentDetail date={date} student={detail} hwDone={hwDone} onBack={() => setDetail(null)} />;
 
   return (
     <div className="cm-stack">
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 날짜 선택</button>
-        <div className="cm-daybar-date">{fmtDate(date)}{date === todayStr && <span className="cm-live">● LIVE</span>}</div>
+        <div className="cm-daybar-date">{cls.name} · {fmtDate(date)}{date === todayStr && <span className="cm-live">● LIVE</span>}</div>
       </div>
 
       <div className="cm-card cm-admin-top">
-        <div className="cm-stat">
-          <div className="cm-stat-num">{presentIds.length}<span>/{ROSTER.length}</span></div>
-          <div className="cm-stat-lab">출석</div>
-        </div>
-        <div className="cm-stat">
-          <div className="cm-stat-num cm-clay">{waiting.length}</div>
-          <div className="cm-stat-lab">대기 질문</div>
-        </div>
+        <div className="cm-stat"><div className="cm-stat-num">{presentIds.length}<span>/{roster.length}</span></div><div className="cm-stat-lab">출석</div></div>
+        <div className="cm-stat"><div className="cm-stat-num cm-clay">{waiting.length}</div><div className="cm-stat-lab">대기 질문</div></div>
       </div>
 
       <div className="cm-card">
         <h3 className="cm-h3">질문 대기열</h3>
-        {questions.length === 0 ? (
-          <div className="cm-empty">들어온 질문이 없어요</div>
-        ) : (
+        {questions.length === 0 ? (<div className="cm-empty">들어온 질문이 없어요</div>) : (
           questions.slice().reverse().map((q) => (
             <div key={q.qid} className={"cm-q" + (q.resolved ? " done" : "")}>
               <div className="cm-q-main">
-                <div className="cm-q-top">
-                  <span className="cm-q-name">{q.name}</span>
-                  <span className="cm-q-time">{hhmm(q.time)}</span>
-                </div>
+                <div className="cm-q-top"><span className="cm-q-name">{q.name}</span><span className="cm-q-time">{hhmm(q.time)}</span></div>
                 <div className="cm-q-body">{q.book} <b>{q.num}</b>번{q.memo && <span className="cm-q-memo"> · {q.memo}</span>}</div>
               </div>
-              {q.resolved ? (
-                <span className="cm-q-resolved">✓ 해결완료</span>
-              ) : (
-                <button className="cm-btn cm-btn-ghost" onClick={() => resolveQuestion(date, q.qid)}>해결</button>
-              )}
+              {q.resolved ? (<span className="cm-q-resolved">✓ 해결완료</span>) : (<button className="cm-btn cm-btn-ghost" onClick={() => resolveQuestion(cls.id, date, q.qid)}>해결</button>)}
             </div>
           ))
         )}
@@ -762,7 +678,7 @@ function AdminDay({ date, onBack }) {
       <div className="cm-card">
         <h3 className="cm-h3">출석 현황 <span className="cm-h-hint">(이름을 누르면 과제 표)</span></h3>
         <div className="cm-roster">
-          {ROSTER.map((r) => {
+          {roster.map((r) => {
             const a = attendance[r.id];
             return (
               <button key={r.id} className={"cm-rost " + (a ? "in" : "")} onClick={() => setDetail(r)}>
@@ -776,16 +692,12 @@ function AdminDay({ date, onBack }) {
 
       <div className="cm-card">
         <h3 className="cm-h3">과제 현황</h3>
-        {hwStudents.length === 0 ? (
-          <div className="cm-empty">등록된 과제가 없어요</div>
-        ) : (
+        {hwStudents.length === 0 ? (<div className="cm-empty">등록된 과제가 없어요</div>) : (
           hwStudents.map((r) => (
             <div key={r.id} className="cm-hw-row">
               <button className="cm-hw-name cm-hw-name-btn" onClick={() => setDetail(r)}>{r.name}</button>
               <div className="cm-hw-items">
-                {BOOKS.filter((b) => (hwDone[r.id][b.name] || []).length > 0).map((b) => (
-                  <span key={b.name} className="cm-chip">{b.name} {hwDone[r.id][b.name].length}문제</span>
-                ))}
+                {BOOKS.filter((b) => (hwDone[r.id][b.name] || []).length > 0).map((b) => (<span key={b.name} className="cm-chip">{b.name} {hwDone[r.id][b.name].length}문제</span>))}
               </div>
             </div>
           ))
@@ -794,9 +706,7 @@ function AdminDay({ date, onBack }) {
 
       <div className="cm-card">
         <h3 className="cm-h3">수업 피드백 <span className="cm-h-hint">(익명 · 작성자 알 수 없음)</span></h3>
-        {feedback.length === 0 ? (
-          <div className="cm-empty">아직 피드백이 없어요</div>
-        ) : (
+        {feedback.length === 0 ? (<div className="cm-empty">아직 피드백이 없어요</div>) : (
           feedback.map((f) => (
             <div key={f.fid} className="cm-fb">
               {f.good && <div className="cm-fb-line"><span className="cm-fb-tag good">인상</span><span>{f.good}</span></div>}
@@ -834,32 +744,34 @@ function StudentDetail({ date, student, hwDone, onBack }) {
 function App() {
   const params = new URLSearchParams(window.location.search);
   const isAdmin = params.get("admin") === "1";
+  const urlClass = findClass(params.get("class"));
+  const [cls, setCls] = useState(urlClass || null);
+
+  let sub, main;
+  if (isAdmin) { sub = "수업 관리"; main = <AdminView />; }
+  else if (!cls) { sub = "반 선택"; main = <ClassPicker onPick={setCls} />; }
+  else { sub = cls.name + " · " + todayStr; main = <StudentView cls={cls} onBack={urlClass ? null : () => setCls(null)} />; }
+
   return (
     <div>
       <header className="cm-header">
-        <div className="cm-brand">
-          <span className="cm-logo">CLIMATH</span>
-          <span className="cm-sub">{isAdmin ? "수업 관리 · " + CLASS_NAME : CLASS_NAME + " · " + todayStr}</span>
-        </div>
+        <div className="cm-brand"><span className="cm-logo">CLIMATH</span><span className="cm-sub">{sub}</span></div>
       </header>
-      <main className="cm-main">{isAdmin ? <AdminView /> : <StudentView />}</main>
+      <main className="cm-main">{main}</main>
     </div>
   );
 }
 
-// ===== 익명 로그인 후 앱 시작 (인증이 아직 안 켜졌어도 화면은 뜨게 함) =====
+// ===== 익명 로그인 후 앱 시작 =====
 const rootEl = document.getElementById("root");
 let rendered = false;
-function renderApp() {
-  if (rendered) return;
-  rendered = true;
-  ReactDOM.createRoot(rootEl).render(<App />);
-}
+function renderApp() { if (rendered) return; rendered = true; ReactDOM.createRoot(rootEl).render(<App />); }
 try {
   firebase.auth().signInAnonymously().catch(() => {});
   firebase.auth().onAuthStateChanged((u) => { if (u) renderApp(); });
 } catch (e) { /* auth 미설정 */ }
 setTimeout(renderApp, 4000);
+
 </script>
 </body>
 </html>
