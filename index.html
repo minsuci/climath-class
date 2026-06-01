@@ -201,7 +201,10 @@ const BOOKS = [
 const DEFAULT_PIN = "1234";
 const ADMIN_PIN = "2030";
 
-const todayStr = new Date().toISOString().slice(0, 10);
+function ymd(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+const todayStr = ymd(new Date());
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
 function fmtDate(d) {
   const dt = new Date(d + "T00:00:00");
@@ -368,16 +371,17 @@ function ClassPicker({ onPick }) {
 // ===== 학생 화면 =====
 function StudentView({ cls, onBack }) {
   const [me, setMe] = useState(null);
-  const [pinName, setPinName] = useState(cls.roster[0].id);
+  const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
 
+  const norm = (s) => (s || "").replace(/\s+/g, "");
   async function login() {
-    const u = cls.roster.find((r) => r.id === pinName);
-    if (!u) return;
+    const u = cls.roster.find((r) => norm(r.name) === norm(name));
+    if (!u) { setErr("명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해줘."); return; }
     const real = (await getStudentPin(cls.id, u.id)) || DEFAULT_PIN;
     if (pin !== real) { setErr("PIN이 올바르지 않습니다"); return; }
-    setErr(""); setPin(""); setMe(u);
+    setErr(""); setPin(""); setName(""); setMe(u);
   }
 
   if (!me) {
@@ -386,9 +390,8 @@ function StudentView({ cls, onBack }) {
         <h2 className="cm-h2">입장하기</h2>
         <div style={{ color: "#7c8294", fontSize: 13, marginTop: -8, marginBottom: 6 }}>{cls.name}</div>
         <label className="cm-label">이름</label>
-        <select className="cm-input" value={pinName} onChange={(e) => setPinName(e.target.value)}>
-          {cls.roster.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-        </select>
+        <input className="cm-input" placeholder="본인 이름을 입력" value={name}
+          onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && login()} />
         <label className="cm-label">PIN</label>
         <input className="cm-input" type="password" inputMode="numeric" maxLength={4} placeholder="4자리"
           value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} onKeyDown={(e) => e.key === "Enter" && login()} />
