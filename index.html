@@ -177,20 +177,22 @@ const { useState, useEffect, useRef } = React;
 const db = window.db;
 
 // ---- 설정값 (실제 운영 시 여기만 수정) ----
+const CLASS_NAME = "고1S 월금반";
 const ROSTER = [
-  { id: "s1", name: "김서연", pin: "1234" },
-  { id: "s2", name: "이준호", pin: "1234" },
-  { id: "s3", name: "박지우", pin: "1234" },
-  { id: "s4", name: "최민재", pin: "1234" },
-  { id: "s5", name: "정하윤", pin: "1234" },
-  { id: "s6", name: "강도현", pin: "1234" },
+  { id: "s1", name: "김서진" },
+  { id: "s2", name: "임서윤" },
+  { id: "s3", name: "김태윤" },
+  { id: "s4", name: "박성준" },
+  { id: "s5", name: "양성은" },
+  { id: "s6", name: "안성빈" },
 ];
 const BOOKS = [
   { name: "수평교 + 최고난도", total: 404 },
   { name: "기출백서", total: 302 },
   { name: "BASECAMP공수1-2", total: 455 },
 ];
-const ADMIN_PIN = "0000"; // 선생님 화면 진입 PIN (원하면 변경)
+const DEFAULT_PIN = "1234"; // 학생 최초 PIN (학생이 직접 변경 가능)
+const ADMIN_PIN = "2030"; // 선생님 화면 진입 PIN
 
 const todayStr = new Date().toISOString().slice(0, 10);
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
@@ -239,6 +241,19 @@ async function listDays() {
   s.forEach((d) => arr.push(d.id));
   if (!arr.includes(todayStr)) arr.push(todayStr);
   return arr.sort().reverse();
+}
+
+const studentsCol = () => db.collection("students");
+async function getStudentPin(sid) {
+  try {
+    const d = await studentsCol().doc(sid).get();
+    return d.exists ? (d.data().pin || null) : null;
+  } catch (e) {
+    return null;
+  }
+}
+async function saveStudentPin(sid, p) {
+  await studentsCol().doc(sid).set({ pin: p }, { merge: true });
 }
 
 // ===== 공용: 과제 번호표 =====
@@ -401,10 +416,11 @@ function StudentView() {
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
 
-  function login() {
+  async function login() {
     const u = ROSTER.find((r) => r.id === pinName);
     if (!u) return;
-    if (pin !== u.pin) { setErr("PIN이 올바르지 않습니다"); return; }
+    const real = (await getStudentPin(u.id)) || DEFAULT_PIN;
+    if (pin !== real) { setErr("PIN이 올바르지 않습니다"); return; }
     setErr(""); setPin(""); setMe(u);
   }
 
@@ -431,6 +447,7 @@ function StudentView() {
 function StudentHome({ me, onLogout }) {
   const [tab, setTab] = useState("att");
   const [att, setAtt] = useState(null);
+  const [showPin, setShowPin] = useState(false);
 
   useEffect(() => {
     const unsub = attCol(todayStr).doc(me.id).onSnapshot((d) => setAtt(d.exists ? d.data() : null));
@@ -444,8 +461,12 @@ function StudentHome({ me, onLogout }) {
           <div className="cm-welcome-name">{me.name} 님</div>
           <div className="cm-welcome-sub">{att ? "출석 완료 · " + hhmm(att.time) : "아직 출석 전이에요"}</div>
         </div>
-        <button className="cm-link" onClick={onLogout}>나가기</button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+          <button className="cm-link" onClick={() => setShowPin((v) => !v)}>비밀번호 변경</button>
+          <button className="cm-link" onClick={onLogout}>나가기</button>
+        </div>
       </div>
+      {showPin && <ChangePin me={me} onDone={() => setShowPin(false)} />}
 
       <div className="cm-tabs">
         <button className={tab === "att" ? "on" : ""} onClick={() => setTab("att")}>출석</button>
@@ -578,6 +599,39 @@ function FeedbackForm() {
           <button className="cm-btn cm-btn-primary" onClick={submit}>제출하기</button>
         </>
       )}
+    </div>
+  );
+}
+
+function ChangePin({ me, onDone }) {
+  const [p1, setP1] = useState("");
+  const [p2, setP2] = useState("");
+  const [msg, setMsg] = useState("");
+
+  async function save() {
+    if (p1.length !== 4) { setMsg("PIN은 4자리로 입력해줘"); return; }
+    if (p1 !== p2) { setMsg("두 번 입력한 PIN이 달라"); return; }
+    try {
+      await saveStudentPin(me.id, p1);
+      setMsg("비밀번호가 변경됐어요");
+      setTimeout(onDone, 800);
+    } catch (e) {
+      setMsg("저장에 실패했어요. 잠시 후 다시 시도해줘");
+    }
+  }
+
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">비밀번호 변경</h3>
+      <label className="cm-label">새 PIN (숫자 4자리)</label>
+      <input className="cm-input" type="password" inputMode="numeric" maxLength={4}
+        value={p1} onChange={(e) => setP1(e.target.value.replace(/\D/g, ""))} />
+      <label className="cm-label">새 PIN 다시 입력</label>
+      <input className="cm-input" type="password" inputMode="numeric" maxLength={4}
+        value={p2} onChange={(e) => setP2(e.target.value.replace(/\D/g, ""))} />
+      {msg && <div className="cm-err">{msg}</div>}
+      <button className="cm-btn cm-btn-primary" onClick={save}>저장</button>
+      <button className="cm-link" style={{ marginTop: 12, display: "block", textAlign: "center", width: "100%" }} onClick={onDone}>취소</button>
     </div>
   );
 }
@@ -785,7 +839,7 @@ function App() {
       <header className="cm-header">
         <div className="cm-brand">
           <span className="cm-logo">CLIMATH</span>
-          <span className="cm-sub">{isAdmin ? "수업 관리" : "오늘의 수업 · " + todayStr}</span>
+          <span className="cm-sub">{isAdmin ? "수업 관리 · " + CLASS_NAME : CLASS_NAME + " · " + todayStr}</span>
         </div>
       </header>
       <main className="cm-main">{isAdmin ? <AdminView /> : <StudentView />}</main>
