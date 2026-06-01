@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>CLIMATH 수업</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Noto+Sans+KR:wght@400;500;700&display=swap');
+
+*{box-sizing:border-box;}
+html,body{margin:0; padding:0;}
+#root{
+  --navy:#15233f; --navy2:#27406e; --cream:#f4efe6; --paper:#fffdf8;
+  --clay:#c2703f; --ink:#1c2333; --muted:#7c8294; --green:#3f7d5e; --line:#e7e0d2;
+  font-family:'Noto Sans KR',system-ui,sans-serif;
+  background:
+    radial-gradient(1200px 400px at 80% -10%, rgba(39,64,110,.10), transparent),
+    var(--cream);
+  min-height:100vh; color:var(--ink);
+}
+.cm-header{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:18px 22px; border-bottom:1px solid var(--line);
+  background:var(--navy); color:#fff; position:sticky; top:0; z-index:5;
+}
+.cm-brand{display:flex; flex-direction:column; gap:2px;}
+.cm-logo{font-family:'Fraunces',serif; font-weight:600; letter-spacing:.14em; font-size:20px;}
+.cm-sub{font-size:11px; color:#aab6d0; letter-spacing:.02em;}
+.cm-toggle{display:flex; background:rgba(255,255,255,.10); border-radius:999px; padding:3px;}
+.cm-toggle button{border:0; background:transparent; color:#c4cde0; font-size:13px; font-weight:500; padding:7px 16px; border-radius:999px; cursor:pointer; font-family:inherit;}
+.cm-toggle button.on{background:#fff; color:var(--navy);}
+
+.cm-main{max-width:560px; margin:0 auto; padding:22px 16px 40px;}
+.cm-stack{display:flex; flex-direction:column; gap:14px;}
+
+.cm-card{background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:20px; box-shadow:0 1px 0 rgba(21,35,63,.03), 0 8px 24px -16px rgba(21,35,63,.25);}
+.cm-h2{font-family:'Fraunces',serif; font-size:22px; margin:0 0 14px; color:var(--navy);}
+.cm-h3{font-family:'Fraunces',serif; font-size:17px; margin:0 0 14px; color:var(--navy);}
+.cm-h-hint{font-family:'Noto Sans KR',sans-serif; font-size:12px; font-weight:400; color:var(--muted);}
+.cm-label{display:block; font-size:12px; color:var(--muted); margin:12px 0 5px; font-weight:500;}
+.cm-input{width:100%; border:1px solid var(--line); background:#fff; border-radius:10px; padding:12px 13px; font-size:15px; font-family:inherit; color:var(--ink); outline:none; transition:border-color .15s;}
+.cm-input:focus{border-color:var(--navy2);}
+.cm-tilde{color:var(--muted);}
+
+.cm-btn{width:100%; border:0; border-radius:11px; padding:13px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit; margin-top:16px; transition:transform .08s, filter .15s;}
+.cm-btn:active{transform:translateY(1px);}
+.cm-btn-primary{background:var(--navy); color:#fff;}
+.cm-btn-primary:hover{filter:brightness(1.12);}
+.cm-big{padding:18px; font-size:17px;}
+.cm-btn-ghost{width:auto; margin:0; background:transparent; color:var(--clay); border:1px solid var(--clay); padding:8px 16px; font-size:13px; border-radius:9px;}
+.cm-btn-ghost:hover{background:var(--clay); color:#fff;}
+.cm-link{background:none; border:0; color:var(--muted); font-size:13px; cursor:pointer; font-family:inherit; text-decoration:underline; text-underline-offset:3px;}
+.cm-err{color:var(--clay); font-size:13px; margin-top:10px;}
+
+.cm-welcome{display:flex; align-items:center; justify-content:space-between;}
+.cm-welcome-name{font-family:'Fraunces',serif; font-size:20px; color:var(--navy);}
+.cm-welcome-sub{font-size:13px; color:var(--muted); margin-top:3px;}
+
+.cm-tabs{display:flex; gap:6px; background:#ece4d4; padding:5px; border-radius:12px;}
+.cm-tabs button{flex:1; border:0; background:transparent; padding:10px 4px; border-radius:9px; font-size:14px; font-weight:500; color:var(--muted); cursor:pointer; font-family:inherit;}
+.cm-tabs button.on{background:#fff; color:var(--navy); box-shadow:0 1px 4px rgba(21,35,63,.10);}
+
+.cm-done{color:var(--green); font-weight:700; font-size:16px; text-align:center; padding:14px;}
+.cm-sentlist{margin-top:18px; border-top:1px dashed var(--line); padding-top:14px;}
+.cm-mini-h{font-size:12px; color:var(--muted); margin-bottom:8px; font-weight:500;}
+.cm-sent-item{display:flex; justify-content:space-between; align-items:center; padding:8px 0; font-size:14px;}
+.cm-tag-ok{font-size:12px; color:var(--green); font-weight:700;}
+.cm-tag-wait{font-size:12px; color:var(--clay); font-weight:700;}
+
+.cm-hint{font-size:13px; color:var(--muted); line-height:1.5;}
+.cm-hint b{color:var(--clay);}
+.cm-anon{font-size:12px; color:var(--green); font-weight:600; background:#e7f0ea; border-radius:9px; padding:9px 12px; margin-bottom:16px;}
+.cm-fbthanks{text-align:center; padding:6px 0 2px;}
+.cm-fb{padding:12px 0; border-bottom:1px solid var(--line);}
+.cm-fb:last-child{border-bottom:0;}
+.cm-fb-line{display:flex; gap:9px; align-items:flex-start; font-size:14px; color:var(--ink); margin:3px 0; line-height:1.45;}
+.cm-fb-tag{flex:none; font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; margin-top:1px;}
+.cm-fb-tag.good{background:#e7f0ea; color:var(--green);}
+.cm-fb-tag.bad{background:#f6e7df; color:var(--clay);}
+
+.cm-book-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;}
+.cm-book-count{font-family:'Fraunces',serif; font-size:15px; color:var(--green); font-weight:600;}
+.cm-paintbadge{margin-left:10px; font-family:'Noto Sans KR',sans-serif; font-size:11px; font-weight:700; color:#fff; background:var(--green); padding:3px 10px; border-radius:999px; vertical-align:middle;}
+.cm-rangebar{display:flex; align-items:center; gap:8px; margin-bottom:16px;}
+.cm-rangebar .cm-input{padding:9px 11px; font-size:14px;}
+.cm-rangebtn{white-space:nowrap;}
+.cm-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(34px,1fr)); gap:5px; user-select:none; -webkit-user-select:none;}
+.cm-cell{display:flex; align-items:center; justify-content:center; padding:7px 0; font-size:11px; border-radius:7px; background:#f0eadd; color:var(--muted); border:1px solid var(--line);}
+button.cm-cell{cursor:pointer; font-family:inherit;}
+.cm-cell.clickable:hover{border-color:var(--green); color:var(--green);}
+.cm-cell.done{background:#dcefe3; color:var(--green); font-weight:700; border-color:#9fcfb4;}
+.cm-cell.done.clickable:hover{border-color:var(--clay); color:var(--clay);}
+
+.cm-daylist{display:flex; flex-direction:column; gap:8px;}
+.cm-day{display:flex; align-items:center; justify-content:space-between; width:100%; text-align:left; cursor:pointer; font-family:inherit; background:#fff; border:1px solid var(--line); border-radius:12px; padding:15px 16px; transition:border-color .15s, transform .08s;}
+.cm-day:hover{border-color:var(--navy2);}
+.cm-day:active{transform:translateY(1px);}
+.cm-day.today{border-color:var(--navy); background:#f7f9fc;}
+.cm-day-left{display:flex; align-items:center; gap:8px;}
+.cm-day-date{font-weight:700; color:var(--navy); font-size:15px;}
+.cm-day-badge{background:var(--navy); color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;}
+.cm-day-arrow{font-size:20px; color:var(--navy2); line-height:1;}
+
+.cm-daybar{display:flex; align-items:center; justify-content:space-between; padding:0 2px;}
+.cm-back{background:none; border:0; color:var(--navy2); font-size:14px; font-weight:700; cursor:pointer; font-family:inherit; padding:4px 0;}
+.cm-daybar-date{font-family:'Fraunces',serif; font-size:16px; color:var(--navy); display:flex; align-items:center; gap:8px;}
+.cm-live{font-family:'Noto Sans KR',sans-serif; font-size:11px; color:var(--clay); font-weight:700; letter-spacing:.05em;}
+
+.cm-admin-top{display:flex; align-items:center; gap:24px;}
+.cm-stat{text-align:left;}
+.cm-stat-num{font-family:'Fraunces',serif; font-size:30px; color:var(--navy); line-height:1;}
+.cm-stat-num span{font-size:16px; color:var(--muted);}
+.cm-clay{color:var(--clay)!important;}
+.cm-stat-lab{font-size:12px; color:var(--muted); margin-top:4px;}
+.cm-admin-top .cm-link{margin-left:auto;}
+
+.cm-empty{color:var(--muted); font-size:14px; text-align:center; padding:14px;}
+.cm-q{display:flex; align-items:center; gap:12px; padding:13px 0; border-bottom:1px solid var(--line);}
+.cm-q:last-child{border-bottom:0;}
+.cm-q-main{flex:1; min-width:0;}
+.cm-q-top{display:flex; justify-content:space-between; align-items:baseline;}
+.cm-q-name{font-weight:700; color:var(--navy);}
+.cm-q-time{font-size:12px; color:var(--muted);}
+.cm-q-body{font-size:15px; margin-top:3px;}
+.cm-q-body b{color:var(--clay);}
+.cm-q-memo{color:var(--muted); font-size:13px;}
+.cm-q.done{opacity:.5;}
+.cm-q-resolved{font-size:13px; color:var(--green); font-weight:700; white-space:nowrap;}
+
+.cm-roster{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+.cm-rost{display:flex; justify-content:space-between; align-items:center; padding:11px 13px; border-radius:10px; background:#f3ede0; font-size:14px; color:var(--muted); border:1px solid transparent; width:100%; cursor:pointer; font-family:inherit; text-align:left; transition:border-color .15s, transform .08s;}
+.cm-rost:hover{border-color:var(--navy2);}
+.cm-rost:active{transform:translateY(1px);}
+.cm-rost.in{background:#e7f0ea; color:var(--navy); font-weight:500;}
+.cm-rost-name{font-weight:700;}
+.cm-rost-t{font-size:12px;}
+
+.cm-hw-row{display:flex; gap:12px; padding:11px 0; border-bottom:1px solid var(--line); align-items:flex-start;}
+.cm-hw-row:last-child{border-bottom:0;}
+.cm-hw-name{font-weight:700; color:var(--navy); min-width:60px; font-size:14px; padding-top:3px;}
+.cm-hw-name-btn{background:none; border:0; cursor:pointer; font-family:inherit; text-align:left; text-decoration:underline; text-underline-offset:3px;}
+.cm-hw-items{display:flex; flex-wrap:wrap; gap:6px;}
+.cm-chip{background:#eef2f8; color:var(--navy2); font-size:12px; padding:4px 10px; border-radius:999px;}
+
+.cm-status{text-align:center; padding:60px 20px; color:var(--muted); font-size:14px;}
+</style>
+</head>
+<body>
+<div id="root"><div class="cm-status">불러오는 중…</div></div>
+
+<!-- React + Babel (빌드 없이 사용) -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- Firebase (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+<script>
+  // ===== Firebase 설정값 =====
+  var firebaseConfig = {
+    apiKey: "AIzaSyBIhpjPGsA1tH9AFspHtNifeeHUnhN0XUA",
+    authDomain: "climath-class.firebaseapp.com",
+    projectId: "climath-class",
+    storageBucket: "climath-class.firebasestorage.app",
+    messagingSenderId: "321968656061",
+    appId: "1:321968656061:web:29d98c125c7480d44371d4"
+  };
+  firebase.initializeApp(firebaseConfig);
+  window.db = firebase.firestore();
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+const db = window.db;
+
+// ---- 설정값 (실제 운영 시 여기만 수정) ----
+const ROSTER = [
+  { id: "s1", name: "김서연", pin: "1234" },
+  { id: "s2", name: "이준호", pin: "1234" },
+  { id: "s3", name: "박지우", pin: "1234" },
+  { id: "s4", name: "최민재", pin: "1234" },
+  { id: "s5", name: "정하윤", pin: "1234" },
+  { id: "s6", name: "강도현", pin: "1234" },
+];
+const BOOKS = [
+  { name: "수평교 + 최고난도", total: 404 },
+  { name: "기출백서", total: 302 },
+  { name: "BASECAMP공수1-2", total: 455 },
+];
+const ADMIN_PIN = "0000"; // 선생님 화면 진입 PIN (원하면 변경)
+
+const todayStr = new Date().toISOString().slice(0, 10);
+const WD = ["일", "월", "화", "수", "목", "금", "토"];
+function fmtDate(d) {
+  const dt = new Date(d + "T00:00:00");
+  return d.split("-").join(".") + " (" + WD[dt.getDay()] + ")";
+}
+const hhmm = (ts) => new Date(ts).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+
+// ===== Firestore 데이터 계층 =====
+const daysCol = () => db.collection("days");
+const dayDoc = (date) => daysCol().doc(date);
+const touchDay = (date) => dayDoc(date).set({ updated: Date.now() }, { merge: true });
+
+const attCol = (date) => dayDoc(date).collection("attendance");
+const qCol = (date) => dayDoc(date).collection("questions");
+const hwCol = (date) => dayDoc(date).collection("homework");
+const fbCol = (date) => dayDoc(date).collection("feedback");
+
+async function checkIn(date, me) {
+  await attCol(date).doc(me.id).set({ name: me.name, time: Date.now() });
+  touchDay(date);
+}
+async function addQuestion(date, q) {
+  await qCol(date).add(q);
+  touchDay(date);
+}
+async function resolveQuestion(date, qid) {
+  await qCol(date).doc(qid).update({ resolved: true });
+}
+async function getMyHw(date, sid) {
+  const d = await hwCol(date).doc(sid).get();
+  return d.exists ? (d.data().books || {}) : {};
+}
+async function saveHwBook(date, me, bookName, arr) {
+  await hwCol(date).doc(me.id).set({ name: me.name, books: { [bookName]: arr } }, { merge: true });
+  touchDay(date);
+}
+async function addFeedback(date, f) {
+  await fbCol(date).add(f);
+  touchDay(date);
+}
+async function listDays() {
+  const s = await daysCol().get();
+  const arr = [];
+  s.forEach((d) => arr.push(d.id));
+  if (!arr.includes(todayStr)) arr.push(todayStr);
+  return arr.sort().reverse();
+}
+
+// ===== 공용: 과제 번호표 =====
+function HwGrid({ total, set, bookName, onCellDown, onCellClick }) {
+  const interactive = !!onCellClick;
+  const cells = [];
+  for (let n = 1; n <= total; n++) {
+    const isDone = set.has(n);
+    const cls = "cm-cell" + (isDone ? " done" : "") + (interactive ? " clickable" : "");
+    cells.push(
+      interactive ? (
+        <button key={n} className={cls} data-n={n} data-book={bookName}
+          onPointerDown={(e) => onCellDown(n, e)} onClick={() => onCellClick(n)}>{n}</button>
+      ) : (
+        <span key={n} className={cls}>{n}</span>
+      )
+    );
+  }
+  return <div className="cm-grid">{cells}</div>;
+}
+
+function BookHwCard({ book, initial, onChange }) {
+  const setRef = useRef(new Set(initial));
+  const [, setTick] = useState(0);
+  const rerender = () => setTick((t) => t + 1);
+  const paintVal = useRef(null);
+  const suppressClick = useRef(false);
+  const [painting, setPainting] = useState(false);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const set = setRef.current;
+  const commit = () => onChange(Array.from(setRef.current).sort((a, b) => a - b));
+
+  function applyPaint(n) {
+    if (paintVal.current) setRef.current.add(n);
+    else setRef.current.delete(n);
+    rerender();
+  }
+  function toggleSingle(n) {
+    if (setRef.current.has(n)) setRef.current.delete(n);
+    else setRef.current.add(n);
+    rerender();
+    commit();
+  }
+  function startMousePaint(n) {
+    paintVal.current = !setRef.current.has(n);
+    applyPaint(n);
+    const move = (ev) => {
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      if (el && el.getAttribute && el.getAttribute("data-book") === book.name) {
+        const dn = el.getAttribute("data-n");
+        if (dn) applyPaint(parseInt(dn, 10));
+      }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      paintVal.current = null;
+      suppressClick.current = true;
+      setTimeout(() => { suppressClick.current = false; }, 50);
+      commit();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+  function startTouchLongPress(n, x, y) {
+    const longTimer = setTimeout(() => {
+      window.removeEventListener("pointermove", cancelMove);
+      window.removeEventListener("pointerup", earlyUp);
+      enterTouchPaint(n);
+    }, 420);
+    const cancelMove = (ev) => {
+      if (Math.abs(ev.clientX - x) > 8 || Math.abs(ev.clientY - y) > 8) {
+        clearTimeout(longTimer);
+        window.removeEventListener("pointermove", cancelMove);
+        window.removeEventListener("pointerup", earlyUp);
+      }
+    };
+    const earlyUp = () => {
+      clearTimeout(longTimer);
+      window.removeEventListener("pointermove", cancelMove);
+    };
+    window.addEventListener("pointermove", cancelMove);
+    window.addEventListener("pointerup", earlyUp, { once: true });
+  }
+  function enterTouchPaint(n) {
+    setPainting(true);
+    paintVal.current = !setRef.current.has(n);
+    applyPaint(n);
+    suppressClick.current = true;
+    if (navigator.vibrate) navigator.vibrate(15);
+    const touchMove = (ev) => {
+      ev.preventDefault();
+      const t = ev.touches[0];
+      if (!t) return;
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      if (el && el.getAttribute && el.getAttribute("data-book") === book.name) {
+        const dn = el.getAttribute("data-n");
+        if (dn) applyPaint(parseInt(dn, 10));
+      }
+    };
+    const end = () => {
+      window.removeEventListener("touchmove", touchMove);
+      window.removeEventListener("touchend", end);
+      paintVal.current = null;
+      setPainting(false);
+      commit();
+      setTimeout(() => { suppressClick.current = false; }, 80);
+    };
+    window.addEventListener("touchmove", touchMove, { passive: false });
+    window.addEventListener("touchend", end, { once: true });
+  }
+  function onCellDown(n, e) {
+    if (e.pointerType === "touch") {
+      startTouchLongPress(n, e.clientX, e.clientY);
+    } else {
+      e.preventDefault();
+      startMousePaint(n);
+    }
+  }
+  function onCellClick(n) {
+    if (suppressClick.current) { suppressClick.current = false; return; }
+    toggleSingle(n);
+  }
+  function addRange() {
+    const a = parseInt(from, 10);
+    const z = parseInt(to, 10);
+    if (isNaN(a) || isNaN(z)) return;
+    for (let n = Math.min(a, z); n <= Math.max(a, z); n++) setRef.current.add(n);
+    setFrom(""); setTo("");
+    rerender(); commit();
+  }
+
+  return (
+    <div className="cm-card">
+      <div className="cm-book-head">
+        <h3 className="cm-h3" style={{ margin: 0 }}>
+          {book.name}
+          {painting && <span className="cm-paintbadge">● 칠하기 모드</span>}
+        </h3>
+        <span className="cm-book-count">{set.size} / {book.total}</span>
+      </div>
+      <div className="cm-rangebar">
+        <input className="cm-input" placeholder="시작" inputMode="numeric" value={from}
+          onChange={(e) => setFrom(e.target.value.replace(/\D/g, ""))} />
+        <span className="cm-tilde">~</span>
+        <input className="cm-input" placeholder="끝" inputMode="numeric" value={to}
+          onChange={(e) => setTo(e.target.value.replace(/\D/g, ""))} />
+        <button className="cm-btn cm-btn-ghost cm-rangebtn" onClick={addRange}>한번에 완료</button>
+      </div>
+      <HwGrid total={book.total} set={set} bookName={book.name} onCellDown={onCellDown} onCellClick={onCellClick} />
+    </div>
+  );
+}
+
+// ===== 학생 화면 =====
+function StudentView() {
+  const [me, setMe] = useState(null);
+  const [pinName, setPinName] = useState(ROSTER[0].id);
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
+
+  function login() {
+    const u = ROSTER.find((r) => r.id === pinName);
+    if (!u) return;
+    if (pin !== u.pin) { setErr("PIN이 올바르지 않습니다"); return; }
+    setErr(""); setPin(""); setMe(u);
+  }
+
+  if (!me) {
+    return (
+      <div className="cm-card">
+        <h2 className="cm-h2">입장하기</h2>
+        <label className="cm-label">이름</label>
+        <select className="cm-input" value={pinName} onChange={(e) => setPinName(e.target.value)}>
+          {ROSTER.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+        <label className="cm-label">PIN</label>
+        <input className="cm-input" type="password" inputMode="numeric" maxLength={4} placeholder="4자리"
+          value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+          onKeyDown={(e) => e.key === "Enter" && login()} />
+        {err && <div className="cm-err">{err}</div>}
+        <button className="cm-btn cm-btn-primary" onClick={login}>입장</button>
+      </div>
+    );
+  }
+  return <StudentHome me={me} onLogout={() => setMe(null)} />;
+}
+
+function StudentHome({ me, onLogout }) {
+  const [tab, setTab] = useState("att");
+  const [att, setAtt] = useState(null);
+
+  useEffect(() => {
+    const unsub = attCol(todayStr).doc(me.id).onSnapshot((d) => setAtt(d.exists ? d.data() : null));
+    return () => unsub();
+  }, [me.id]);
+
+  return (
+    <div className="cm-stack">
+      <div className="cm-card cm-welcome">
+        <div>
+          <div className="cm-welcome-name">{me.name} 님</div>
+          <div className="cm-welcome-sub">{att ? "출석 완료 · " + hhmm(att.time) : "아직 출석 전이에요"}</div>
+        </div>
+        <button className="cm-link" onClick={onLogout}>나가기</button>
+      </div>
+
+      <div className="cm-tabs">
+        <button className={tab === "att" ? "on" : ""} onClick={() => setTab("att")}>출석</button>
+        <button className={tab === "q" ? "on" : ""} onClick={() => setTab("q")}>질문</button>
+        <button className={tab === "hw" ? "on" : ""} onClick={() => setTab("hw")}>과제</button>
+        <button className={tab === "fb" ? "on" : ""} onClick={() => setTab("fb")}>피드백</button>
+      </div>
+
+      {tab === "att" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">출석체크</h3>
+          {att ? (
+            <div className="cm-done">✓ {hhmm(att.time)}에 출석했어요</div>
+          ) : (
+            <button className="cm-btn cm-btn-primary cm-big" onClick={() => checkIn(todayStr, me)}>출석하기</button>
+          )}
+        </div>
+      )}
+      {tab === "q" && <QuestionForm me={me} />}
+      {tab === "hw" && <StudentHomework me={me} />}
+      {tab === "fb" && <FeedbackForm />}
+    </div>
+  );
+}
+
+function QuestionForm({ me }) {
+  const [book, setBook] = useState(BOOKS[0].name);
+  const [num, setNum] = useState("");
+  const [memo, setMemo] = useState("");
+  const [sent, setSent] = useState([]);
+
+  useEffect(() => {
+    const unsub = qCol(todayStr).where("sid", "==", me.id).onSnapshot((s) => {
+      const arr = [];
+      s.forEach((d) => arr.push({ qid: d.id, ...d.data() }));
+      arr.sort((a, b) => a.time - b.time);
+      setSent(arr);
+    });
+    return () => unsub();
+  }, [me.id]);
+
+  async function submit() {
+    if (!num.trim()) return;
+    await addQuestion(todayStr, {
+      sid: me.id, name: me.name, book, num: num.trim(), memo: memo.trim(),
+      time: Date.now(), resolved: false,
+    });
+    setNum(""); setMemo("");
+  }
+
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">질문하기</h3>
+      <label className="cm-label">교재</label>
+      <select className="cm-input" value={book} onChange={(e) => setBook(e.target.value)}>
+        {BOOKS.map((b) => <option key={b.name}>{b.name}</option>)}
+      </select>
+      <label className="cm-label">문항 번호</label>
+      <input className="cm-input" placeholder="예: 124  또는  124-(2)" value={num} onChange={(e) => setNum(e.target.value)} />
+      <label className="cm-label">메모 (선택)</label>
+      <input className="cm-input" placeholder="예: 적분 구간을 모르겠어요" value={memo} onChange={(e) => setMemo(e.target.value)} />
+      <button className="cm-btn cm-btn-primary" onClick={submit}>선생님께 보내기</button>
+
+      {sent.length > 0 && (
+        <div className="cm-sentlist">
+          <div className="cm-mini-h">내가 보낸 질문</div>
+          {sent.slice().reverse().map((q) => (
+            <div key={q.qid} className="cm-sent-item">
+              <span>{q.book} <b>{q.num}</b>번</span>
+              <span className={q.resolved ? "cm-tag-ok" : "cm-tag-wait"}>{q.resolved ? "해결됨" : "대기중"}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StudentHomework({ me }) {
+  const [done, setDone] = useState(null);
+  useEffect(() => {
+    getMyHw(todayStr, me.id).then((d) => setDone(d));
+  }, [me.id]);
+
+  function persistBook(bookName, arr) {
+    setDone((prev) => ({ ...(prev || {}), [bookName]: arr }));
+    saveHwBook(todayStr, me, bookName, arr);
+  }
+
+  if (!done) return <div className="cm-card cm-empty">불러오는 중…</div>;
+  return (
+    <>
+      <div className="cm-card cm-hint">
+        완료한 번호를 <b>누르거나, 마우스로 드래그</b>해서 칠하세요. 터치 화면에서는 칸을 <b>꾹 눌러 칠하기 모드</b>로 들어간 뒤 손가락을 끌면 됩니다. 같은 동작으로 다시 지울 수 있고, 범위 입력으로도 처리할 수 있어요.
+      </div>
+      {BOOKS.map((b) => (
+        <BookHwCard key={b.name} book={b} initial={done[b.name] || []}
+          onChange={(arr) => persistBook(b.name, arr)} />
+      ))}
+    </>
+  );
+}
+
+function FeedbackForm() {
+  const [good, setGood] = useState("");
+  const [bad, setBad] = useState("");
+  const [done, setDone] = useState(false);
+
+  async function submit() {
+    if (!good.trim() && !bad.trim()) return;
+    await addFeedback(todayStr, { good: good.trim(), bad: bad.trim() });
+    setGood(""); setBad(""); setDone(true);
+  }
+
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">오늘 수업 한줄 피드백</h3>
+      <div className="cm-anon">익명이에요. 누가 썼는지 선생님도 알 수 없어요.</div>
+      {done ? (
+        <div className="cm-fbthanks">
+          <div className="cm-done">✓ 제출됐어요. 고마워요!</div>
+          <button className="cm-link" onClick={() => setDone(false)}>하나 더 남기기</button>
+        </div>
+      ) : (
+        <>
+          <label className="cm-label">인상 깊었던 부분</label>
+          <input className="cm-input" placeholder="한 줄로 적어주세요 (선택)" maxLength={120} value={good} onChange={(e) => setGood(e.target.value)} />
+          <label className="cm-label">아쉬웠던 부분</label>
+          <input className="cm-input" placeholder="한 줄로 적어주세요 (선택)" maxLength={120} value={bad} onChange={(e) => setBad(e.target.value)} />
+          <button className="cm-btn cm-btn-primary" onClick={submit}>제출하기</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ===== 선생님 화면 =====
+function AdminView() {
+  const [ok, setOk] = useState(false);
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
+
+  if (!ok) {
+    return (
+      <div className="cm-card">
+        <h2 className="cm-h2">선생님 로그인</h2>
+        <label className="cm-label">관리자 PIN</label>
+        <input className="cm-input" type="password" inputMode="numeric" value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (pin === ADMIN_PIN ? setOk(true) : setErr("PIN이 올바르지 않습니다"))} />
+        {err && <div className="cm-err">{err}</div>}
+        <button className="cm-btn cm-btn-primary" onClick={() => (pin === ADMIN_PIN ? setOk(true) : setErr("PIN이 올바르지 않습니다"))}>들어가기</button>
+      </div>
+    );
+  }
+  return <AdminDays />;
+}
+
+function AdminDays() {
+  const [selected, setSelected] = useState(null);
+  const [days, setDays] = useState(null);
+
+  const refresh = () => listDays().then(setDays);
+  useEffect(() => { refresh(); }, []);
+
+  if (selected) {
+    return <AdminDay date={selected} onBack={() => { setSelected(null); refresh(); }} />;
+  }
+  return (
+    <div className="cm-stack">
+      <div className="cm-card">
+        <h3 className="cm-h3">날짜 선택</h3>
+        {!days ? (
+          <div className="cm-empty">불러오는 중…</div>
+        ) : (
+          <div className="cm-daylist">
+            {days.map((d) => (
+              <button key={d} className={"cm-day" + (d === todayStr ? " today" : "")} onClick={() => setSelected(d)}>
+                <div className="cm-day-left">
+                  <span className="cm-day-date">{fmtDate(d)}</span>
+                  {d === todayStr && <span className="cm-day-badge">오늘</span>}
+                </div>
+                <span className="cm-day-arrow">›</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdminDay({ date, onBack }) {
+  const [attendance, setAttendance] = useState({});
+  const [questions, setQuestions] = useState([]);
+  const [hwDone, setHwDone] = useState({});
+  const [feedback, setFeedback] = useState([]);
+  const [detail, setDetail] = useState(null);
+
+  useEffect(() => {
+    const unsubs = [
+      attCol(date).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data())); setAttendance(m); }),
+      qCol(date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); setQuestions(arr); }),
+      hwCol(date).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data().books || {})); setHwDone(m); }),
+      fbCol(date).onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ fid: d.id, ...d.data() })); setFeedback(arr); }),
+    ];
+    return () => unsubs.forEach((u) => u && u());
+  }, [date]);
+
+  const presentIds = Object.keys(attendance);
+  const waiting = questions.filter((q) => !q.resolved);
+  const hwStudents = ROSTER.filter((r) => hwDone[r.id] && BOOKS.some((b) => (hwDone[r.id][b.name] || []).length > 0));
+
+  if (detail) {
+    return <StudentDetail date={date} student={detail} hwDone={hwDone} onBack={() => setDetail(null)} />;
+  }
+
+  return (
+    <div className="cm-stack">
+      <div className="cm-daybar">
+        <button className="cm-back" onClick={onBack}>‹ 날짜 선택</button>
+        <div className="cm-daybar-date">{fmtDate(date)}{date === todayStr && <span className="cm-live">● LIVE</span>}</div>
+      </div>
+
+      <div className="cm-card cm-admin-top">
+        <div className="cm-stat">
+          <div className="cm-stat-num">{presentIds.length}<span>/{ROSTER.length}</span></div>
+          <div className="cm-stat-lab">출석</div>
+        </div>
+        <div className="cm-stat">
+          <div className="cm-stat-num cm-clay">{waiting.length}</div>
+          <div className="cm-stat-lab">대기 질문</div>
+        </div>
+      </div>
+
+      <div className="cm-card">
+        <h3 className="cm-h3">질문 대기열</h3>
+        {questions.length === 0 ? (
+          <div className="cm-empty">들어온 질문이 없어요</div>
+        ) : (
+          questions.slice().reverse().map((q) => (
+            <div key={q.qid} className={"cm-q" + (q.resolved ? " done" : "")}>
+              <div className="cm-q-main">
+                <div className="cm-q-top">
+                  <span className="cm-q-name">{q.name}</span>
+                  <span className="cm-q-time">{hhmm(q.time)}</span>
+                </div>
+                <div className="cm-q-body">{q.book} <b>{q.num}</b>번{q.memo && <span className="cm-q-memo"> · {q.memo}</span>}</div>
+              </div>
+              {q.resolved ? (
+                <span className="cm-q-resolved">✓ 해결완료</span>
+              ) : (
+                <button className="cm-btn cm-btn-ghost" onClick={() => resolveQuestion(date, q.qid)}>해결</button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="cm-card">
+        <h3 className="cm-h3">출석 현황 <span className="cm-h-hint">(이름을 누르면 과제 표)</span></h3>
+        <div className="cm-roster">
+          {ROSTER.map((r) => {
+            const a = attendance[r.id];
+            return (
+              <button key={r.id} className={"cm-rost " + (a ? "in" : "")} onClick={() => setDetail(r)}>
+                <span className="cm-rost-name">{r.name}</span>
+                <span className="cm-rost-t">{a ? hhmm(a.time) : "미출석"} ›</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="cm-card">
+        <h3 className="cm-h3">과제 현황</h3>
+        {hwStudents.length === 0 ? (
+          <div className="cm-empty">등록된 과제가 없어요</div>
+        ) : (
+          hwStudents.map((r) => (
+            <div key={r.id} className="cm-hw-row">
+              <button className="cm-hw-name cm-hw-name-btn" onClick={() => setDetail(r)}>{r.name}</button>
+              <div className="cm-hw-items">
+                {BOOKS.filter((b) => (hwDone[r.id][b.name] || []).length > 0).map((b) => (
+                  <span key={b.name} className="cm-chip">{b.name} {hwDone[r.id][b.name].length}문제</span>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="cm-card">
+        <h3 className="cm-h3">수업 피드백 <span className="cm-h-hint">(익명 · 작성자 알 수 없음)</span></h3>
+        {feedback.length === 0 ? (
+          <div className="cm-empty">아직 피드백이 없어요</div>
+        ) : (
+          feedback.map((f) => (
+            <div key={f.fid} className="cm-fb">
+              {f.good && <div className="cm-fb-line"><span className="cm-fb-tag good">인상</span><span>{f.good}</span></div>}
+              {f.bad && <div className="cm-fb-line"><span className="cm-fb-tag bad">아쉬움</span><span>{f.bad}</span></div>}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StudentDetail({ date, student, hwDone, onBack }) {
+  const mine = hwDone[student.id] || {};
+  return (
+    <div className="cm-stack">
+      <div className="cm-daybar">
+        <button className="cm-back" onClick={onBack}>‹ 현황으로</button>
+        <div className="cm-daybar-date">{student.name} · {fmtDate(date)}</div>
+      </div>
+      {BOOKS.map((b) => (
+        <div className="cm-card" key={b.name}>
+          <div className="cm-book-head">
+            <h3 className="cm-h3" style={{ margin: 0 }}>{b.name}</h3>
+            <span className="cm-book-count">{(mine[b.name] || []).length} / {b.total}</span>
+          </div>
+          <HwGrid total={b.total} set={new Set(mine[b.name] || [])} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ===== 앱 루트 =====
+function App() {
+  const params = new URLSearchParams(window.location.search);
+  const isAdmin = params.get("admin") === "1";
+  return (
+    <div>
+      <header className="cm-header">
+        <div className="cm-brand">
+          <span className="cm-logo">CLIMATH</span>
+          <span className="cm-sub">{isAdmin ? "수업 관리" : "오늘의 수업 · " + todayStr}</span>
+        </div>
+      </header>
+      <main className="cm-main">{isAdmin ? <AdminView /> : <StudentView />}</main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
