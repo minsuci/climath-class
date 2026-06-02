@@ -91,6 +91,7 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-cell.clickable:hover{border-color:var(--green); color:var(--green);}
 .cm-cell.done{background:#dcefe3; color:var(--green); font-weight:700; border-color:#9fcfb4;}
 .cm-cell.done.clickable:hover{border-color:var(--clay); color:var(--clay);}
+.cm-cell.q{color:#d6453f; font-weight:700;}
 
 .cm-daylist{display:flex; flex-direction:column; gap:8px;}
 .cm-day{display:flex; align-items:center; justify-content:space-between; width:100%; text-align:left; cursor:pointer; font-family:inherit; background:#fff; border:1px solid var(--line); border-radius:12px; padding:15px 16px; transition:border-color .15s, transform .08s;}
@@ -142,6 +143,14 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-hw-name-btn{background:none; border:0; cursor:pointer; font-family:inherit; text-align:left; text-decoration:underline; text-underline-offset:3px;}
 .cm-hw-items{display:flex; flex-wrap:wrap; gap:6px;}
 .cm-chip{background:#eef2f8; color:var(--navy2); font-size:12px; padding:4px 10px; border-radius:999px;}
+.cm-scorebig{text-align:center; color:var(--muted); font-size:14px; margin-top:16px;}
+.cm-scorebig b{font-family:'Fraunces',serif; font-size:30px; color:var(--navy); margin:0 5px;}
+.cm-scorebig span{font-size:12px;}
+.cm-score-row{display:flex; align-items:baseline; gap:10px; padding:10px 0; border-bottom:1px solid var(--line);}
+.cm-score-row:last-child{border-bottom:0;}
+.cm-score-name{font-weight:700; color:var(--navy); min-width:58px;}
+.cm-score-detail{flex:1; font-size:13px; color:var(--muted);}
+.cm-score-num{font-family:'Fraunces',serif; font-size:18px; color:var(--green); font-weight:600;}
 
 .cm-status{text-align:center; padding:60px 20px; color:var(--muted); font-size:14px;}
 </style>
@@ -238,6 +247,8 @@ async function saveHwBook(cid, date, me, bookName, arr) {
   touchDay(cid, date);
 }
 async function addFeedback(cid, date, f) { await fbCol(cid, date).add(f); touchDay(cid, date); }
+const scoresCol = (cid, date) => dayDoc(cid, date).collection("scores");
+async function addScore(cid, date, s) { await scoresCol(cid, date).add(s); touchDay(cid, date); }
 async function listDays(cid) {
   const s = await daysCol(cid).get();
   const arr = [];
@@ -253,12 +264,12 @@ async function getStudentPin(cid, sid) {
 async function saveStudentPin(cid, sid, p) { await studentsCol(cid).doc(sid).set({ pin: p }, { merge: true }); }
 
 // ===== 공용: 과제 번호표 =====
-function HwGrid({ total, set, bookName, onCellDown, onCellClick }) {
+function HwGrid({ total, set, qset, bookName, onCellDown, onCellClick }) {
   const interactive = !!onCellClick;
   const cells = [];
   for (let n = 1; n <= total; n++) {
     const isDone = set.has(n);
-    const cls = "cm-cell" + (isDone ? " done" : "") + (interactive ? " clickable" : "");
+    const cls = "cm-cell" + (isDone ? " done" : "") + (interactive ? " clickable" : "") + (qset && qset.has(n) ? " q" : "");
     cells.push(
       interactive ? (
         <button key={n} className={cls} data-n={n} data-book={bookName}
@@ -269,7 +280,7 @@ function HwGrid({ total, set, bookName, onCellDown, onCellClick }) {
   return <div className="cm-grid">{cells}</div>;
 }
 
-function BookHwCard({ book, initial, onChange }) {
+function BookHwCard({ book, initial, qset, onChange }) {
   const setRef = useRef(new Set(initial));
   const [, setTick] = useState(0);
   const rerender = () => setTick((t) => t + 1);
@@ -347,7 +358,7 @@ function BookHwCard({ book, initial, onChange }) {
         <input className="cm-input" placeholder="끝" inputMode="numeric" value={to} onChange={(e) => setTo(e.target.value.replace(/\D/g, ""))} />
         <button className="cm-btn cm-btn-ghost cm-rangebtn" onClick={addRange}>한번에 완료</button>
       </div>
-      <HwGrid total={book.total} set={set} bookName={book.name} onCellDown={onCellDown} onCellClick={onCellClick} />
+      <HwGrid total={book.total} set={set} qset={qset} bookName={book.name} onCellDown={onCellDown} onCellClick={onCellClick} />
     </div>
   );
 }
@@ -435,6 +446,7 @@ function StudentHome({ cls, me, onLogout }) {
         <button className={activeTab === "att" ? "on" : ""} onClick={() => setTab("att")}>출석</button>
         <button className={activeTab === "q" ? "on" : ""} disabled={!att} onClick={() => att && setTab("q")}>질문</button>
         <button className={activeTab === "hw" ? "on" : ""} disabled={!att} onClick={() => att && setTab("hw")}>과제</button>
+        <button className={activeTab === "score" ? "on" : ""} disabled={!att} onClick={() => att && setTab("score")}>점수</button>
         <button className={activeTab === "fb" ? "on" : ""} disabled={!att} onClick={() => att && setTab("fb")}>피드백</button>
       </div>
 
@@ -453,6 +465,7 @@ function StudentHome({ cls, me, onLogout }) {
       )}
       {activeTab === "q" && <QuestionForm cls={cls} me={me} />}
       {activeTab === "hw" && <StudentHomework cls={cls} me={me} />}
+      {activeTab === "score" && <ScoreForm cls={cls} me={me} />}
       {activeTab === "fb" && <FeedbackForm cls={cls} />}
     </div>
   );
@@ -525,7 +538,21 @@ function QuestionForm({ cls, me }) {
 
 function StudentHomework({ cls, me }) {
   const [done, setDone] = useState(null);
+  const [qmap, setQmap] = useState({});
   useEffect(() => { getMyHw(cls.id, todayStr, me.id).then((d) => setDone(d)); }, [cls.id, me.id]);
+  useEffect(() => {
+    const unsub = qCol(cls.id, todayStr).where("sid", "==", me.id).onSnapshot((s) => {
+      const m = {};
+      s.forEach((d) => {
+        const q = d.data();
+        const n = parseInt(q.num, 10);
+        if (!isNaN(n)) { (m[q.book] = m[q.book] || new Set()).add(n); }
+      });
+      setQmap(m);
+    });
+    return () => unsub();
+  }, [cls.id, me.id]);
+
   function persistBook(bookName, arr) {
     setDone((prev) => ({ ...(prev || {}), [bookName]: arr }));
     saveHwBook(cls.id, todayStr, me, bookName, arr);
@@ -534,9 +561,9 @@ function StudentHomework({ cls, me }) {
   return (
     <>
       <div className="cm-card cm-hint">
-        완료한 번호를 <b>누르거나, 마우스로 드래그</b>해서 칠하세요. 터치 화면에서는 칸을 <b>꾹 눌러 칠하기 모드</b>로 들어간 뒤 손가락을 끌면 됩니다. 같은 동작으로 다시 지울 수 있고, 범위 입력으로도 처리할 수 있어요.
+        완료한 번호를 <b>누르거나, 마우스로 드래그</b>해서 칠하세요. 터치 화면에서는 칸을 <b>꾹 눌러 칠하기 모드</b>로 들어간 뒤 손가락을 끌면 됩니다. 같은 동작으로 다시 지울 수 있고, 범위 입력으로도 처리할 수 있어요. <b style={{ color: "#d6453f" }}>내가 질문한 번호는 빨간 글씨</b>로 표시돼요.
       </div>
-      {BOOKS.map((b) => (<BookHwCard key={b.name} book={b} initial={done[b.name] || []} onChange={(arr) => persistBook(b.name, arr)} />))}
+      {BOOKS.map((b) => (<BookHwCard key={b.name} book={b} initial={done[b.name] || []} qset={qmap[b.name]} onChange={(arr) => persistBook(b.name, arr)} />))}
     </>
   );
 }
@@ -564,6 +591,59 @@ function FeedbackForm({ cls }) {
           <input className="cm-input" placeholder="한 줄로 적어주세요 (선택)" maxLength={120} value={bad} onChange={(e) => setBad(e.target.value)} />
           <button className="cm-btn cm-btn-primary" onClick={submit}>제출하기</button>
         </>
+      )}
+    </div>
+  );
+}
+
+function ScoreForm({ cls, me }) {
+  const [correct, setCorrect] = useState("");
+  const [total, setTotal] = useState("");
+  const [label, setLabel] = useState("");
+  const [mine, setMine] = useState([]);
+
+  useEffect(() => {
+    const unsub = scoresCol(cls.id, todayStr).where("sid", "==", me.id).onSnapshot((s) => {
+      const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() })); arr.sort((a, b) => a.time - b.time); setMine(arr);
+    });
+    return () => unsub();
+  }, [cls.id, me.id]);
+
+  const c = parseInt(correct, 10), t = parseInt(total, 10);
+  const valid = !isNaN(c) && !isNaN(t) && t > 0 && c >= 0 && c <= t;
+  const score = valid ? Math.round((c / t) * 100) : null;
+  const over = correct !== "" && total !== "" && !isNaN(c) && !isNaN(t) && (c > t || t === 0);
+
+  async function submit() {
+    if (!valid) return;
+    await addScore(cls.id, todayStr, { sid: me.id, name: me.name, correct: c, total: t, score, label: label.trim(), time: Date.now() });
+    setCorrect(""); setTotal(""); setLabel("");
+  }
+
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">테스트 점수</h3>
+      <label className="cm-label">시험 이름 (선택)</label>
+      <input className="cm-input" placeholder="예: 6월 단원평가" value={label} onChange={(e) => setLabel(e.target.value)} />
+      <label className="cm-label">맞은 개수 / 전체 문항 수</label>
+      <div className="cm-rangebar">
+        <input className="cm-input" inputMode="numeric" placeholder="맞은 개수" value={correct} onChange={(e) => setCorrect(e.target.value.replace(/\D/g, ""))} />
+        <span className="cm-tilde">/</span>
+        <input className="cm-input" inputMode="numeric" placeholder="전체" value={total} onChange={(e) => setTotal(e.target.value.replace(/\D/g, ""))} />
+      </div>
+      {score !== null && <div className="cm-scorebig">환산 점수 <b>{score}점</b><span>/ 100점</span></div>}
+      {over && <div className="cm-err">맞은 개수는 전체 문항 수보다 클 수 없어요.</div>}
+      <button className="cm-btn cm-btn-primary" onClick={submit}>제출하기</button>
+      {mine.length > 0 && (
+        <div className="cm-sentlist">
+          <div className="cm-mini-h">내가 제출한 점수</div>
+          {mine.slice().reverse().map((s) => (
+            <div key={s.id} className="cm-sent-item">
+              <span>{s.label ? s.label + " · " : ""}{s.correct}/{s.total}</span>
+              <span className="cm-tag-ok">{s.score}점</span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -641,6 +721,7 @@ function AdminDay({ cls, date, onBack }) {
   const [questions, setQuestions] = useState([]);
   const [hwDone, setHwDone] = useState({});
   const [feedback, setFeedback] = useState([]);
+  const [scores, setScores] = useState([]);
   const [detail, setDetail] = useState(null);
 
   useEffect(() => {
@@ -649,6 +730,7 @@ function AdminDay({ cls, date, onBack }) {
       qCol(cls.id, date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); setQuestions(arr); }),
       hwCol(cls.id, date).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data().books || {})); setHwDone(m); }),
       fbCol(cls.id, date).onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ fid: d.id, ...d.data() })); setFeedback(arr); }),
+      scoresCol(cls.id, date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() })); setScores(arr); }),
     ];
     return () => unsubs.forEach((u) => u && u());
   }, [cls.id, date]);
@@ -658,7 +740,7 @@ function AdminDay({ cls, date, onBack }) {
   const waiting = questions.filter((q) => !q.resolved);
   const hwStudents = roster.filter((r) => hwDone[r.id] && BOOKS.some((b) => (hwDone[r.id][b.name] || []).length > 0));
 
-  if (detail) return <StudentDetail date={date} student={detail} hwDone={hwDone} onBack={() => setDetail(null)} />;
+  if (detail) return <StudentDetail date={date} student={detail} hwDone={hwDone} questions={questions} onBack={() => setDetail(null)} />;
 
   return (
     <div className="cm-stack">
@@ -717,6 +799,19 @@ function AdminDay({ cls, date, onBack }) {
       </div>
 
       <div className="cm-card">
+        <h3 className="cm-h3">테스트 점수</h3>
+        {scores.length === 0 ? (<div className="cm-empty">제출된 점수가 없어요</div>) : (
+          scores.slice().reverse().map((s) => (
+            <div key={s.id} className="cm-score-row">
+              <span className="cm-score-name">{s.name}</span>
+              <span className="cm-score-detail">{s.label ? s.label + " · " : ""}{s.correct}/{s.total}</span>
+              <span className="cm-score-num">{s.score}점</span>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="cm-card">
         <h3 className="cm-h3">수업 피드백 <span className="cm-h-hint">(익명 · 작성자 알 수 없음)</span></h3>
         {feedback.length === 0 ? (<div className="cm-empty">아직 피드백이 없어요</div>) : (
           feedback.map((f) => (
@@ -731,8 +826,13 @@ function AdminDay({ cls, date, onBack }) {
   );
 }
 
-function StudentDetail({ date, student, hwDone, onBack }) {
+function StudentDetail({ date, student, hwDone, questions, onBack }) {
   const mine = hwDone[student.id] || {};
+  const qmap = {};
+  (questions || []).filter((q) => q.sid === student.id).forEach((q) => {
+    const n = parseInt(q.num, 10);
+    if (!isNaN(n)) { (qmap[q.book] = qmap[q.book] || new Set()).add(n); }
+  });
   return (
     <div className="cm-stack">
       <div className="cm-daybar">
@@ -745,7 +845,7 @@ function StudentDetail({ date, student, hwDone, onBack }) {
             <h3 className="cm-h3" style={{ margin: 0 }}>{b.name}</h3>
             <span className="cm-book-count">{(mine[b.name] || []).length} / {b.total}</span>
           </div>
-          <HwGrid total={b.total} set={new Set(mine[b.name] || [])} />
+          <HwGrid total={b.total} set={new Set(mine[b.name] || [])} qset={qmap[b.name]} />
         </div>
       ))}
     </div>
