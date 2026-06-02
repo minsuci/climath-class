@@ -255,9 +255,29 @@ const qCol = (cid, date) => dayDoc(cid, date).collection("questions");
 const hwCol = (cid) => classDoc(cid).collection("homework");
 const fbCol = (cid, date) => dayDoc(cid, date).collection("feedback");
 
+// 구글 시트 출석 자동화 설정
+const GSHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyeQE8xsDkYuk_9KDSJJiJ8KRRIFMhL_uH1i1AzBEixg3DnEwHbvN6o277H87zchuvW/exec"; // Apps Script 웹앱 URL을 여기에 붙여넣기
+const GSHEET_TOKEN = "climath2025";
+const GSHEET_CLASSES = ["s-mongeum", "s-hwamok", "jasago"]; // 한민수 시트 반만
+
+async function syncAttendanceToSheet(cid, date, name) {
+  if (!GSHEET_WEBHOOK_URL) return; // URL 미설정 시 스킵
+  if (!GSHEET_CLASSES.includes(cid)) return; // 해당 반만
+  try {
+    await fetch(GSHEET_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: GSHEET_TOKEN, cid, name, date })
+    });
+  } catch (err) {
+    console.warn("시트 출석 동기화 실패:", err);
+  }
+}
+
 async function checkIn(cid, date, me) {
   await attCol(cid, date).doc(me.id).set({ name: me.name, time: Date.now() });
   touchDay(cid, date);
+  syncAttendanceToSheet(cid, date, me.name); // 구글 시트에도 O 기록 (비동기, 실패해도 앱 출석은 유지)
 }
 async function addQuestion(cid, date, q) { await qCol(cid, date).add(q); touchDay(cid, date); }
 async function resolveQuestion(cid, date, qid) { await qCol(cid, date).doc(qid).update({ resolved: true }); }
