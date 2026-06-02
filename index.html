@@ -157,6 +157,21 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-qchip:hover{background:#d6453f; color:#fff; border-color:#d6453f;}
 
 .cm-status{text-align:center; padding:60px 20px; color:var(--muted); font-size:14px;}
+
+.cm-notice-overlay{
+  position:fixed; inset:0; background:rgba(21,35,63,.88);
+  z-index:100; display:flex; align-items:center; justify-content:center; padding:24px;
+}
+.cm-notice-box{
+  background:#fff; border-radius:22px; padding:30px 28px;
+  max-width:440px; width:100%; text-align:center; box-shadow:0 24px 64px rgba(21,35,63,.5);
+}
+.cm-notice-label{font-family:'Fraunces',serif; font-size:20px; color:var(--navy); margin-bottom:16px;}
+.cm-notice-text{font-size:15px; color:var(--ink); line-height:1.75; white-space:pre-wrap; margin-bottom:22px;}
+
+.cm-notice-preview{background:#f0f4ff; border-left:3px solid var(--navy2); border-radius:0 9px 9px 0; padding:10px 14px; font-size:13px; color:var(--navy); margin-bottom:14px; line-height:1.5;}
+.cm-notice-dot{color:var(--clay); margin-right:4px;}
+.cm-notice-ta{resize:vertical; min-height:80px; line-height:1.55;}
 </style>
 </head>
 <body>
@@ -260,6 +275,16 @@ async function removeQuestioned(cid, sid, bookName, n) {
 }
 function listenQuestioned(cid, sid, cb) {
   return questionedCol(cid).doc(sid).onSnapshot((d) => cb(d.exists ? (d.data().books || {}) : {}));
+}
+const noticeDoc = (cid) => classDoc(cid).collection("config").doc("notice");
+async function postNotice(cid, text) {
+  await noticeDoc(cid).set({ text, time: Date.now(), active: true });
+}
+async function clearNotice(cid) {
+  await noticeDoc(cid).set({ active: false, text: "" }, { merge: true });
+}
+function listenNotice(cid, cb) {
+  return noticeDoc(cid).onSnapshot((d) => cb(d.exists ? d.data() : null));
 }
 async function addFeedback(cid, date, f) { await fbCol(cid, date).add(f); touchDay(cid, date); }
 const scoresCol = (cid, date) => dayDoc(cid, date).collection("scores");
@@ -444,16 +469,44 @@ function StudentHome({ cls, me, onLogout }) {
   const [tab, setTab] = useState("att");
   const [att, setAtt] = useState(null);
   const [showPin, setShowPin] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
 
   useEffect(() => {
     const unsub = attCol(cls.id, todayStr).doc(me.id).onSnapshot((d) => setAtt(d.exists ? d.data() : null));
     return () => unsub();
   }, [cls.id, me.id]);
 
+  useEffect(() => {
+    const unsub = listenNotice(cls.id, (n) => setNotice(n));
+    return () => unsub();
+  }, [cls.id]);
+
+  useEffect(() => {
+    if (!notice || !notice.active || !notice.time) { setNoticeDismissed(false); return; }
+    try { setNoticeDismissed(!!localStorage.getItem("climath_n_" + cls.id + "_" + notice.time)); } catch (e) {}
+  }, [notice, cls.id]);
+
+  function dismissNotice() {
+    if (!notice) return;
+    try { localStorage.setItem("climath_n_" + cls.id + "_" + notice.time, "1"); } catch (e) {}
+    setNoticeDismissed(true);
+  }
+
   const activeTab = att ? tab : "att";
+  const showBanner = !!(notice && notice.active && notice.text && !noticeDismissed);
 
   return (
     <div className="cm-stack">
+      {showBanner && (
+        <div className="cm-notice-overlay" onClick={dismissNotice}>
+          <div className="cm-notice-box" onClick={(e) => e.stopPropagation()}>
+            <div className="cm-notice-label">📢 공지사항</div>
+            <div className="cm-notice-text">{notice.text}</div>
+            <button className="cm-btn cm-btn-primary" style={{ marginTop: 0 }} onClick={dismissNotice}>확인</button>
+          </div>
+        </div>
+      )}
       <div className="cm-card cm-welcome">
         <div>
           <div className="cm-welcome-name">{me.name} 님</div>
@@ -711,16 +764,52 @@ function AdminView() {
 function AdminDays({ cls, onBack }) {
   const [selected, setSelected] = useState(null);
   const [days, setDays] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [noticeText, setNoticeText] = useState("");
   const refresh = () => listDays(cls.id).then(setDays);
   useEffect(() => { refresh(); }, [cls.id]);
+  useEffect(() => {
+    const unsub = listenNotice(cls.id, (n) => {
+      setNotice(n);
+      if (n && n.active && n.text) setNoticeText(n.text);
+    });
+    return () => unsub();
+  }, [cls.id]);
 
   if (selected) return <AdminDay cls={cls} date={selected} onBack={() => { setSelected(null); refresh(); }} />;
+
+  const hasActive = !!(notice && notice.active && notice.text);
   return (
     <div className="cm-stack">
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
         <div className="cm-daybar-date">{cls.name}</div>
       </div>
+
+      <div className="cm-card">
+        <h3 className="cm-h3">공지 메시지</h3>
+        {hasActive && (
+          <div className="cm-notice-preview">
+            <span className="cm-notice-dot">●</span> 현재 공지: {notice.text}
+          </div>
+        )}
+        <textarea className="cm-input cm-notice-ta" rows={3}
+          placeholder="학생들이 앱을 열면 보이는 공지를 입력하세요"
+          value={noticeText} onChange={(e) => setNoticeText(e.target.value)} />
+        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+          <button className="cm-btn cm-btn-primary" style={{ margin: 0 }}
+            onClick={() => noticeText.trim() && postNotice(cls.id, noticeText.trim())}>
+            공지 올리기
+          </button>
+          {hasActive && (
+            <button className="cm-btn cm-btn-ghost" style={{ margin: 0 }}
+              onClick={() => { clearNotice(cls.id); setNoticeText(""); }}>
+              공지 지우기
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="cm-card">
         <h3 className="cm-h3">날짜 선택</h3>
         {!days ? (<div className="cm-empty">불러오는 중…</div>) : (
