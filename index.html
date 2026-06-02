@@ -168,6 +168,7 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 }
 .cm-notice-label{font-family:'Fraunces',serif; font-size:20px; color:var(--navy); margin-bottom:16px;}
 .cm-notice-text{font-size:15px; color:var(--ink); line-height:1.75; white-space:pre-wrap; margin-bottom:22px;}
+.cm-notice-box.dm{border-top:4px solid var(--clay);}
 
 .cm-notice-preview{background:#f0f4ff; border-left:3px solid var(--navy2); border-radius:0 9px 9px 0; padding:10px 14px; font-size:13px; color:var(--navy); margin-bottom:14px; line-height:1.5;}
 .cm-notice-dot{color:var(--clay); margin-right:4px;}
@@ -211,13 +212,16 @@ const CLASSES = [
   { id: "s-mongeum", name: "고1S 월금반", roster: [
     { id: "s1", name: "김서진" }, { id: "s2", name: "임서윤" }, { id: "s3", name: "김태윤" },
     { id: "s4", name: "박성준" }, { id: "s5", name: "양성은" }, { id: "s6", name: "안성빈" },
+    { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
   ]},
   { id: "s-hwamok", name: "고1S 화목반", roster: [
     { id: "s1", name: "박범의" }, { id: "s2", name: "민우영" }, { id: "s3", name: "윤지섭" }, { id: "s4", name: "안현준" },
+    { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
   ]},
   { id: "jasago", name: "고1자사고반", roster: [
     { id: "s1", name: "마서준" }, { id: "s2", name: "김하준" }, { id: "s3", name: "김중원" },
     { id: "s4", name: "진현겸" }, { id: "s5", name: "공하빈" },
+    { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
   ]},
 ];
 const findClass = (id) => CLASSES.find((c) => c.id === id);
@@ -285,6 +289,17 @@ async function clearNotice(cid) {
 }
 function listenNotice(cid, cb) {
   return noticeDoc(cid).onSnapshot((d) => cb(d.exists ? d.data() : null));
+}
+const dmCol = (cid) => classDoc(cid).collection("dms");
+const dmDoc = (cid, sid) => dmCol(cid).doc(sid);
+async function postDm(cid, sid, text) {
+  await dmDoc(cid, sid).set({ text, time: Date.now(), active: true });
+}
+async function clearDm(cid, sid) {
+  await dmDoc(cid, sid).set({ active: false, text: "" }, { merge: true });
+}
+function listenDm(cid, sid, cb) {
+  return dmDoc(cid, sid).onSnapshot((d) => cb(d.exists ? d.data() : null));
 }
 async function addFeedback(cid, date, f) { await fbCol(cid, date).add(f); touchDay(cid, date); }
 const scoresCol = (cid, date) => dayDoc(cid, date).collection("scores");
@@ -440,7 +455,7 @@ function StudentView({ cls, onBack }) {
   async function login() {
     const u = cls.roster.find((r) => norm(r.name) === norm(name));
     if (!u) { setErr("명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해줘."); return; }
-    const real = (await getStudentPin(cls.id, u.id)) || DEFAULT_PIN;
+    const real = (await getStudentPin(cls.id, u.id)) || u.defaultPin || DEFAULT_PIN;
     if (pin !== real) { setErr("PIN이 올바르지 않습니다"); return; }
     setErr(""); setPin(""); setName(""); setMe(u);
   }
@@ -466,13 +481,16 @@ function StudentView({ cls, onBack }) {
 }
 
 function StudentHome({ cls, me, onLogout }) {
-  const [tab, setTab] = useState("att");
+  const [tab, setTab] = useState(me.teacher ? "q" : "att");
   const [att, setAtt] = useState(null);
   const [showPin, setShowPin] = useState(false);
   const [notice, setNotice] = useState(null);
   const [noticeDismissed, setNoticeDismissed] = useState(false);
+  const [dmNotice, setDmNotice] = useState(null);
+  const [dmDismissed, setDmDismissed] = useState(false);
 
   useEffect(() => {
+    if (me.teacher) return;
     const unsub = attCol(cls.id, todayStr).doc(me.id).onSnapshot((d) => setAtt(d.exists ? d.data() : null));
     return () => unsub();
   }, [cls.id, me.id]);
@@ -483,34 +501,54 @@ function StudentHome({ cls, me, onLogout }) {
   }, [cls.id]);
 
   useEffect(() => {
+    const unsub = listenDm(cls.id, me.id, (n) => setDmNotice(n));
+    return () => unsub();
+  }, [cls.id, me.id]);
+
+  useEffect(() => {
     if (!notice || !notice.active || !notice.time) { setNoticeDismissed(false); return; }
     try { setNoticeDismissed(!!localStorage.getItem("climath_n_" + cls.id + "_" + notice.time)); } catch (e) {}
   }, [notice, cls.id]);
+
+  useEffect(() => {
+    if (!dmNotice || !dmNotice.active || !dmNotice.time) { setDmDismissed(false); return; }
+    try { setDmDismissed(!!localStorage.getItem("climath_dm_" + cls.id + "_" + me.id + "_" + dmNotice.time)); } catch (e) {}
+  }, [dmNotice, cls.id, me.id]);
 
   function dismissNotice() {
     if (!notice) return;
     try { localStorage.setItem("climath_n_" + cls.id + "_" + notice.time, "1"); } catch (e) {}
     setNoticeDismissed(true);
   }
+  function dismissDm() {
+    if (!dmNotice) return;
+    try { localStorage.setItem("climath_dm_" + cls.id + "_" + me.id + "_" + dmNotice.time, "1"); } catch (e) {}
+    setDmDismissed(true);
+  }
 
-  const activeTab = att ? tab : "att";
-  const showBanner = !!(notice && notice.active && notice.text && !noticeDismissed);
+  const activeTab = me.teacher ? tab : (att ? tab : "att");
+  const showDmBanner = !!(dmNotice && dmNotice.active && dmNotice.text && !dmDismissed);
+  const showClassBanner = !!(notice && notice.active && notice.text && !noticeDismissed) && !showDmBanner;
+  const showBanner = showDmBanner || showClassBanner;
+  const bannerLabel = showDmBanner ? "✉ 선생님 메시지" : "📢 공지사항";
+  const bannerText = showDmBanner ? dmNotice.text : (notice ? notice.text : "");
+  const dismissBanner = showDmBanner ? dismissDm : dismissNotice;
 
   return (
     <div className="cm-stack">
       {showBanner && (
-        <div className="cm-notice-overlay" onClick={dismissNotice}>
-          <div className="cm-notice-box" onClick={(e) => e.stopPropagation()}>
-            <div className="cm-notice-label">📢 공지사항</div>
-            <div className="cm-notice-text">{notice.text}</div>
-            <button className="cm-btn cm-btn-primary" style={{ marginTop: 0 }} onClick={dismissNotice}>확인</button>
+        <div className="cm-notice-overlay" onClick={dismissBanner}>
+          <div className={"cm-notice-box" + (showDmBanner ? " dm" : "")} onClick={(e) => e.stopPropagation()}>
+            <div className="cm-notice-label">{bannerLabel}</div>
+            <div className="cm-notice-text">{bannerText}</div>
+            <button className="cm-btn cm-btn-primary" style={{ marginTop: 0 }} onClick={dismissBanner}>확인</button>
           </div>
         </div>
       )}
       <div className="cm-card cm-welcome">
         <div>
           <div className="cm-welcome-name">{me.name} 님</div>
-          <div className="cm-welcome-sub">{att ? "출석 완료 · " + hhmm(att.time) : "아직 출석 전이에요"}</div>
+          <div className="cm-welcome-sub">{me.teacher ? "선생님 모드" : att ? "출석 완료 · " + hhmm(att.time) : "아직 출석 전이에요"}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
           <button className="cm-link" onClick={() => setShowPin((v) => !v)}>비밀번호 변경</button>
@@ -520,11 +558,11 @@ function StudentHome({ cls, me, onLogout }) {
       {showPin && <ChangePin cls={cls} me={me} onDone={() => setShowPin(false)} />}
 
       <div className="cm-tabs">
-        <button className={activeTab === "att" ? "on" : ""} onClick={() => setTab("att")}>출석</button>
-        <button className={activeTab === "q" ? "on" : ""} disabled={!att} onClick={() => att && setTab("q")}>질문</button>
-        <button className={activeTab === "hw" ? "on" : ""} disabled={!att} onClick={() => att && setTab("hw")}>과제</button>
-        <button className={activeTab === "score" ? "on" : ""} disabled={!att} onClick={() => att && setTab("score")}>점수</button>
-        <button className={activeTab === "fb" ? "on" : ""} disabled={!att} onClick={() => att && setTab("fb")}>피드백</button>
+        {!me.teacher && <button className={activeTab === "att" ? "on" : ""} onClick={() => setTab("att")}>출석</button>}
+        <button className={activeTab === "q" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("q")}>질문</button>
+        <button className={activeTab === "hw" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("hw")}>과제</button>
+        <button className={activeTab === "score" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("score")}>점수</button>
+        <button className={activeTab === "fb" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("fb")}>피드백</button>
       </div>
 
       {activeTab === "att" && (
@@ -766,6 +804,9 @@ function AdminDays({ cls, onBack }) {
   const [days, setDays] = useState(null);
   const [notice, setNotice] = useState(null);
   const [noticeText, setNoticeText] = useState("");
+  const [dmStudent, setDmStudent] = useState("");
+  const [dmText, setDmText] = useState("");
+  const [activeDms, setActiveDms] = useState({});
   const refresh = () => listDays(cls.id).then(setDays);
   useEffect(() => { refresh(); }, [cls.id]);
   useEffect(() => {
@@ -775,10 +816,18 @@ function AdminDays({ cls, onBack }) {
     });
     return () => unsub();
   }, [cls.id]);
+  useEffect(() => {
+    const unsub = dmCol(cls.id).onSnapshot((s) => {
+      const m = {}; s.forEach((d) => (m[d.id] = d.data())); setActiveDms(m);
+    });
+    return () => unsub();
+  }, [cls.id]);
 
   if (selected) return <AdminDay cls={cls} date={selected} onBack={() => { setSelected(null); refresh(); }} />;
 
   const hasActive = !!(notice && notice.active && notice.text);
+  const students = cls.roster.filter((r) => !r.teacher);
+
   return (
     <div className="cm-stack">
       <div className="cm-daybar">
@@ -786,30 +835,75 @@ function AdminDays({ cls, onBack }) {
         <div className="cm-daybar-date">{cls.name}</div>
       </div>
 
+      {/* 전체 공지 */}
       <div className="cm-card">
-        <h3 className="cm-h3">공지 메시지</h3>
+        <h3 className="cm-h3">전체 공지</h3>
         {hasActive && (
-          <div className="cm-notice-preview">
-            <span className="cm-notice-dot">●</span> 현재 공지: {notice.text}
-          </div>
+          <div className="cm-notice-preview"><span className="cm-notice-dot">●</span> 현재 공지: {notice.text}</div>
         )}
         <textarea className="cm-input cm-notice-ta" rows={3}
           placeholder="학생들이 앱을 열면 보이는 공지를 입력하세요"
           value={noticeText} onChange={(e) => setNoticeText(e.target.value)} />
         <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
           <button className="cm-btn cm-btn-primary" style={{ margin: 0 }}
-            onClick={() => noticeText.trim() && postNotice(cls.id, noticeText.trim())}>
-            공지 올리기
-          </button>
+            onClick={() => noticeText.trim() && postNotice(cls.id, noticeText.trim())}>공지 올리기</button>
           {hasActive && (
             <button className="cm-btn cm-btn-ghost" style={{ margin: 0 }}
-              onClick={() => { clearNotice(cls.id); setNoticeText(""); }}>
-              공지 지우기
-            </button>
+              onClick={() => { clearNotice(cls.id); setNoticeText(""); }}>공지 지우기</button>
           )}
         </div>
       </div>
 
+      {/* 개인 공지 */}
+      <div className="cm-card">
+        <h3 className="cm-h3">개인 공지</h3>
+        <label className="cm-label">학생 선택</label>
+        <select className="cm-input" value={dmStudent} onChange={(e) => {
+          const sid = e.target.value;
+          setDmStudent(sid);
+          const existing = activeDms[sid];
+          setDmText((existing && existing.active && existing.text) ? existing.text : "");
+        }}>
+          <option value="">-- 학생을 선택하세요 --</option>
+          {students.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name}{activeDms[r.id]?.active && activeDms[r.id]?.text ? " 📩" : ""}
+            </option>
+          ))}
+        </select>
+        {dmStudent && (
+          <>
+            <label className="cm-label">메시지</label>
+            <textarea className="cm-input cm-notice-ta" rows={3}
+              placeholder="해당 학생에게만 보이는 메시지를 입력하세요"
+              value={dmText} onChange={(e) => setDmText(e.target.value)} />
+            <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+              <button className="cm-btn cm-btn-primary" style={{ margin: 0 }}
+                onClick={() => dmText.trim() && postDm(cls.id, dmStudent, dmText.trim())}>보내기</button>
+              {activeDms[dmStudent]?.active && activeDms[dmStudent]?.text && (
+                <button className="cm-btn cm-btn-ghost" style={{ margin: 0 }}
+                  onClick={() => { clearDm(cls.id, dmStudent); setDmText(""); }}>지우기</button>
+              )}
+            </div>
+          </>
+        )}
+        {Object.entries(activeDms).filter(([, v]) => v.active && v.text).length > 0 && (
+          <div style={{ marginTop: 16, borderTop: "1px dashed var(--line)", paddingTop: 12 }}>
+            <div className="cm-mini-h">현재 보내진 개인 공지</div>
+            {Object.entries(activeDms).filter(([, v]) => v.active && v.text).map(([sid, v]) => {
+              const st = students.find((r) => r.id === sid);
+              return st ? (
+                <div key={sid} className="cm-sent-item">
+                  <span><b>{st.name}</b> · {v.text.length > 24 ? v.text.slice(0, 24) + "…" : v.text}</span>
+                  <button className="cm-link" onClick={() => { clearDm(cls.id, sid); if (dmStudent === sid) setDmText(""); }}>지우기</button>
+                </div>
+              ) : null;
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 날짜 선택 */}
       <div className="cm-card">
         <h3 className="cm-h3">날짜 선택</h3>
         {!days ? (<div className="cm-empty">불러오는 중…</div>) : (
@@ -848,7 +942,7 @@ function AdminDay({ cls, date, onBack }) {
     return () => unsubs.forEach((u) => u && u());
   }, [cls.id, date]);
 
-  const roster = cls.roster;
+  const roster = cls.roster.filter((r) => !r.teacher);
   const presentIds = Object.keys(attendance);
   const waiting = questions.filter((q) => !q.resolved);
   const hwStudents = roster.filter((r) => hwDone[r.id] && BOOKS.some((b) => (hwDone[r.id][b.name] || []).length > 0));
