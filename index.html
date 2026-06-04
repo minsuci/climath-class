@@ -669,7 +669,7 @@ function QuestionForm({ cls, me }) {
   }, [cls.id, me.id]);
   async function submit() {
     if (!num.trim()) return;
-    const nums = num.trim().split(/[\s,，、]+/).map((s) => s.trim()).filter((s) => s.length > 0);
+    const nums = num.trim().split(/[^0-9\-()]+/).map((s) => s.trim()).filter((s) => s.length > 0);
     const now = Date.now();
     await Promise.all(nums.map((n, i) =>
       addQuestion(cls.id, todayStr, { sid: me.id, name: me.name, book, num: n, memo: memo.trim(), time: now + i, resolved: false })
