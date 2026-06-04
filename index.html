@@ -133,6 +133,12 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-resolved-summary::before { content: "▶ "; font-size: 11px; }
 details[open] .cm-resolved-summary::before { content: "▼ "; }
 .cm-resolved-box .cm-q { margin: 0; border-radius: 0; border-top: 1px solid #ede8e0; }
+.cm-q-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.cm-q-tab { padding: 4px 10px; border-radius: 20px; border: 1px solid #d4c9b8; background: #fff; font-size: 12px; color: #8a7f72; cursor: pointer; }
+.cm-q-tab.on { background: #2c3e5c; color: #fff; border-color: #2c3e5c; }
+.cm-q-pages { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px; font-size: 13px; color: #8a7f72; }
+.cm-q-page-btn { background: none; border: 1px solid #d4c9b8; border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 13px; color: #5a5248; }
+.cm-q-page-btn:disabled { opacity: 0.3; cursor: default; }
 .cm-q-resolved{font-size:13px; color:var(--green); font-weight:700; white-space:nowrap;}
 
 .cm-roster{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
@@ -663,14 +669,14 @@ function QuestionForm({ cls, me }) {
   }, [cls.id, me.id]);
   async function submit() {
     if (!num.trim()) return;
-    // 쉼표/공백으로 구분해서 개별 번호 파싱
     const nums = num.trim().split(/[\s,，、]+/).map((s) => s.trim()).filter((s) => s.length > 0);
     const now = Date.now();
-    for (let i = 0; i < nums.length; i++) {
-      const n = nums[i];
-      await addQuestion(cls.id, todayStr, { sid: me.id, name: me.name, book, num: n, memo: memo.trim(), time: now + i, resolved: false });
-      const parsed = parseInt(n, 10);
-      if (!isNaN(parsed)) addQuestioned(cls.id, me.id, me.name, book, parsed);
+    await Promise.all(nums.map((n, i) =>
+      addQuestion(cls.id, todayStr, { sid: me.id, name: me.name, book, num: n, memo: memo.trim(), time: now + i, resolved: false })
+    ));
+    const parsedNums = nums.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
+    if (parsedNums.length > 0) {
+      await Promise.all(parsedNums.map((n) => addQuestioned(cls.id, me.id, me.name, book, n)));
     }
     setNum(""); setMemo("");
   }
@@ -968,13 +974,26 @@ function AdminDays({ cls, onBack }) {
   );
 }
 
+const BOOK_TABS = ["전체", ...BOOKS.map((b) => b.name)];
+const RESOLVED_PAGE_SIZE = 5;
+
 function QuestionQueue({ questions, clsId, date }) {
+  const [activeBook, setActiveBook] = React.useState("전체");
+  const [resolvedPage, setResolvedPage] = React.useState(0);
+
   const sortByNum = (arr) => arr.slice().sort((a, b) => {
     const na = parseFloat(a.num) || 0, nb = parseFloat(b.num) || 0;
     return na !== nb ? na - nb : a.time - b.time;
   });
-  const pending = sortByNum(questions.filter((q) => !q.resolved));
-  const resolved = sortByNum(questions.filter((q) => q.resolved));
+
+  const filtered = activeBook === "전체" ? questions : questions.filter((q) => q.book === activeBook);
+  const pending = sortByNum(filtered.filter((q) => !q.resolved));
+  // 해결완료: 최신순 (time 내림차순)
+  const resolved = filtered.filter((q) => q.resolved).slice().sort((a, b) => b.time - a.time);
+  const resolvedTotal = resolved.length;
+  const resolvedPages = Math.ceil(resolvedTotal / RESOLVED_PAGE_SIZE);
+  const resolvedShown = resolved.slice(resolvedPage * RESOLVED_PAGE_SIZE, (resolvedPage + 1) * RESOLVED_PAGE_SIZE);
+
   const renderQ = (q) => (
     <div key={q.qid} className={"cm-q" + (q.resolved ? " done" : "")}>
       <div className="cm-q-main">
@@ -986,15 +1005,30 @@ function QuestionQueue({ questions, clsId, date }) {
         : <button className="cm-btn cm-btn-ghost" onClick={() => resolveQuestion(clsId, date, q.qid)}>해결</button>}
     </div>
   );
+
   if (questions.length === 0) return <div className="cm-empty">들어온 질문이 없어요</div>;
+
   return (
     <div>
+      <div className="cm-q-tabs">
+        {BOOK_TABS.map((t) => (
+          <button key={t} className={"cm-q-tab" + (activeBook === t ? " on" : "")}
+            onClick={() => { setActiveBook(t); setResolvedPage(0); }}>{t}</button>
+        ))}
+      </div>
       {pending.length === 0 && <div className="cm-empty">대기 중인 질문이 없어요</div>}
       {pending.map(renderQ)}
-      {resolved.length > 0 && (
+      {resolvedTotal > 0 && (
         <details className="cm-resolved-box" style={{marginTop: 12}}>
-          <summary className="cm-resolved-summary">해결완료 {resolved.length}건</summary>
-          {resolved.map(renderQ)}
+          <summary className="cm-resolved-summary">해결완료 {resolvedTotal}건</summary>
+          {resolvedShown.map(renderQ)}
+          {resolvedPages > 1 && (
+            <div className="cm-q-pages">
+              <button className="cm-q-page-btn" disabled={resolvedPage === 0} onClick={() => setResolvedPage((p) => p - 1)}>◀</button>
+              <span>{resolvedPage + 1} / {resolvedPages}</span>
+              <button className="cm-q-page-btn" disabled={resolvedPage >= resolvedPages - 1} onClick={() => setResolvedPage((p) => p + 1)}>▶</button>
+            </div>
+          )}
         </details>
       )}
     </div>
