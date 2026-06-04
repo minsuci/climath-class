@@ -256,21 +256,35 @@ const hwCol = (cid) => classDoc(cid).collection("homework");
 const fbCol = (cid, date) => dayDoc(cid, date).collection("feedback");
 
 // 구글 시트 출석 자동화 설정
-const GSHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyeQE8xsDkYuk_9KDSJJiJ8KRRIFMhL_uH1i1AzBEixg3DnEwHbvN6o277H87zchuvW/exec"; // Apps Script 웹앱 URL을 여기에 붙여넣기
+const GSHEET_WEBHOOK_URL = ""; // Apps Script 웹앱 URL을 여기에 붙여넣기
 const GSHEET_TOKEN = "climath2025";
 const GSHEET_CLASSES = ["s-mongeum", "s-hwamok", "jasago"]; // 한민수 시트 반만
 
 async function syncAttendanceToSheet(cid, date, name) {
-  if (!GSHEET_WEBHOOK_URL) return; // URL 미설정 시 스킵
-  if (!GSHEET_CLASSES.includes(cid)) return; // 해당 반만
+  if (!GSHEET_WEBHOOK_URL) return;
+  if (!GSHEET_CLASSES.includes(cid)) return;
   try {
     await fetch(GSHEET_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: GSHEET_TOKEN, cid, name, date })
+      body: JSON.stringify({ token: GSHEET_TOKEN, action: "attendance", cid, name, date })
     });
   } catch (err) {
     console.warn("시트 출석 동기화 실패:", err);
+  }
+}
+
+async function syncScoreToSheet(cid, date, name, score) {
+  if (!GSHEET_WEBHOOK_URL) return;
+  if (!GSHEET_CLASSES.includes(cid)) return;
+  try {
+    await fetch(GSHEET_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: GSHEET_TOKEN, action: "score", cid, name, date, score })
+    });
+  } catch (err) {
+    console.warn("시트 점수 동기화 실패:", err);
   }
 }
 
@@ -750,6 +764,7 @@ function ScoreForm({ cls, me }) {
   async function submit() {
     if (!valid) return;
     await addScore(cls.id, todayStr, { sid: me.id, name: me.name, correct: c, total: t, score, label: label.trim(), time: Date.now() });
+    syncScoreToSheet(cls.id, todayStr, me.name, score); // 구글 시트 TEST 칸에 점수 기록 (가장 최근 제출이 덮어씀)
     setCorrect(""); setTotal(""); setLabel("");
   }
 
