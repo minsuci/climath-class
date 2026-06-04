@@ -127,6 +127,12 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-q-body b{color:var(--clay);}
 .cm-q-memo{color:var(--muted); font-size:13px;}
 .cm-q.done{opacity:.5;}
+.cm-resolved-box { border: 1px solid #e8e0d4; border-radius: 10px; overflow: hidden; }
+.cm-resolved-summary { cursor: pointer; padding: 10px 14px; font-size: 13px; color: #8a7f72; font-weight: 600; list-style: none; background: #f7f4f0; user-select: none; }
+.cm-resolved-summary::-webkit-details-marker { display: none; }
+.cm-resolved-summary::before { content: "▶ "; font-size: 11px; }
+details[open] .cm-resolved-summary::before { content: "▼ "; }
+.cm-resolved-box .cm-q { margin: 0; border-radius: 0; border-top: 1px solid #ede8e0; }
 .cm-q-resolved{font-size:13px; color:var(--green); font-weight:700; white-space:nowrap;}
 
 .cm-roster{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
@@ -657,9 +663,15 @@ function QuestionForm({ cls, me }) {
   }, [cls.id, me.id]);
   async function submit() {
     if (!num.trim()) return;
-    await addQuestion(cls.id, todayStr, { sid: me.id, name: me.name, book, num: num.trim(), memo: memo.trim(), time: Date.now(), resolved: false });
-    const n = parseInt(num, 10);
-    if (!isNaN(n)) addQuestioned(cls.id, me.id, me.name, book, n);
+    // 쉼표/공백으로 구분해서 개별 번호 파싱
+    const nums = num.trim().split(/[\s,，、]+/).map((s) => s.trim()).filter((s) => s.length > 0);
+    const now = Date.now();
+    for (let i = 0; i < nums.length; i++) {
+      const n = nums[i];
+      await addQuestion(cls.id, todayStr, { sid: me.id, name: me.name, book, num: n, memo: memo.trim(), time: now + i, resolved: false });
+      const parsed = parseInt(n, 10);
+      if (!isNaN(parsed)) addQuestioned(cls.id, me.id, me.name, book, parsed);
+    }
     setNum(""); setMemo("");
   }
   return (
@@ -956,6 +968,39 @@ function AdminDays({ cls, onBack }) {
   );
 }
 
+function QuestionQueue({ questions, clsId, date }) {
+  const sortByNum = (arr) => arr.slice().sort((a, b) => {
+    const na = parseFloat(a.num) || 0, nb = parseFloat(b.num) || 0;
+    return na !== nb ? na - nb : a.time - b.time;
+  });
+  const pending = sortByNum(questions.filter((q) => !q.resolved));
+  const resolved = sortByNum(questions.filter((q) => q.resolved));
+  const renderQ = (q) => (
+    <div key={q.qid} className={"cm-q" + (q.resolved ? " done" : "")}>
+      <div className="cm-q-main">
+        <div className="cm-q-top"><span className="cm-q-name">{q.name}</span><span className="cm-q-time">{hhmm(q.time)}</span></div>
+        <div className="cm-q-body">{q.book} <b>{q.num}</b>번{q.memo && <span className="cm-q-memo"> · {q.memo}</span>}</div>
+      </div>
+      {q.resolved
+        ? <span className="cm-q-resolved">✓ 해결완료</span>
+        : <button className="cm-btn cm-btn-ghost" onClick={() => resolveQuestion(clsId, date, q.qid)}>해결</button>}
+    </div>
+  );
+  if (questions.length === 0) return <div className="cm-empty">들어온 질문이 없어요</div>;
+  return (
+    <div>
+      {pending.length === 0 && <div className="cm-empty">대기 중인 질문이 없어요</div>}
+      {pending.map(renderQ)}
+      {resolved.length > 0 && (
+        <details className="cm-resolved-box" style={{marginTop: 12}}>
+          <summary className="cm-resolved-summary">해결완료 {resolved.length}건</summary>
+          {resolved.map(renderQ)}
+        </details>
+      )}
+    </div>
+  );
+}
+
 function AdminDay({ cls, date, onBack }) {
   const [attendance, setAttendance] = useState({});
   const [questions, setQuestions] = useState([]);
@@ -998,17 +1043,7 @@ function AdminDay({ cls, date, onBack }) {
 
       <div className="cm-card">
         <h3 className="cm-h3">질문 대기열</h3>
-        {questions.length === 0 ? (<div className="cm-empty">들어온 질문이 없어요</div>) : (
-          questions.slice().reverse().map((q) => (
-            <div key={q.qid} className={"cm-q" + (q.resolved ? " done" : "")}>
-              <div className="cm-q-main">
-                <div className="cm-q-top"><span className="cm-q-name">{q.name}</span><span className="cm-q-time">{hhmm(q.time)}</span></div>
-                <div className="cm-q-body">{q.book} <b>{q.num}</b>번{q.memo && <span className="cm-q-memo"> · {q.memo}</span>}</div>
-              </div>
-              {q.resolved ? (<span className="cm-q-resolved">✓ 해결완료</span>) : (<button className="cm-btn cm-btn-ghost" onClick={() => resolveQuestion(cls.id, date, q.qid)}>해결</button>)}
-            </div>
-          ))
-        )}
+        <QuestionQueue questions={questions} clsId={cls.id} date={date} />
       </div>
 
       <div className="cm-card">
