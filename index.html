@@ -608,7 +608,6 @@ function StudentHome({ cls, me, onLogout }) {
         <button className={activeTab === "q" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("q")}>질문</button>
         <button className={activeTab === "hw" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("hw")}>과제</button>
         <button className={activeTab === "score" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("score")}>점수</button>
-        <button className={activeTab === "fb" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("fb")}>피드백</button>
       </div>
 
       {activeTab === "att" && (
@@ -619,7 +618,7 @@ function StudentHome({ cls, me, onLogout }) {
           ) : (
             <>
               <button className="cm-btn cm-btn-primary cm-big" onClick={() => checkIn(cls.id, todayStr, me)}>출석하기</button>
-              <div className="cm-hint" style={{ marginTop: 14, textAlign: "center" }}>출석체크를 해야 질문 · 과제 · 피드백을 쓸 수 있어요.</div>
+              <div className="cm-hint" style={{ marginTop: 14, textAlign: "center" }}>출석체크를 해야 질문 · 과제를 쓸 수 있어요.</div>
             </>
           )}
         </div>
@@ -627,7 +626,6 @@ function StudentHome({ cls, me, onLogout }) {
       {activeTab === "q" && <QuestionForm cls={cls} me={me} />}
       {activeTab === "hw" && <StudentHomework cls={cls} me={me} />}
       {activeTab === "score" && <ScoreForm cls={cls} me={me} />}
-      {activeTab === "fb" && <FeedbackForm cls={cls} />}
     </div>
   );
 }
