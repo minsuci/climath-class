@@ -81,6 +81,7 @@ html,body{margin:0; padding:0;}
 
 .cm-book-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;}
 .cm-book-count{font-family:'Fraunces',serif; font-size:15px; color:var(--green); font-weight:600;}
+.cm-book-pct{font-size:13px; color:var(--ink2); font-weight:500; font-family:inherit;}
 .cm-paintbadge{margin-left:10px; font-family:'Noto Sans KR',sans-serif; font-size:11px; font-weight:700; color:#fff; background:var(--green); padding:3px 10px; border-radius:999px; vertical-align:middle;}
 .cm-rangebar{display:flex; align-items:center; gap:8px; margin-bottom:16px;}
 .cm-rangebar .cm-input{padding:9px 11px; font-size:14px;}
@@ -105,6 +106,10 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 
 .cm-daybar{display:flex; align-items:center; justify-content:space-between; padding:8px 2px; position:sticky; top:0; z-index:100; background:var(--bg); margin:-4px -4px 4px -4px;}
 .cm-back{background:none; border:0; color:var(--navy2); font-size:14px; font-weight:700; cursor:pointer; font-family:inherit; padding:4px 0;}
+@keyframes slideInRight{from{transform:translateX(100%);opacity:0;}to{transform:translateX(0);opacity:1;}}
+@keyframes slideInLeft{from{transform:translateX(-40%);opacity:0;}to{transform:translateX(0);opacity:1;}}
+.cm-slide-in{animation:slideInRight 0.22s cubic-bezier(.25,.8,.25,1) both;}
+.cm-slide-back{animation:slideInLeft 0.22s cubic-bezier(.25,.8,.25,1) both;}
 .cm-daybar-date{font-family:'Fraunces',serif; font-size:16px; color:var(--navy); display:flex; align-items:center; gap:8px;}
 .cm-live{font-family:'Noto Sans KR',sans-serif; font-size:11px; color:var(--clay); font-weight:700; letter-spacing:.05em;}
 
@@ -365,6 +370,24 @@ async function getStudentPin(cid, sid) {
 async function saveStudentPin(cid, sid, p) { await studentsCol(cid).doc(sid).set({ pin: p }, { merge: true }); }
 
 // ===== 공용: 과제 번호표 =====
+// ===== 스와이프 뒤로가기 훅 =====
+function useSwipeBack(onBack) {
+  const tx = React.useRef(null);
+  function onTouchStart(e) { tx.current = e.touches[0].clientX; }
+  function onTouchEnd(e) {
+    if (tx.current === null) return;
+    const dx = e.changedTouches[0].clientX - tx.current;
+    tx.current = null;
+    if (dx > 60 && onBack) onBack();
+  }
+  return { onTouchStart, onTouchEnd };
+}
+
+// ===== 슬라이드 애니메이션 래퍼 =====
+function SlideIn({ children, back = false }) {
+  return <div className={back ? "cm-slide-back" : "cm-slide-in"}>{children}</div>;
+}
+
 function HwGrid({ total, set, qset, bookName, onCellDown, onCellClick }) {
   const interactive = !!onCellClick;
   const cells = [];
@@ -452,7 +475,7 @@ function BookHwCard({ book, initial, qNumbers, onClearQuestion, onChange }) {
     <div className="cm-card">
       <div className="cm-book-head">
         <h3 className="cm-h3" style={{ margin: 0 }}>{book.name}{painting && <span className="cm-paintbadge">● 칠하기 모드</span>}</h3>
-        <span className="cm-book-count">{set.size} / {book.total}</span>
+        <span className="cm-book-count">{set.size} / {book.total}<span className="cm-book-pct"> ({book.total > 0 ? Math.round(set.size / book.total * 100) : 0}%)</span></span>
       </div>
       <div className="cm-rangebar">
         <input className="cm-input" placeholder="시작" inputMode="numeric" value={from} onChange={(e) => setFrom(e.target.value.replace(/\D/g, ""))} />
@@ -852,6 +875,7 @@ function AdminView() {
 
 function AdminDays({ cls, onBack }) {
   const [selected, setSelected] = useState(null);
+  const swipe = useSwipeBack(onBack);
   const [days, setDays] = useState(null);
   const [notice, setNotice] = useState(null);
   const [noticeText, setNoticeText] = useState("");
@@ -874,13 +898,13 @@ function AdminDays({ cls, onBack }) {
     return () => unsub();
   }, [cls.id]);
 
-  if (selected) return <AdminDay cls={cls} date={selected} onBack={() => { setSelected(null); refresh(); }} />;
+  if (selected) return <SlideIn><AdminDay cls={cls} date={selected} onBack={() => { setSelected(null); refresh(); }} /></SlideIn>;
 
   const hasActive = !!(notice && notice.active && notice.text);
   const students = cls.roster.filter((r) => !r.teacher);
 
   return (
-    <div className="cm-stack">
+    <div className="cm-stack" {...swipe}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
         <div className="cm-daybar-date">{cls.name}</div>
@@ -1059,10 +1083,11 @@ function AdminDay({ cls, date, onBack }) {
   const waiting = questions.filter((q) => !q.resolved);
   const hwStudents = roster.filter((r) => hwDone[r.id] && BOOKS.some((b) => (hwDone[r.id][b.name] || []).length > 0));
 
-  if (detail) return <StudentDetail cls={cls} student={detail} hwDone={hwDone} questioned={questioned} onBack={() => setDetail(null)} />;
+  if (detail) return <SlideIn><StudentDetail cls={cls} student={detail} hwDone={hwDone} questioned={questioned} onBack={() => setDetail(null)} /></SlideIn>;
 
+  const swipeDay = useSwipeBack(onBack);
   return (
-    <div className="cm-stack">
+    <div className="cm-stack" {...swipeDay}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 날짜 선택</button>
         <div className="cm-daybar-date">{cls.name} · {fmtDate(date)}{date === todayStr && <span className="cm-live">● LIVE</span>}</div>
@@ -1138,16 +1163,9 @@ function AdminDay({ cls, date, onBack }) {
 function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
   const mine = hwDone[student.id] || {};
   const qmine = (questioned && questioned[student.id]) || {};
-  const touchStart = React.useRef(null);
-  function onTouchStart(e) { touchStart.current = e.touches[0].clientX; }
-  function onTouchEnd(e) {
-    if (touchStart.current === null) return;
-    const dx = e.changedTouches[0].clientX - touchStart.current;
-    if (dx > 60) onBack();
-    touchStart.current = null;
-  }
+  const swipeDetail = useSwipeBack(onBack);
   return (
-    <div className="cm-stack" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+    <div className="cm-stack" {...swipeDetail}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 현황으로</button>
         <div className="cm-daybar-date">{student.name} · 누적 진도</div>
@@ -1158,7 +1176,7 @@ function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
           <div className="cm-card" key={b.name}>
             <div className="cm-book-head">
               <h3 className="cm-h3" style={{ margin: 0 }}>{b.name}</h3>
-              <span className="cm-book-count">{(mine[b.name] || []).length} / {b.total}</span>
+              <span className="cm-book-count">{(mine[b.name] || []).length} / {b.total}<span className="cm-book-pct"> ({b.total > 0 ? Math.round((mine[b.name] || []).length / b.total * 100) : 0}%)</span></span>
             </div>
             {qnums.length > 0 && (
               <div className="cm-qchips">
@@ -1186,7 +1204,7 @@ function App() {
   let sub, main;
   if (isAdmin) { sub = "수업 관리"; main = <AdminView />; }
   else if (!cls) { sub = "반 선택"; main = <ClassPicker onPick={setCls} />; }
-  else { sub = cls.name + " · " + todayStr; main = <StudentView cls={cls} onBack={urlClass ? null : () => setCls(null)} />; }
+  else { sub = cls.name + " · " + todayStr; main = <SlideIn><StudentView cls={cls} onBack={urlClass ? null : () => setCls(null)} /></SlideIn>; }
 
   return (
     <div>
