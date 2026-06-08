@@ -103,7 +103,7 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-day-badge{background:var(--navy); color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;}
 .cm-day-arrow{font-size:20px; color:var(--navy2); line-height:1;}
 
-.cm-daybar{display:flex; align-items:center; justify-content:space-between; padding:0 2px;}
+.cm-daybar{display:flex; align-items:center; justify-content:space-between; padding:8px 2px; position:sticky; top:0; z-index:100; background:var(--bg); margin:-4px -4px 4px -4px;}
 .cm-back{background:none; border:0; color:var(--navy2); font-size:14px; font-weight:700; cursor:pointer; font-family:inherit; padding:4px 0;}
 .cm-daybar-date{font-family:'Fraunces',serif; font-size:16px; color:var(--navy); display:flex; align-items:center; gap:8px;}
 .cm-live{font-family:'Noto Sans KR',sans-serif; font-size:11px; color:var(--clay); font-weight:700; letter-spacing:.05em;}
@@ -1138,8 +1138,16 @@ function AdminDay({ cls, date, onBack }) {
 function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
   const mine = hwDone[student.id] || {};
   const qmine = (questioned && questioned[student.id]) || {};
+  const touchStart = React.useRef(null);
+  function onTouchStart(e) { touchStart.current = e.touches[0].clientX; }
+  function onTouchEnd(e) {
+    if (touchStart.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStart.current;
+    if (dx > 60) onBack();
+    touchStart.current = null;
+  }
   return (
-    <div className="cm-stack">
+    <div className="cm-stack" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 현황으로</button>
         <div className="cm-daybar-date">{student.name} · 누적 진도</div>
