@@ -383,11 +383,6 @@ function useSwipeBack(onBack) {
   return { onTouchStart, onTouchEnd };
 }
 
-// ===== 슬라이드 애니메이션 래퍼 =====
-function SlideIn({ children, back = false }) {
-  return <div className={back ? "cm-slide-back" : "cm-slide-in"}>{children}</div>;
-}
-
 function HwGrid({ total, set, qset, bookName, onCellDown, onCellClick }) {
   const interactive = !!onCellClick;
   const cells = [];
@@ -902,8 +897,16 @@ function AdminDays({ cls, onBack }) {
   const hasActive = !!(notice && notice.active && notice.text);
   const students = cls.roster.filter((r) => !r.teacher);
 
+  const daysTouch = React.useRef(null);
+  function onDaysTouchStart(e) { daysTouch.current = e.touches[0].clientX; }
+  function onDaysTouchEnd(e) {
+    if (daysTouch.current === null) return;
+    const dx = e.changedTouches[0].clientX - daysTouch.current;
+    if (dx > 60) onBack();
+    daysTouch.current = null;
+  }
   return (
-    <div className="cm-stack">
+    <div className="cm-stack cm-slide-in" onTouchStart={onDaysTouchStart} onTouchEnd={onDaysTouchEnd}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
         <div className="cm-daybar-date">{cls.name}</div>
@@ -1084,8 +1087,16 @@ function AdminDay({ cls, date, onBack }) {
 
   if (detail) return <StudentDetail cls={cls} student={detail} hwDone={hwDone} questioned={questioned} onBack={() => setDetail(null)} />;
 
+  const dayTouch = React.useRef(null);
+  function onDayTouchStart(e) { dayTouch.current = e.touches[0].clientX; }
+  function onDayTouchEnd(e) {
+    if (dayTouch.current === null) return;
+    const dx = e.changedTouches[0].clientX - dayTouch.current;
+    if (dx > 60) onBack();
+    dayTouch.current = null;
+  }
   return (
-    <div className="cm-stack">
+    <div className="cm-stack cm-slide-in" onTouchStart={onDayTouchStart} onTouchEnd={onDayTouchEnd}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 날짜 선택</button>
         <div className="cm-daybar-date">{cls.name} · {fmtDate(date)}{date === todayStr && <span className="cm-live">● LIVE</span>}</div>
@@ -1170,7 +1181,7 @@ function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
     touchStart.current = null;
   }
   return (
-    <div className="cm-stack" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+    <div className="cm-stack cm-slide-in" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 현황으로</button>
         <div className="cm-daybar-date">{student.name} · 누적 진도</div>
