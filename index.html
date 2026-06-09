@@ -142,6 +142,21 @@ details[open] .cm-resolved-summary::before { content: "▼ "; }
 .cm-q-pages { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px; font-size: 13px; color: #8a7f72; }
 .cm-q-page-btn { background: none; border: 1px solid #d4c9b8; border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 13px; color: #5a5248; }
 .cm-q-page-btn:disabled { opacity: 0.3; cursor: default; }
+/* 출석부 */
+.cm-ab-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -16px; padding: 0 16px 8px; }
+.cm-ab-table { border-collapse: collapse; font-size: 11px; min-width: 100%; }
+.cm-ab-table th, .cm-ab-table td { border: 1px solid #e8e0d4; padding: 4px 6px; white-space: nowrap; text-align: center; }
+.cm-ab-table th { background: #f7f4f0; font-weight: 700; color: #5a5248; position: sticky; top: 0; }
+.cm-ab-name { position: sticky; left: 0; background: #f7f4f0; font-weight: 700; color: #2c3e5c; text-align: left !important; z-index: 2; min-width: 60px; }
+.cm-ab-table th.cm-ab-name { z-index: 3; }
+.cm-ab-att-o { color: #2ecc71; font-weight: 700; }
+.cm-ab-att-x { color: #e74c3c; }
+.cm-ab-score { color: #c0392b; font-weight: 600; font-size: 10px; }
+.cm-ab-hw { color: #8a7f72; font-size: 10px; }
+.cm-ab-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.cm-ab-tab { padding: 4px 12px; border-radius: 20px; border: 1px solid #d4c9b8; background: #fff; font-size: 12px; color: #8a7f72; cursor: pointer; font-family: inherit; }
+.cm-ab-tab.on { background: #2c3e5c; color: #fff; border-color: #2c3e5c; }
+.cm-ab-month-sel { font-size: 13px; border: 1px solid #d4c9b8; border-radius: 8px; padding: 4px 8px; font-family: inherit; color: #2c3e5c; background: #fff; margin-bottom: 12px; }
 .cm-q-resolved{font-size:13px; color:var(--green); font-weight:700; white-space:nowrap;}
 
 .cm-roster{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
@@ -269,44 +284,9 @@ const attCol = (cid, date) => dayDoc(cid, date).collection("attendance");
 const qCol = (cid, date) => dayDoc(cid, date).collection("questions");
 const hwCol = (cid) => classDoc(cid).collection("homework");
 const fbCol = (cid, date) => dayDoc(cid, date).collection("feedback");
-
-// 구글 시트 출석 자동화 설정
-const GSHEET_WEBHOOK_URL = ""; // Apps Script 웹앱 URL을 여기에 붙여넣기
-const GSHEET_TOKEN = "climath2025";
-const GSHEET_CLASSES = ["s-mongeum", "s-hwamok", "jasago"]; // 한민수 시트 반만
-
-async function syncAttendanceToSheet(cid, date, name) {
-  if (!GSHEET_WEBHOOK_URL) return;
-  if (!GSHEET_CLASSES.includes(cid)) return;
-  try {
-    await fetch(GSHEET_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: GSHEET_TOKEN, action: "attendance", cid, name, date })
-    });
-  } catch (err) {
-    console.warn("시트 출석 동기화 실패:", err);
-  }
-}
-
-async function syncScoreToSheet(cid, date, name, score) {
-  if (!GSHEET_WEBHOOK_URL) return;
-  if (!GSHEET_CLASSES.includes(cid)) return;
-  try {
-    await fetch(GSHEET_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: GSHEET_TOKEN, action: "score", cid, name, date, score })
-    });
-  } catch (err) {
-    console.warn("시트 점수 동기화 실패:", err);
-  }
-}
-
 async function checkIn(cid, date, me) {
   await attCol(cid, date).doc(me.id).set({ name: me.name, time: Date.now() });
   touchDay(cid, date);
-  syncAttendanceToSheet(cid, date, me.name); // 구글 시트에도 O 기록 (비동기, 실패해도 앱 출석은 유지)
 }
 async function addQuestion(cid, date, q) { await qCol(cid, date).add(q); touchDay(cid, date); }
 async function resolveQuestion(cid, date, qid) { await qCol(cid, date).doc(qid).update({ resolved: true }); }
@@ -783,7 +763,6 @@ function ScoreForm({ cls, me }) {
   async function submit() {
     if (!valid) return;
     await addScore(cls.id, todayStr, { sid: me.id, name: me.name, correct: c, total: t, score, label: label.trim(), time: Date.now() });
-    syncScoreToSheet(cls.id, todayStr, me.name, score); // 구글 시트 TEST 칸에 점수 기록 (가장 최근 제출이 덮어씀)
     setCorrect(""); setTotal(""); setLabel("");
   }
 
@@ -856,6 +835,7 @@ function AdminView() {
 function AdminDays({ cls, onBack }) {
   const [selected, setSelected] = useState(null);
   const [days, setDays] = useState(null);
+  const [activeView, setActiveView] = useState("days"); // "days" | "book"
   const [notice, setNotice] = useState(null);
   const [noticeText, setNoticeText] = useState("");
   const [dmStudent, setDmStudent] = useState("");
@@ -966,19 +946,174 @@ function AdminDays({ cls, onBack }) {
         )}
       </div>
 
-      {/* 날짜 선택 */}
-      <div className="cm-card">
-        <h3 className="cm-h3">날짜 선택</h3>
-        {!days ? (<div className="cm-empty">불러오는 중…</div>) : (
-          <div className="cm-daylist">
-            {days.map((d) => (
-              <button key={d} className={"cm-day" + (d === todayStr ? " today" : "")} onClick={() => setSelected(d)}>
-                <div className="cm-day-left"><span className="cm-day-date">{fmtDate(d)}</span>{d === todayStr && <span className="cm-day-badge">오늘</span>}</div>
-                <span className="cm-day-arrow">›</span>
-              </button>
-            ))}
-          </div>
-        )}
+      {/* 탭 */}
+      <div className="cm-ab-tabs">
+        <button className={"cm-ab-tab" + (activeView === "days" ? " on" : "")} onClick={() => setActiveView("days")}>날짜별</button>
+        <button className={"cm-ab-tab" + (activeView === "book" ? " on" : "")} onClick={() => setActiveView("book")}>월간 출석부</button>
+      </div>
+
+      {activeView === "days" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">날짜 선택</h3>
+          {!days ? (<div className="cm-empty">불러오는 중…</div>) : (
+            <div className="cm-daylist">
+              {days.map((d) => (
+                <button key={d} className={"cm-day" + (d === todayStr ? " today" : "")} onClick={() => setSelected(d)}>
+                  <div className="cm-day-left"><span className="cm-day-date">{fmtDate(d)}</span>{d === todayStr && <span className="cm-day-badge">오늘</span>}</div>
+                  <span className="cm-day-arrow">›</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeView === "book" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">월간 출석부</h3>
+          <AttendanceBook cls={cls} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== 월간 출석부 =====
+function AttendanceBook({ cls }) {
+  const students = cls.roster.filter((r) => !r.teacher);
+  const [days, setDays] = React.useState([]);
+  const [attData, setAttData] = React.useState({});   // { date: { sid: true } }
+  const [scoreData, setScoreData] = React.useState({}); // { date: { sid: score } }
+  const [hwData, setHwData] = React.useState({});     // { sid: { bookName: count } }
+  const [loading, setLoading] = React.useState(true);
+
+  // 현재 월 (YYYY-MM)
+  const nowYM = todayStr.slice(0, 7);
+  const [month, setMonth] = React.useState(nowYM);
+
+  // 최근 6개월 옵션
+  const monthOptions = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    const ym = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    monthOptions.push(ym);
+  }
+
+  useEffect(() => {
+    setLoading(true);
+    // 해당 월의 days 목록 불러오기
+    listDays(cls.id).then((allDays) => {
+      const filtered = allDays.filter((d) => d.startsWith(month)).sort();
+      setDays(filtered);
+
+      if (filtered.length === 0) { setLoading(false); return; }
+
+      const attMap = {};
+      const scoreMap = {};
+      let pending = filtered.length * 2;
+      const done = () => { if (--pending === 0) setLoading(false); };
+
+      filtered.forEach((date) => {
+        attMap[date] = {};
+        scoreMap[date] = {};
+        // 출석
+        attCol(cls.id, date).get().then((s) => {
+          s.forEach((d) => { attMap[date][d.id] = true; });
+          setAttData({ ...attMap });
+          done();
+        }).catch(done);
+        // 점수 (가장 최근 제출)
+        scoresCol(cls.id, date).orderBy("time").get().then((s) => {
+          s.forEach((d) => {
+            const data = d.data();
+            scoreMap[date][data.sid] = data.score;
+          });
+          setScoreData({ ...scoreMap });
+          done();
+        }).catch(done);
+      });
+
+      // 과제 (전체, 날짜 무관)
+      hwCol(cls.id).get().then((s) => {
+        const hw = {};
+        s.forEach((d) => {
+          const books = d.data().books || {};
+          hw[d.id] = {};
+          BOOKS.forEach((b) => {
+            hw[d.id][b.name] = (books[b.name] || []).length;
+          });
+        });
+        setHwData(hw);
+      });
+    });
+  }, [cls.id, month]);
+
+  // 날짜 포맷 M/D
+  const shortDate = (d) => { const p = d.split("-"); return parseInt(p[1]) + "/" + parseInt(p[2]); };
+
+  if (loading) return <div className="cm-empty">불러오는 중…</div>;
+  if (days.length === 0) return <div className="cm-empty">이 달에 수업 기록이 없어요</div>;
+
+  // 교재별 과제 완성률 (전체 합산)
+  const totalHwPages = BOOKS.reduce((s, b) => s + b.total, 0);
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <select className="cm-ab-month-sel" value={month} onChange={(e) => setMonth(e.target.value)}>
+          {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <span style={{ fontSize: 12, color: "#8a7f72" }}>총 {days.length}회차</span>
+      </div>
+      <div className="cm-ab-wrap">
+        <table className="cm-ab-table">
+          <thead>
+            <tr>
+              <th className="cm-ab-name">이름</th>
+              {days.map((d) => (
+                <th key={d} colSpan={3} style={{ minWidth: 72 }}>{shortDate(d)}</th>
+              ))}
+              <th style={{ minWidth: 60 }}>과제</th>
+            </tr>
+            <tr>
+              <th className="cm-ab-name"></th>
+              {days.map((d) => (
+                <React.Fragment key={d}>
+                  <th style={{ fontSize: 10, color: "#8a7f72" }}>출결</th>
+                  <th style={{ fontSize: 10, color: "#8a7f72" }}>과제</th>
+                  <th style={{ fontSize: 10, color: "#8a7f72" }}>점수</th>
+                </React.Fragment>
+              ))}
+              <th style={{ fontSize: 10, color: "#8a7f72" }}>완성률</th>
+            </tr>
+          </thead>
+          <tbody>
+            {students.map((st) => {
+              const hw = hwData[st.id] || {};
+              const totalDone = BOOKS.reduce((s, b) => s + (hw[b.name] || 0), 0);
+              const hwPct = totalHwPages > 0 ? Math.round(totalDone / totalHwPages * 100) : 0;
+              const attCount = days.filter((d) => attData[d] && attData[d][st.id]).length;
+              return (
+                <tr key={st.id}>
+                  <td className="cm-ab-name">{st.name}</td>
+                  {days.map((d) => {
+                    const present = attData[d] && attData[d][st.id];
+                    const score = scoreData[d] && scoreData[d][st.id];
+                    return (
+                      <React.Fragment key={d}>
+                        <td className={present ? "cm-ab-att-o" : "cm-ab-att-x"}>{present ? "O" : "/"}</td>
+                        <td></td>
+                        <td className="cm-ab-score">{score != null ? score : ""}</td>
+                      </React.Fragment>
+                    );
+                  })}
+                  <td className="cm-ab-hw">{hwPct}%<br/><span style={{fontSize:9,color:"#bbb"}}>{attCount}/{days.length}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
