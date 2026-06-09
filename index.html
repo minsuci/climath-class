@@ -373,13 +373,13 @@ async function saveStudentPin(cid, sid, p) { await studentsCol(cid).doc(sid).set
 // ===== 스와이프 뒤로가기 훅 =====
 function useSwipeBack(onBack) {
   const tx = React.useRef(null);
-  function onTouchStart(e) { tx.current = e.touches[0].clientX; }
-  function onTouchEnd(e) {
+  const onTouchStart = React.useCallback((e) => { tx.current = e.touches[0].clientX; }, []);
+  const onTouchEnd = React.useCallback((e) => {
     if (tx.current === null) return;
     const dx = e.changedTouches[0].clientX - tx.current;
     tx.current = null;
     if (dx > 60 && onBack) onBack();
-  }
+  }, [onBack]);
   return { onTouchStart, onTouchEnd };
 }
 
@@ -875,7 +875,6 @@ function AdminView() {
 
 function AdminDays({ cls, onBack }) {
   const [selected, setSelected] = useState(null);
-  const swipe = useSwipeBack(onBack);
   const [days, setDays] = useState(null);
   const [notice, setNotice] = useState(null);
   const [noticeText, setNoticeText] = useState("");
@@ -898,13 +897,13 @@ function AdminDays({ cls, onBack }) {
     return () => unsub();
   }, [cls.id]);
 
-  if (selected) return <SlideIn><AdminDay cls={cls} date={selected} onBack={() => { setSelected(null); refresh(); }} /></SlideIn>;
+  if (selected) return <AdminDay cls={cls} date={selected} onBack={() => { setSelected(null); refresh(); }} />;
 
   const hasActive = !!(notice && notice.active && notice.text);
   const students = cls.roster.filter((r) => !r.teacher);
 
   return (
-    <div className="cm-stack" {...swipe}>
+    <div className="cm-stack">
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
         <div className="cm-daybar-date">{cls.name}</div>
@@ -1083,11 +1082,10 @@ function AdminDay({ cls, date, onBack }) {
   const waiting = questions.filter((q) => !q.resolved);
   const hwStudents = roster.filter((r) => hwDone[r.id] && BOOKS.some((b) => (hwDone[r.id][b.name] || []).length > 0));
 
-  if (detail) return <SlideIn><StudentDetail cls={cls} student={detail} hwDone={hwDone} questioned={questioned} onBack={() => setDetail(null)} /></SlideIn>;
+  if (detail) return <StudentDetail cls={cls} student={detail} hwDone={hwDone} questioned={questioned} onBack={() => setDetail(null)} />;
 
-  const swipeDay = useSwipeBack(onBack);
   return (
-    <div className="cm-stack" {...swipeDay}>
+    <div className="cm-stack">
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 날짜 선택</button>
         <div className="cm-daybar-date">{cls.name} · {fmtDate(date)}{date === todayStr && <span className="cm-live">● LIVE</span>}</div>
@@ -1163,9 +1161,16 @@ function AdminDay({ cls, date, onBack }) {
 function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
   const mine = hwDone[student.id] || {};
   const qmine = (questioned && questioned[student.id]) || {};
-  const swipeDetail = useSwipeBack(onBack);
+  const touchStart = React.useRef(null);
+  function onTouchStart(e) { touchStart.current = e.touches[0].clientX; }
+  function onTouchEnd(e) {
+    if (touchStart.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStart.current;
+    if (dx > 60) onBack();
+    touchStart.current = null;
+  }
   return (
-    <div className="cm-stack" {...swipeDetail}>
+    <div className="cm-stack" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 현황으로</button>
         <div className="cm-daybar-date">{student.name} · 누적 진도</div>
@@ -1204,7 +1209,7 @@ function App() {
   let sub, main;
   if (isAdmin) { sub = "수업 관리"; main = <AdminView />; }
   else if (!cls) { sub = "반 선택"; main = <ClassPicker onPick={setCls} />; }
-  else { sub = cls.name + " · " + todayStr; main = <SlideIn><StudentView cls={cls} onBack={urlClass ? null : () => setCls(null)} /></SlideIn>; }
+  else { sub = cls.name + " · " + todayStr; main = <StudentView cls={cls} onBack={urlClass ? null : () => setCls(null)} />; }
 
   return (
     <div>
