@@ -239,16 +239,16 @@ const db = window.db;
 
 // ---- 반/명단 설정 (실제 운영 시 여기만 수정) ----
 const CLASSES = [
-  { id: "s-mongeum", name: "고1S 월금반", roster: [
+  { id: "s-mongeum", name: "고1S 월금반", classDays: [1, 5], roster: [
     { id: "s1", name: "김서진" }, { id: "s2", name: "임서윤" }, { id: "s3", name: "김태윤" },
     { id: "s4", name: "박성준" }, { id: "s5", name: "양성은" }, { id: "s6", name: "안성빈" },
     { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
   ]},
-  { id: "s-hwamok", name: "고1S 화목반", roster: [
+  { id: "s-hwamok", name: "고1S 화목반", classDays: [2, 4], roster: [
     { id: "s1", name: "박범의" }, { id: "s2", name: "민우영" }, { id: "s3", name: "윤지섭" }, { id: "s4", name: "안현준" },
     { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
   ]},
-  { id: "jasago", name: "고1자사고반", roster: [
+  { id: "jasago", name: "고1자사고반", classDays: [6], roster: [
     { id: "s1", name: "마서준" }, { id: "s2", name: "김하준" }, { id: "s3", name: "김중원" },
     { id: "s4", name: "진현겸" }, { id: "s5", name: "공하빈" },
     { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
@@ -858,18 +858,33 @@ function AdminDays({ cls, onBack }) {
   }, [cls.id]);
 
   const daysTouch = React.useRef(null);
+  const [daysSlide, setDaysSlide] = React.useState(0);
+  const [daysAnim, setDaysAnim] = React.useState(false);
   function onDaysTouchStart(e) {
     const x = e.touches[0].clientX;
-    // 화면 왼쪽 30% 안에서만 감지
     if (x > window.innerWidth * 0.3) { daysTouch.current = null; return; }
+    setDaysAnim(false);
     daysTouch.current = { x, y: e.touches[0].clientY };
+  }
+  function onDaysTouchMove(e) {
+    if (!daysTouch.current) return;
+    const dx = e.touches[0].clientX - daysTouch.current.x;
+    const dy = e.touches[0].clientY - daysTouch.current.y;
+    if (Math.abs(dx) < Math.abs(dy)) return;
+    if (dx > 0) setDaysSlide(dx);
   }
   function onDaysTouchEnd(e) {
     if (!daysTouch.current) return;
     const dx = e.changedTouches[0].clientX - daysTouch.current.x;
     const dy = e.changedTouches[0].clientY - daysTouch.current.y;
     daysTouch.current = null;
-    if (dx > 60 && Math.abs(dx) > Math.abs(dy) * 2) onBack();
+    setDaysAnim(true);
+    if (dx > 80 && Math.abs(dx) > Math.abs(dy) * 2) {
+      setDaysSlide(window.innerWidth);
+      setTimeout(() => { setDaysSlide(0); setDaysAnim(false); onBack(); }, 220);
+    } else {
+      setDaysSlide(0);
+    }
   }
 
   if (selected) return <AdminDay cls={cls} date={selected} onBack={() => { setSelected(null); refresh(); }} />;
@@ -878,7 +893,7 @@ function AdminDays({ cls, onBack }) {
   const students = cls.roster.filter((r) => !r.teacher);
 
   return (
-    <div className="cm-stack cm-slide-in" onTouchStart={onDaysTouchStart} onTouchEnd={onDaysTouchEnd}>
+    <div className="cm-stack cm-slide-in" onTouchStart={onDaysTouchStart} onTouchMove={onDaysTouchMove} onTouchEnd={onDaysTouchEnd} style={{transform: `translateX(${daysSlide}px)`, transition: daysAnim ? "transform 0.22s cubic-bezier(.25,.8,.25,1)" : "none", willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
         <div className="cm-daybar-date">{cls.name}</div>
@@ -1010,7 +1025,13 @@ function AttendanceBook({ cls }) {
     setLoading(true);
     // 해당 월의 days 목록 불러오기
     listDays(cls.id).then((allDays) => {
-      const filtered = allDays.filter((d) => d.startsWith(month)).sort();
+      const classDays = cls.classDays || [];
+      const filtered = allDays.filter((d) => {
+        if (!d.startsWith(month)) return false;
+        if (classDays.length === 0) return true;
+        const dow = new Date(d + "T00:00:00").getDay(); // 0=일~6=토
+        return classDays.includes(dow);
+      }).sort();
       setDays(filtered);
 
       if (filtered.length === 0) { setLoading(false); return; }
@@ -1213,23 +1234,39 @@ function AdminDay({ cls, date, onBack }) {
   const hwStudents = roster.filter((r) => hwDone[r.id] && BOOKS.some((b) => (hwDone[r.id][b.name] || []).length > 0));
 
   const dayTouch = React.useRef(null);
+  const [daySlide, setDaySlide] = React.useState(0);
+  const [dayAnim, setDayAnim] = React.useState(false);
   function onDayTouchStart(e) {
     const x = e.touches[0].clientX;
     if (x > window.innerWidth * 0.3) { dayTouch.current = null; return; }
+    setDayAnim(false);
     dayTouch.current = { x, y: e.touches[0].clientY };
+  }
+  function onDayTouchMove(e) {
+    if (!dayTouch.current) return;
+    const dx = e.touches[0].clientX - dayTouch.current.x;
+    const dy = e.touches[0].clientY - dayTouch.current.y;
+    if (Math.abs(dx) < Math.abs(dy)) return;
+    if (dx > 0) setDaySlide(dx);
   }
   function onDayTouchEnd(e) {
     if (!dayTouch.current) return;
     const dx = e.changedTouches[0].clientX - dayTouch.current.x;
     const dy = e.changedTouches[0].clientY - dayTouch.current.y;
     dayTouch.current = null;
-    if (dx > 60 && Math.abs(dx) > Math.abs(dy) * 2) onBack();
+    setDayAnim(true);
+    if (dx > 80 && Math.abs(dx) > Math.abs(dy) * 2) {
+      setDaySlide(window.innerWidth);
+      setTimeout(() => { setDaySlide(0); setDayAnim(false); onBack(); }, 220);
+    } else {
+      setDaySlide(0);
+    }
   }
 
   if (detail) return <StudentDetail cls={cls} student={detail} hwDone={hwDone} questioned={questioned} onBack={() => setDetail(null)} />;
 
   return (
-    <div className="cm-stack cm-slide-in" onTouchStart={onDayTouchStart} onTouchEnd={onDayTouchEnd}>
+    <div className="cm-stack cm-slide-in" onTouchStart={onDayTouchStart} onTouchMove={onDayTouchMove} onTouchEnd={onDayTouchEnd} style={{transform: `translateX(${daySlide}px)`, transition: dayAnim ? "transform 0.22s cubic-bezier(.25,.8,.25,1)" : "none", willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 날짜 선택</button>
         <div className="cm-daybar-date">{cls.name} · {fmtDate(date)}{date === todayStr && <span className="cm-live">● LIVE</span>}</div>
@@ -1306,20 +1343,36 @@ function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
   const mine = hwDone[student.id] || {};
   const qmine = (questioned && questioned[student.id]) || {};
   const touchStart = React.useRef(null);
+  const [detailSlide, setDetailSlide] = React.useState(0);
+  const [detailAnim, setDetailAnim] = React.useState(false);
   function onTouchStart(e) {
     const x = e.touches[0].clientX;
     if (x > window.innerWidth * 0.3) { touchStart.current = null; return; }
+    setDetailAnim(false);
     touchStart.current = { x, y: e.touches[0].clientY };
+  }
+  function onTouchMove(e) {
+    if (!touchStart.current) return;
+    const dx = e.touches[0].clientX - touchStart.current.x;
+    const dy = e.touches[0].clientY - touchStart.current.y;
+    if (Math.abs(dx) < Math.abs(dy)) return;
+    if (dx > 0) setDetailSlide(dx);
   }
   function onTouchEnd(e) {
     if (!touchStart.current) return;
     const dx = e.changedTouches[0].clientX - touchStart.current.x;
     const dy = e.changedTouches[0].clientY - touchStart.current.y;
     touchStart.current = null;
-    if (dx > 60 && Math.abs(dx) > Math.abs(dy) * 2) onBack();
+    setDetailAnim(true);
+    if (dx > 80 && Math.abs(dx) > Math.abs(dy) * 2) {
+      setDetailSlide(window.innerWidth);
+      setTimeout(() => { setDetailSlide(0); setDetailAnim(false); onBack(); }, 220);
+    } else {
+      setDetailSlide(0);
+    }
   }
   return (
-    <div className="cm-stack cm-slide-in" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+    <div className="cm-stack cm-slide-in" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} style={{transform: `translateX(${detailSlide}px)`, transition: detailAnim ? "transform 0.22s cubic-bezier(.25,.8,.25,1)" : "none", willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 현황으로</button>
         <div className="cm-daybar-date">{student.name} · 누적 진도</div>
