@@ -858,39 +858,38 @@ function AdminDays({ cls, onBack }) {
     return () => unsub();
   }, [cls.id]);
 
-  const daysTouch = React.useRef(null);
   const daysRef = React.useRef(null);
-  const [daysSlide, setDaysSlide] = React.useState(0);
-  const [daysAnim, setDaysAnim] = React.useState(false);
+  const daysTouch = React.useRef(null);
   const onBackRef = React.useRef(onBack);
   React.useEffect(() => { onBackRef.current = onBack; }, [onBack]);
   React.useEffect(() => {
     const el = daysRef.current;
     if (!el) return;
     function onStart(e) {
-      const x = e.touches[0].clientX;
-      if (x > window.innerWidth * 0.3) { daysTouch.current = null; return; }
-      setDaysAnim(false);
-      daysTouch.current = { x, y: e.touches[0].clientY };
+      daysTouch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      el.style.transition = "none";
     }
     function onMove(e) {
       if (!daysTouch.current) return;
       const dx = e.touches[0].clientX - daysTouch.current.x;
       const dy = e.touches[0].clientY - daysTouch.current.y;
-      if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
-      if (dx > 0) { e.preventDefault(); setDaysSlide(dx); }
+      if (Math.abs(dy) > Math.abs(dx)) return;
+      if (dx > 0) {
+        e.preventDefault();
+        el.style.transform = `translateX(${dx}px)`;
+      }
     }
     function onEnd(e) {
       if (!daysTouch.current) return;
       const dx = e.changedTouches[0].clientX - daysTouch.current.x;
       const dy = e.changedTouches[0].clientY - daysTouch.current.y;
       daysTouch.current = null;
-      setDaysAnim(true);
+      el.style.transition = "transform 0.22s cubic-bezier(.25,.8,.25,1)";
       if (dx > 80 && Math.abs(dx) > Math.abs(dy) * 2) {
-        setDaysSlide(window.innerWidth);
-        setTimeout(() => { setDaysSlide(0); setDaysAnim(false); onBackRef.current(); }, 220);
+        el.style.transform = `translateX(${window.innerWidth}px)`;
+        setTimeout(() => { el.style.transition = "none"; el.style.transform = ""; onBackRef.current(); }, 230);
       } else {
-        setDaysSlide(0);
+        el.style.transform = "";
       }
     }
     el.addEventListener("touchstart", onStart, { passive: true });
@@ -909,7 +908,7 @@ function AdminDays({ cls, onBack }) {
   const students = cls.roster.filter((r) => !r.teacher);
 
   return (
-    <div ref={daysRef} className="cm-stack cm-slide-in" style={{transform: `translateX(${daysSlide}px)`, transition: daysAnim ? "transform 0.22s cubic-bezier(.25,.8,.25,1)" : "none", willChange: "transform"}}>
+    <div ref={daysRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
         <div className="cm-daybar-date">{cls.name}</div>
@@ -1266,39 +1265,38 @@ function AdminDay({ cls, date, onBack }) {
   const waiting = questions.filter((q) => !q.resolved);
   const hwStudents = roster.filter((r) => hwDone[r.id] && BOOKS.some((b) => (hwDone[r.id][b.name] || []).length > 0));
 
-  const dayTouch = React.useRef(null);
   const dayRef = React.useRef(null);
-  const [daySlide, setDaySlide] = React.useState(0);
-  const [dayAnim, setDayAnim] = React.useState(false);
+  const dayTouch = React.useRef(null);
   const dayOnBackRef = React.useRef(onBack);
   React.useEffect(() => { dayOnBackRef.current = onBack; }, [onBack]);
   React.useEffect(() => {
     const el = dayRef.current;
     if (!el) return;
     function onStart(e) {
-      const x = e.touches[0].clientX;
-      if (x > window.innerWidth * 0.3) { dayTouch.current = null; return; }
-      setDayAnim(false);
-      dayTouch.current = { x, y: e.touches[0].clientY };
+      dayTouch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      el.style.transition = "none";
     }
     function onMove(e) {
       if (!dayTouch.current) return;
       const dx = e.touches[0].clientX - dayTouch.current.x;
       const dy = e.touches[0].clientY - dayTouch.current.y;
-      if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
-      if (dx > 0) { e.preventDefault(); setDaySlide(dx); }
+      if (Math.abs(dy) > Math.abs(dx)) return;
+      if (dx > 0) {
+        e.preventDefault();
+        el.style.transform = `translateX(${dx}px)`;
+      }
     }
     function onEnd(e) {
       if (!dayTouch.current) return;
       const dx = e.changedTouches[0].clientX - dayTouch.current.x;
       const dy = e.changedTouches[0].clientY - dayTouch.current.y;
       dayTouch.current = null;
-      setDayAnim(true);
+      el.style.transition = "transform 0.22s cubic-bezier(.25,.8,.25,1)";
       if (dx > 80 && Math.abs(dx) > Math.abs(dy) * 2) {
-        setDaySlide(window.innerWidth);
-        setTimeout(() => { setDaySlide(0); setDayAnim(false); dayOnBackRef.current(); }, 220);
+        el.style.transform = `translateX(${window.innerWidth}px)`;
+        setTimeout(() => { el.style.transition = "none"; el.style.transform = ""; dayOnBackRef.current(); }, 230);
       } else {
-        setDaySlide(0);
+        el.style.transform = "";
       }
     }
     el.addEventListener("touchstart", onStart, { passive: true });
@@ -1314,7 +1312,7 @@ function AdminDay({ cls, date, onBack }) {
   if (detail) return <StudentDetail cls={cls} student={detail} hwDone={hwDone} questioned={questioned} onBack={() => setDetail(null)} />;
 
   return (
-    <div ref={dayRef} className="cm-stack cm-slide-in" style={{transform: `translateX(${daySlide}px)`, transition: dayAnim ? "transform 0.22s cubic-bezier(.25,.8,.25,1)" : "none", willChange: "transform"}}>
+    <div ref={dayRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 날짜 선택</button>
         <div className="cm-daybar-date">{cls.name} · {fmtDate(date)}{date === todayStr && <span className="cm-live">● LIVE</span>}</div>
@@ -1390,39 +1388,38 @@ function AdminDay({ cls, date, onBack }) {
 function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
   const mine = hwDone[student.id] || {};
   const qmine = (questioned && questioned[student.id]) || {};
-  const detailTouchRef = React.useRef(null);
   const detailDivRef = React.useRef(null);
-  const [detailSlide, setDetailSlide] = React.useState(0);
-  const [detailAnim, setDetailAnim] = React.useState(false);
+  const detailTouchRef = React.useRef(null);
   const detailOnBackRef = React.useRef(onBack);
   React.useEffect(() => { detailOnBackRef.current = onBack; }, [onBack]);
   React.useEffect(() => {
     const el = detailDivRef.current;
     if (!el) return;
     function onStart(e) {
-      const x = e.touches[0].clientX;
-      if (x > window.innerWidth * 0.3) { detailTouchRef.current = null; return; }
-      setDetailAnim(false);
-      detailTouchRef.current = { x, y: e.touches[0].clientY };
+      detailTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      el.style.transition = "none";
     }
     function onMove(e) {
       if (!detailTouchRef.current) return;
       const dx = e.touches[0].clientX - detailTouchRef.current.x;
       const dy = e.touches[0].clientY - detailTouchRef.current.y;
-      if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
-      if (dx > 0) { e.preventDefault(); setDetailSlide(dx); }
+      if (Math.abs(dy) > Math.abs(dx)) return;
+      if (dx > 0) {
+        e.preventDefault();
+        el.style.transform = `translateX(${dx}px)`;
+      }
     }
     function onEnd(e) {
       if (!detailTouchRef.current) return;
       const dx = e.changedTouches[0].clientX - detailTouchRef.current.x;
       const dy = e.changedTouches[0].clientY - detailTouchRef.current.y;
       detailTouchRef.current = null;
-      setDetailAnim(true);
+      el.style.transition = "transform 0.22s cubic-bezier(.25,.8,.25,1)";
       if (dx > 80 && Math.abs(dx) > Math.abs(dy) * 2) {
-        setDetailSlide(window.innerWidth);
-        setTimeout(() => { setDetailSlide(0); setDetailAnim(false); detailOnBackRef.current(); }, 220);
+        el.style.transform = `translateX(${window.innerWidth}px)`;
+        setTimeout(() => { el.style.transition = "none"; el.style.transform = ""; detailOnBackRef.current(); }, 230);
       } else {
-        setDetailSlide(0);
+        el.style.transform = "";
       }
     }
     el.addEventListener("touchstart", onStart, { passive: true });
@@ -1435,7 +1432,7 @@ function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
     };
   }, []);
   return (
-    <div ref={detailDivRef} className="cm-stack cm-slide-in" style={{transform: `translateX(${detailSlide}px)`, transition: detailAnim ? "transform 0.22s cubic-bezier(.25,.8,.25,1)" : "none", willChange: "transform"}}>
+    <div ref={detailDivRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 현황으로</button>
         <div className="cm-daybar-date">{student.name} · 누적 진도</div>
