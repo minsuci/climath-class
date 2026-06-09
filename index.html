@@ -149,8 +149,9 @@ details[open] .cm-resolved-summary::before { content: "▼ "; }
 .cm-ab-table th { background: #f7f4f0; font-weight: 700; color: #5a5248; position: sticky; top: 0; }
 .cm-ab-name { position: sticky; left: 0; background: #f7f4f0; font-weight: 700; color: #2c3e5c; text-align: left !important; z-index: 2; min-width: 60px; }
 .cm-ab-table th.cm-ab-name { z-index: 3; }
-.cm-ab-att-o { color: #2ecc71; font-weight: 700; }
-.cm-ab-att-x { color: #e74c3c; }
+.cm-ab-att-o { color: #2ecc71; font-weight: 700; cursor: pointer; user-select: none; }
+.cm-ab-att-x { color: #e74c3c; cursor: pointer; user-select: none; }
+.cm-ab-att-o:active, .cm-ab-att-x:active { opacity: 0.5; }
 .cm-ab-score { color: #c0392b; font-weight: 600; font-size: 10px; }
 .cm-ab-hw { color: #8a7f72; font-size: 10px; }
 .cm-ab-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
@@ -1076,6 +1077,23 @@ function AttendanceBook({ cls }) {
     });
   }, [cls.id, month]);
 
+  // 출결 토글
+  async function toggleAttendance(date, student) {
+    const present = attData[date] && attData[date][student.id];
+    if (present) {
+      await attCol(cls.id, date).doc(student.id).delete();
+    } else {
+      await attCol(cls.id, date).doc(student.id).set({ name: student.name, time: Date.now() });
+      touchDay(cls.id, date);
+    }
+    setAttData((prev) => {
+      const next = { ...prev, [date]: { ...(prev[date] || {}) } };
+      if (present) delete next[date][student.id];
+      else next[date][student.id] = true;
+      return next;
+    });
+  }
+
   // 날짜 포맷 M/D
   const shortDate = (d) => { const p = d.split("-"); return parseInt(p[1]) + "/" + parseInt(p[2]); };
 
@@ -1129,7 +1147,7 @@ function AttendanceBook({ cls }) {
                     const score = scoreData[d] && scoreData[d][st.id];
                     return (
                       <React.Fragment key={d}>
-                        <td className={present ? "cm-ab-att-o" : "cm-ab-att-x"}>{present ? "O" : "/"}</td>
+                        <td className={present ? "cm-ab-att-o" : "cm-ab-att-x"} onClick={() => toggleAttendance(d, st)}>{present ? "O" : "/"}</td>
                         <td></td>
                         <td className="cm-ab-score">{score != null ? score : ""}</td>
                       </React.Fragment>
