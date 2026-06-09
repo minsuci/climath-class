@@ -858,12 +858,18 @@ function AdminDays({ cls, onBack }) {
   }, [cls.id]);
 
   const daysTouch = React.useRef(null);
-  function onDaysTouchStart(e) { daysTouch.current = e.touches[0].clientX; }
+  function onDaysTouchStart(e) {
+    const x = e.touches[0].clientX;
+    // 화면 왼쪽 30% 안에서만 감지
+    if (x > window.innerWidth * 0.3) { daysTouch.current = null; return; }
+    daysTouch.current = { x, y: e.touches[0].clientY };
+  }
   function onDaysTouchEnd(e) {
-    if (daysTouch.current === null) return;
-    const dx = e.changedTouches[0].clientX - daysTouch.current;
-    if (dx > 60) onBack();
+    if (!daysTouch.current) return;
+    const dx = e.changedTouches[0].clientX - daysTouch.current.x;
+    const dy = e.changedTouches[0].clientY - daysTouch.current.y;
     daysTouch.current = null;
+    if (dx > 60 && Math.abs(dx) > Math.abs(dy) * 2) onBack();
   }
 
   if (selected) return <AdminDay cls={cls} date={selected} onBack={() => { setSelected(null); refresh(); }} />;
@@ -1207,12 +1213,17 @@ function AdminDay({ cls, date, onBack }) {
   const hwStudents = roster.filter((r) => hwDone[r.id] && BOOKS.some((b) => (hwDone[r.id][b.name] || []).length > 0));
 
   const dayTouch = React.useRef(null);
-  function onDayTouchStart(e) { dayTouch.current = e.touches[0].clientX; }
+  function onDayTouchStart(e) {
+    const x = e.touches[0].clientX;
+    if (x > window.innerWidth * 0.3) { dayTouch.current = null; return; }
+    dayTouch.current = { x, y: e.touches[0].clientY };
+  }
   function onDayTouchEnd(e) {
-    if (dayTouch.current === null) return;
-    const dx = e.changedTouches[0].clientX - dayTouch.current;
-    if (dx > 60) onBack();
+    if (!dayTouch.current) return;
+    const dx = e.changedTouches[0].clientX - dayTouch.current.x;
+    const dy = e.changedTouches[0].clientY - dayTouch.current.y;
     dayTouch.current = null;
+    if (dx > 60 && Math.abs(dx) > Math.abs(dy) * 2) onBack();
   }
 
   if (detail) return <StudentDetail cls={cls} student={detail} hwDone={hwDone} questioned={questioned} onBack={() => setDetail(null)} />;
@@ -1295,12 +1306,17 @@ function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
   const mine = hwDone[student.id] || {};
   const qmine = (questioned && questioned[student.id]) || {};
   const touchStart = React.useRef(null);
-  function onTouchStart(e) { touchStart.current = e.touches[0].clientX; }
+  function onTouchStart(e) {
+    const x = e.touches[0].clientX;
+    if (x > window.innerWidth * 0.3) { touchStart.current = null; return; }
+    touchStart.current = { x, y: e.touches[0].clientY };
+  }
   function onTouchEnd(e) {
-    if (touchStart.current === null) return;
-    const dx = e.changedTouches[0].clientX - touchStart.current;
-    if (dx > 60) onBack();
+    if (!touchStart.current) return;
+    const dx = e.changedTouches[0].clientX - touchStart.current.x;
+    const dy = e.changedTouches[0].clientY - touchStart.current.y;
     touchStart.current = null;
+    if (dx > 60 && Math.abs(dx) > Math.abs(dy) * 2) onBack();
   }
   return (
     <div className="cm-stack cm-slide-in" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
