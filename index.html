@@ -833,6 +833,21 @@ function AdminView() {
   return <AdminDays cls={cls} onBack={() => setCls(null)} />;
 }
 
+const SWIPE_VER = "v5";
+const SWIPE_DEBUG = /[?&]debug=1/.test(location.search);
+let __dbgEl = null;
+function swipeLog(msg) {
+  if (!SWIPE_DEBUG) return;
+  if (!__dbgEl) {
+    __dbgEl = document.createElement("div");
+    __dbgEl.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:99999;background:rgba(0,0,0,.85);color:#0f0;font:11px/1.5 monospace;padding:6px 10px;max-height:130px;overflow:auto;pointer-events:none;white-space:pre-wrap;";
+    document.body.appendChild(__dbgEl);
+    __dbgEl.textContent = "[swipe " + SWIPE_VER + "] debug on\n";
+  }
+  __dbgEl.textContent += msg + "\n";
+  __dbgEl.scrollTop = __dbgEl.scrollHeight;
+}
+
 function useSwipeBack(onBack) {
   const onBackRef = React.useRef(onBack);
   onBackRef.current = onBack;
@@ -846,24 +861,27 @@ function useSwipeBack(onBack) {
       start = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       active = false;
       el.style.transition = "none";
+      swipeLog("start x=" + Math.round(start.x) + " y=" + Math.round(start.y));
     }
     function onMove(e) {
       if (!start) return;
       const dx = e.touches[0].clientX - start.x;
       const dy = e.touches[0].clientY - start.y;
       if (!active) {
-        if (dx > 10 && Math.abs(dx) > Math.abs(dy)) { active = true; }
-        else if (Math.abs(dy) > 10 || dx < -10) { start = null; return; }
+        if (dx > 10 && Math.abs(dx) > Math.abs(dy)) { active = true; swipeLog("active!"); }
+        else if (Math.abs(dy) > 10 || dx < -10) { start = null; swipeLog("vert -> pass"); return; }
         else return;
       }
       e.preventDefault();
       el.style.transform = "translateX(" + Math.max(0, dx) + "px)";
+      swipeLog("move dx=" + Math.round(dx) + " tf=" + el.style.transform);
     }
     function onEnd(e) {
       if (!start) return;
       const dx = e.changedTouches[0].clientX - start.x;
       start = null;
       el.style.transition = "transform 0.22s cubic-bezier(.25,.8,.25,1)";
+      swipeLog("end dx=" + Math.round(dx) + " active=" + active);
       if (active && dx > 80) {
         el.style.transform = "translateX(" + window.innerWidth + "px)";
         setTimeout(() => { onBackRef.current(); }, 230);
@@ -873,6 +891,7 @@ function useSwipeBack(onBack) {
       }
     }
     el.style.touchAction = "pan-y";
+    swipeLog("attach -> ." + (el.className || "?").split(" ")[0] + " size=" + el.offsetWidth + "x" + el.offsetHeight);
     el.addEventListener("touchstart", onStart, { passive: true });
     el.addEventListener("touchmove", onMove, { passive: false });
     el.addEventListener("touchend", onEnd, { passive: true });
