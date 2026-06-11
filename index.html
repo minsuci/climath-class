@@ -860,6 +860,7 @@ function useSwipeBack(onBack) {
     function onStart(e) {
       start = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       active = false;
+      el.style.animation = "none";
       el.style.transition = "none";
       swipeLog("start x=" + Math.round(start.x) + " y=" + Math.round(start.y));
     }
