@@ -390,6 +390,17 @@ async function saveClassMeta(cid, name, classDays) {
   await classesCol().doc(cid).update({ name, classDays });
   await loadClasses();
 }
+async function deleteClass(cid) {
+  await classesCol().doc(cid).delete();
+  // 모든 선생님의 담당 목록에서 제거
+  const ts = await listTeachers();
+  for (const t of ts) {
+    if ((t.classIds || []).includes(cid)) {
+      await updateTeacher(t.tid, { classIds: t.classIds.filter((x) => x !== cid) });
+    }
+  }
+  await loadClasses();
+}
 
 // ===== 공용: 과제 번호표 =====
 function HwGrid({ total, set, qset, bookName, onCellDown, onCellClick }) {
@@ -991,7 +1002,7 @@ function BookManager({ cls, canEdit }) {
   );
 }
 
-function ClassMetaEditor({ cls, onSaved }) {
+function ClassMetaEditor({ cls, onSaved, onDeleted }) {
   const [name, setName] = useState(cls.name);
   const [days, setDays] = useState([...(cls.classDays || [])]);
   const [msg, setMsg] = useState("");
@@ -1025,6 +1036,16 @@ function ClassMetaEditor({ cls, onSaved }) {
       <div className="cm-hint" style={{margin: "8px 0"}}>요일을 바꾸면 <b>월간 출석부의 날짜 칸</b>이 새 요일 기준으로 표시돼요. 지난 기록은 그대로 남아요.</div>
       {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
       <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중..." : "저장"}</button>
+      <div style={{borderTop: "1px solid var(--line)", marginTop: 18, paddingTop: 14}}>
+        <button className="cm-link" style={{color: "#d6453f"}} disabled={busy} onClick={async () => {
+          const typed = prompt('정말 삭제하려면 반 이름("' + cls.name + '")을 똑같이 입력하세요.\n출석·과제·질문 기록이 화면에서 사라지며 되돌리기 어렵습니다.');
+          if (typed === null) return;
+          if (typed.trim() !== cls.name) { alert("이름이 일치하지 않아 취소했어요."); return; }
+          setBusy(true);
+          try { await deleteClass(cls.id); onDeleted(); }
+          catch (e) { alert("삭제 실패: " + e.message); setBusy(false); }
+        }}>반 삭제</button>
+      </div>
     </div>
   );
 }
@@ -1382,7 +1403,7 @@ function AdminDays({ cls, canEdit, isOwner, onBack }) {
         {isOwner && (
           <div className="cm-card">
             <h3 className="cm-h3">반 정보 <span className="cm-h-hint">(관리자 전용)</span></h3>
-            <ClassMetaEditor cls={cls} onSaved={() => bumpVer((v) => v + 1)} />
+            <ClassMetaEditor cls={cls} onSaved={() => bumpVer((v) => v + 1)} onDeleted={onBack} />
           </div>
         )}
         <div className="cm-card">
