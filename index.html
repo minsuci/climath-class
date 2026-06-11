@@ -94,6 +94,7 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-day-left{display:flex; align-items:center; gap:8px;}
 .cm-day-date{font-weight:700; color:var(--navy); font-size:15px;}
 .cm-day-badge{background:var(--navy); color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;}
+.cm-day-sub{font-size:11px; color:var(--muted); background:#f0ece5; padding:2px 8px; border-radius:999px; margin-left:6px;}
 .cm-day-arrow{font-size:20px; color:var(--navy2); line-height:1;}
 
 .cm-daybar{display:flex; align-items:center; justify-content:space-between; padding:8px 2px; position:sticky; top:0; z-index:100; background:var(--bg); margin:-4px -4px 4px -4px;}
@@ -337,6 +338,19 @@ async function getStudentPin(cid, sid) {
   catch (e) { return null; }
 }
 async function saveStudentPin(cid, sid, p) { await studentsCol(cid).doc(sid).set({ pin: p }, { merge: true }); }
+
+// ----- 선생님 계정 -----
+const teachersCol = () => db.collection("teachers");
+async function listTeachers() {
+  const s = await teachersCol().orderBy("time").get();
+  const arr = []; s.forEach((d) => arr.push({ tid: d.id, ...d.data() }));
+  return arr;
+}
+async function addTeacher(name, pin, classIds, role) {
+  await teachersCol().add({ name, pin, classIds, role: role || "teacher", time: Date.now() });
+}
+async function updateTeacher(tid, patch) { await teachersCol().doc(tid).update(patch); }
+async function deleteTeacher(tid) { await teachersCol().doc(tid).delete(); }
 
 // ===== 공용: 과제 번호표 =====
 function HwGrid({ total, set, qset, bookName, onCellDown, onCellClick }) {
@@ -760,39 +774,202 @@ function ScoreForm({ cls, me }) {
 
 // ===== 선생님 화면 =====
 function AdminView() {
-  const [ok, setOk] = useState(false);
+  const [teachers, setTeachers] = useState(null); // null=로딩중
+  const [me, setMe] = useState(null);
+  const [picked, setPicked] = useState(null); // 로그인 시도 중인 선생님
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
+  const [mode, setMode] = useState("login"); // login | register | manage
   const [cls, setCls] = useState(null);
-  const tryLogin = () => (pin === ADMIN_PIN ? setOk(true) : setErr("PIN이 올바르지 않습니다"));
 
-  if (!ok) {
-    return (
-      <div className="cm-card">
-        <h2 className="cm-h2">선생님 로그인</h2>
-        <label className="cm-label">관리자 PIN</label>
-        <input className="cm-input" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} onKeyDown={(e) => e.key === "Enter" && tryLogin()} />
-        {err && <div className="cm-err">{err}</div>}
-        <button className="cm-btn cm-btn-primary" onClick={tryLogin}>들어가기</button>
-      </div>
-    );
+  async function refreshTeachers() {
+    let arr = await listTeachers();
+    if (arr.length === 0) {
+      await addTeacher("한민수", ADMIN_PIN, CLASSES.map((c) => c.id), "owner");
+      arr = await listTeachers();
+    }
+    setTeachers(arr);
+    return arr;
   }
-  if (!cls) {
+  useEffect(() => {
+    refreshTeachers().then((arr) => {
+      try {
+        const tid = sessionStorage.getItem("climath_teacher");
+        const t = arr.find((x) => x.tid === tid);
+        if (t) setMe(t);
+      } catch (e) {}
+    });
+  }, []);
+
+  function tryLogin() {
+    if (pin !== picked.pin) { setErr("PIN이 올바르지 않습니다"); return; }
+    try { sessionStorage.setItem("climath_teacher", picked.tid); } catch (e) {}
+    setMe(picked); setPicked(null); setPin(""); setErr("");
+  }
+  function logout() {
+    try { sessionStorage.removeItem("climath_teacher"); } catch (e) {}
+    setMe(null); setCls(null); setMode("login");
+  }
+  const canEdit = (c) => me && (me.role === "owner" || (me.classIds || []).includes(c.id));
+
+  if (teachers === null) return <div className="cm-card"><div className="cm-empty">불러오는 중...</div></div>;
+
+  // ---- 로그인 전 ----
+  if (!me) {
+    if (mode === "register") return <TeacherRegister onDone={async () => { await refreshTeachers(); setMode("login"); }} onCancel={() => setMode("login")} />;
+    if (picked) {
+      return (
+        <div className="cm-card">
+          <h2 className="cm-h2">{picked.name} 선생님</h2>
+          <label className="cm-label">PIN</label>
+          <input className="cm-input" type="password" inputMode="numeric" autoFocus value={pin}
+            onChange={(e) => setPin(e.target.value)} onKeyDown={(e) => e.key === "Enter" && tryLogin()} />
+          {err && <div className="cm-err">{err}</div>}
+          <button className="cm-btn cm-btn-primary" onClick={tryLogin}>들어가기</button>
+          <button className="cm-link" onClick={() => { setPicked(null); setPin(""); setErr(""); }}>← 다른 선생님</button>
+        </div>
+      );
+    }
     return (
       <div className="cm-stack"><div className="cm-card">
-        <h3 className="cm-h3">반 선택</h3>
+        <h2 className="cm-h2">선생님 로그인</h2>
         <div className="cm-daylist">
-          {CLASSES.map((c) => (
-            <button key={c.id} className="cm-day" onClick={() => setCls(c)}>
-              <div className="cm-day-left"><span className="cm-day-date">{c.name}</span></div>
+          {teachers.map((t) => (
+            <button key={t.tid} className="cm-day" onClick={() => setPicked(t)}>
+              <div className="cm-day-left"><span className="cm-day-date">{t.name}</span>
+                {t.role === "owner" && <span className="cm-day-sub">원장</span>}</div>
               <span className="cm-day-arrow">›</span>
             </button>
           ))}
         </div>
+        <button className="cm-link" onClick={() => setMode("register")}>+ 새 선생님 등록</button>
       </div></div>
     );
   }
-  return <AdminDays cls={cls} onBack={() => setCls(null)} />;
+
+  // ---- 선생님 관리 (원장 전용) ----
+  if (mode === "manage") return <TeacherManage me={me} teachers={teachers} onRefresh={refreshTeachers} onBack={() => setMode("login")} />;
+
+  // ---- 반 선택 ----
+  if (!cls) {
+    return (
+      <div className="cm-stack"><div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 12}}>
+          <h3 className="cm-h3" style={{margin: 0}}>{me.name} 선생님</h3>
+          <button className="cm-link" onClick={logout}>로그아웃</button>
+        </div>
+        <div className="cm-daylist">
+          {CLASSES.map((c) => (
+            <button key={c.id} className="cm-day" onClick={() => setCls(c)}>
+              <div className="cm-day-left"><span className="cm-day-date">{c.name}</span>
+                <span className="cm-day-sub">{canEdit(c) ? "담당" : "열람 전용"}</span></div>
+              <span className="cm-day-arrow">›</span>
+            </button>
+          ))}
+        </div>
+        {me.role === "owner" && <button className="cm-link" onClick={() => setMode("manage")}>⚙ 선생님 관리</button>}
+      </div></div>
+    );
+  }
+  return <AdminDays cls={cls} canEdit={canEdit(cls)} onBack={() => setCls(null)} />;
+}
+
+function TeacherRegister({ onDone, onCancel }) {
+  const [name, setName] = useState("");
+  const [p1, setP1] = useState("");
+  const [p2, setP2] = useState("");
+  const [sel, setSel] = useState([]);
+  const [msg, setMsg] = useState("");
+  function toggleCls(id) { setSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]); }
+  async function submit() {
+    if (!name.trim()) { setMsg("이름을 입력해주세요"); return; }
+    if (p1.length !== 4) { setMsg("PIN은 숫자 4자리입니다"); return; }
+    if (p1 !== p2) { setMsg("두 번 입력한 PIN이 다릅니다"); return; }
+    const existing = await listTeachers();
+    if (existing.some((t) => t.name === name.trim())) { setMsg("이미 등록된 이름입니다"); return; }
+    await addTeacher(name.trim(), p1, sel, "teacher");
+    onDone();
+  }
+  return (
+    <div className="cm-card">
+      <h2 className="cm-h2">새 선생님 등록</h2>
+      <label className="cm-label">이름</label>
+      <input className="cm-input" value={name} onChange={(e) => setName(e.target.value)} />
+      <label className="cm-label">PIN (숫자 4자리)</label>
+      <input className="cm-input" type="password" inputMode="numeric" maxLength={4} value={p1} onChange={(e) => setP1(e.target.value.replace(/\D/g, ""))} />
+      <label className="cm-label">PIN 다시 입력</label>
+      <input className="cm-input" type="password" inputMode="numeric" maxLength={4} value={p2} onChange={(e) => setP2(e.target.value.replace(/\D/g, ""))} />
+      <label className="cm-label">담당 반 선택</label>
+      <div className="cm-daylist">
+        {CLASSES.map((c) => (
+          <button key={c.id} className="cm-day" onClick={() => toggleCls(c.id)}>
+            <div className="cm-day-left"><span className="cm-day-date">{c.name}</span></div>
+            <span className="cm-day-arrow">{sel.includes(c.id) ? "✓" : ""}</span>
+          </button>
+        ))}
+      </div>
+      {msg && <div className="cm-err">{msg}</div>}
+      <button className="cm-btn cm-btn-primary" onClick={submit}>등록하기</button>
+      <button className="cm-link" onClick={onCancel}>← 돌아가기</button>
+    </div>
+  );
+}
+
+function TeacherManage({ me, teachers, onRefresh, onBack }) {
+  const [resetTid, setResetTid] = useState(null);
+  const [newPin, setNewPin] = useState("");
+  async function toggleCls(t, cid) {
+    const has = (t.classIds || []).includes(cid);
+    const next = has ? t.classIds.filter((x) => x !== cid) : [...(t.classIds || []), cid];
+    await updateTeacher(t.tid, { classIds: next });
+    onRefresh();
+  }
+  async function doResetPin(t) {
+    if (newPin.length !== 4) return;
+    await updateTeacher(t.tid, { pin: newPin });
+    setResetTid(null); setNewPin("");
+    onRefresh();
+  }
+  async function doDelete(t) {
+    if (!confirm(t.name + " 선생님 계정을 삭제할까요?")) return;
+    await deleteTeacher(t.tid);
+    onRefresh();
+  }
+  return (
+    <div className="cm-stack">
+      <div className="cm-card">
+        <h2 className="cm-h2">선생님 관리</h2>
+        {teachers.map((t) => (
+          <div key={t.tid} style={{borderBottom: "1px solid #e8e0d4", padding: "12px 0"}}>
+            <div style={{display: "flex", alignItems: "center", gap: 8}}>
+              <strong>{t.name}</strong>
+              {t.role === "owner" && <span className="cm-day-sub">원장</span>}
+              <span style={{marginLeft: "auto"}}>
+                {t.tid !== me.tid && t.role !== "owner" && <button className="cm-link" onClick={() => doDelete(t)}>삭제</button>}
+                <button className="cm-link" onClick={() => { setResetTid(resetTid === t.tid ? null : t.tid); setNewPin(""); }}>PIN 변경</button>
+              </span>
+            </div>
+            {resetTid === t.tid && (
+              <div style={{display: "flex", gap: 8, marginTop: 8}}>
+                <input className="cm-input" style={{margin: 0}} type="password" inputMode="numeric" maxLength={4} placeholder="새 PIN 4자리"
+                  value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))} />
+                <button className="cm-btn cm-btn-ghost" onClick={() => doResetPin(t)}>저장</button>
+              </div>
+            )}
+            {t.role !== "owner" && (
+              <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8}}>
+                {CLASSES.map((c) => {
+                  const on = (t.classIds || []).includes(c.id);
+                  return <button key={c.id} className={"cm-ab-tab" + (on ? " on" : "")} onClick={() => toggleCls(t, c.id)}>{c.name}</button>;
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <button className="cm-link" onClick={onBack}>← 돌아가기</button>
+    </div>
+  );
 }
 
 function useSwipeBack(onBack) {
@@ -850,7 +1027,7 @@ function useSwipeBack(onBack) {
   }, []);
 }
 
-function AdminDays({ cls, onBack }) {
+function AdminDays({ cls, canEdit, onBack }) {
   const [selected, setSelected] = useState(null);
   const [days, setDays] = useState(null);
   const [activeView, setActiveView] = useState("days"); // "days" | "book"
@@ -880,13 +1057,13 @@ function AdminDays({ cls, onBack }) {
   const hasActive = !!(notice && notice.active && notice.text);
   const students = cls.roster.filter((r) => !r.teacher);
 
-  if (selected) return <AdminDay cls={cls} date={selected} onBack={() => { setSelected(null); refresh(); }} />;
+  if (selected) return <AdminDay cls={cls} date={selected} canEdit={canEdit} onBack={() => { setSelected(null); refresh(); }} />;
 
   return (
     <div ref={daysRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
-        <div className="cm-daybar-date">{cls.name}</div>
+        <div className="cm-daybar-date">{cls.name}{!canEdit && <span className="cm-day-sub">열람 전용</span>}</div>
       </div>
 
       {/* 전체 공지 */}
@@ -895,6 +1072,8 @@ function AdminDays({ cls, onBack }) {
         {hasActive && (
           <div className="cm-notice-preview"><span className="cm-notice-dot">●</span> 현재 공지: {notice.text}</div>
         )}
+        {!canEdit && !hasActive && <div className="cm-empty">공지가 없어요</div>}
+        {canEdit && (<>
         <textarea className="cm-input cm-notice-ta" rows={3}
           placeholder="학생들이 앱을 열면 보이는 공지를 입력하세요"
           value={noticeText} onChange={(e) => setNoticeText(e.target.value)} />
@@ -906,9 +1085,11 @@ function AdminDays({ cls, onBack }) {
               onClick={() => { clearNotice(cls.id); setNoticeText(""); }}>공지 지우기</button>
           )}
         </div>
+        </>)}
       </div>
 
       {/* 개인 공지 */}
+      {canEdit && (
       <div className="cm-card">
         <h3 className="cm-h3">개인 공지</h3>
         <label className="cm-label">학생 선택</label>
@@ -956,6 +1137,7 @@ function AdminDays({ cls, onBack }) {
           </div>
         )}
       </div>
+      )}
 
       {/* 탭 */}
       <div className="cm-ab-tabs">
@@ -982,7 +1164,7 @@ function AdminDays({ cls, onBack }) {
       {activeView === "book" && (
         <div className="cm-card">
           <h3 className="cm-h3">월간 출석부</h3>
-          <AttendanceBook cls={cls} />
+          <AttendanceBook cls={cls} canEdit={canEdit} />
         </div>
       )}
     </div>
@@ -990,7 +1172,7 @@ function AdminDays({ cls, onBack }) {
 }
 
 // ===== 월간 출석부 =====
-function AttendanceBook({ cls }) {
+function AttendanceBook({ cls, canEdit }) {
   const students = cls.roster.filter((r) => !r.teacher);
   const [days, setDays] = React.useState([]);
   const [attData, setAttData] = React.useState({});   // { date: { sid: true } }
@@ -1136,7 +1318,7 @@ function AttendanceBook({ cls }) {
                     const score = scoreData[d] && scoreData[d][st.id];
                     return (
                       <React.Fragment key={d}>
-                        <td className={present ? "cm-ab-att-o" : "cm-ab-att-x"} onClick={() => toggleAttendance(d, st)}>{present ? "O" : "/"}</td>
+                        <td className={present ? "cm-ab-att-o" : "cm-ab-att-x"} onClick={() => canEdit && toggleAttendance(d, st)} style={canEdit ? undefined : {cursor: "default"}}>{present ? "O" : "/"}</td>
                         <td></td>
                         <td className="cm-ab-score">{score != null ? score : ""}</td>
                       </React.Fragment>
@@ -1156,7 +1338,7 @@ function AttendanceBook({ cls }) {
 const BOOK_TABS = ["전체", ...BOOKS.map((b) => b.name)];
 const RESOLVED_PAGE_SIZE = 5;
 
-function QuestionQueue({ questions, clsId, date }) {
+function QuestionQueue({ questions, clsId, date, canEdit }) {
   const [activeBook, setActiveBook] = React.useState("전체");
   const [resolvedPage, setResolvedPage] = React.useState(0);
 
@@ -1181,7 +1363,7 @@ function QuestionQueue({ questions, clsId, date }) {
       </div>
       {q.resolved
         ? <span className="cm-q-resolved">✓ 해결완료</span>
-        : <button className="cm-btn cm-btn-ghost" onClick={() => resolveQuestion(clsId, date, q.qid)}>해결</button>}
+        : canEdit ? <button className="cm-btn cm-btn-ghost" onClick={() => resolveQuestion(clsId, date, q.qid)}>해결</button> : null}
     </div>
   );
 
@@ -1214,7 +1396,7 @@ function QuestionQueue({ questions, clsId, date }) {
   );
 }
 
-function AdminDay({ cls, date, onBack }) {
+function AdminDay({ cls, date, canEdit, onBack }) {
   const [attendance, setAttendance] = useState({});
   const [questions, setQuestions] = useState([]);
   const [hwDone, setHwDone] = useState({});
@@ -1246,7 +1428,7 @@ function AdminDay({ cls, date, onBack }) {
     <div ref={dayRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 날짜 선택</button>
-        <div className="cm-daybar-date">{cls.name} · {fmtDate(date)}{date === todayStr && <span className="cm-live">● LIVE</span>}</div>
+        <div className="cm-daybar-date">{cls.name} · {fmtDate(date)}{date === todayStr && <span className="cm-live">● LIVE</span>}{!canEdit && <span className="cm-day-sub">열람 전용</span>}</div>
       </div>
 
       <div className="cm-card cm-admin-top">
@@ -1256,7 +1438,7 @@ function AdminDay({ cls, date, onBack }) {
 
       <div className="cm-card">
         <h3 className="cm-h3">질문 대기열</h3>
-        <QuestionQueue questions={questions} clsId={cls.id} date={date} />
+        <QuestionQueue questions={questions} clsId={cls.id} date={date} canEdit={canEdit} />
       </div>
 
       <div className="cm-card">
