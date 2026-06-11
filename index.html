@@ -70,14 +70,6 @@ html,body{margin:0; padding:0;}
 
 .cm-hint{font-size:13px; color:var(--muted); line-height:1.5;}
 .cm-hint b{color:var(--clay);}
-.cm-anon{font-size:12px; color:var(--green); font-weight:600; background:#e7f0ea; border-radius:9px; padding:9px 12px; margin-bottom:16px;}
-.cm-fbthanks{text-align:center; padding:6px 0 2px;}
-.cm-fb{padding:12px 0; border-bottom:1px solid var(--line);}
-.cm-fb:last-child{border-bottom:0;}
-.cm-fb-line{display:flex; gap:9px; align-items:flex-start; font-size:14px; color:var(--ink); margin:3px 0; line-height:1.45;}
-.cm-fb-tag{flex:none; font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; margin-top:1px;}
-.cm-fb-tag.good{background:#e7f0ea; color:var(--green);}
-.cm-fb-tag.bad{background:#f6e7df; color:var(--clay);}
 
 .cm-book-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;}
 .cm-book-count{font-family:'Fraunces',serif; font-size:15px; color:var(--green); font-weight:600;}
@@ -284,7 +276,6 @@ const touchDay = (cid, date) => dayDoc(cid, date).set({ updated: Date.now() }, {
 const attCol = (cid, date) => dayDoc(cid, date).collection("attendance");
 const qCol = (cid, date) => dayDoc(cid, date).collection("questions");
 const hwCol = (cid) => classDoc(cid).collection("homework");
-const fbCol = (cid, date) => dayDoc(cid, date).collection("feedback");
 async function checkIn(cid, date, me) {
   await attCol(cid, date).doc(me.id).set({ name: me.name, time: Date.now() });
   touchDay(cid, date);
@@ -331,7 +322,6 @@ async function clearDm(cid, sid) {
 function listenDm(cid, sid, cb) {
   return dmDoc(cid, sid).onSnapshot((d) => cb(d.exists ? d.data() : null));
 }
-async function addFeedback(cid, date, f) { await fbCol(cid, date).add(f); touchDay(cid, date); }
 const scoresCol = (cid, date) => dayDoc(cid, date).collection("scores");
 async function addScore(cid, date, s) { await scoresCol(cid, date).add(s); touchDay(cid, date); }
 async function listDays(cid) {
@@ -715,34 +705,6 @@ function StudentHomework({ cls, me }) {
   );
 }
 
-function FeedbackForm({ cls }) {
-  const [good, setGood] = useState("");
-  const [bad, setBad] = useState("");
-  const [done, setDone] = useState(false);
-  async function submit() {
-    if (!good.trim() && !bad.trim()) return;
-    await addFeedback(cls.id, todayStr, { good: good.trim(), bad: bad.trim() });
-    setGood(""); setBad(""); setDone(true);
-  }
-  return (
-    <div className="cm-card">
-      <h3 className="cm-h3">오늘 수업 한줄 피드백</h3>
-      <div className="cm-anon">익명이에요. 누가 썼는지 선생님도 알 수 없어요.</div>
-      {done ? (
-        <div className="cm-fbthanks"><div className="cm-done">✓ 제출됐어요. 고마워요!</div><button className="cm-link" onClick={() => setDone(false)}>하나 더 남기기</button></div>
-      ) : (
-        <>
-          <label className="cm-label">인상 깊었던 부분</label>
-          <input className="cm-input" placeholder="한 줄로 적어주세요 (선택)" maxLength={120} value={good} onChange={(e) => setGood(e.target.value)} />
-          <label className="cm-label">아쉬웠던 부분</label>
-          <input className="cm-input" placeholder="한 줄로 적어주세요 (선택)" maxLength={120} value={bad} onChange={(e) => setBad(e.target.value)} />
-          <button className="cm-btn cm-btn-primary" onClick={submit}>제출하기</button>
-        </>
-      )}
-    </div>
-  );
-}
-
 function ScoreForm({ cls, me }) {
   const [correct, setCorrect] = useState("");
   const [total, setTotal] = useState("");
@@ -833,21 +795,6 @@ function AdminView() {
   return <AdminDays cls={cls} onBack={() => setCls(null)} />;
 }
 
-const SWIPE_VER = "v5";
-const SWIPE_DEBUG = /[?&]debug=1/.test(location.search);
-let __dbgEl = null;
-function swipeLog(msg) {
-  if (!SWIPE_DEBUG) return;
-  if (!__dbgEl) {
-    __dbgEl = document.createElement("div");
-    __dbgEl.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:99999;background:rgba(0,0,0,.85);color:#0f0;font:11px/1.5 monospace;padding:6px 10px;max-height:130px;overflow:auto;pointer-events:none;white-space:pre-wrap;";
-    document.body.appendChild(__dbgEl);
-    __dbgEl.textContent = "[swipe " + SWIPE_VER + "] debug on\n";
-  }
-  __dbgEl.textContent += msg + "\n";
-  __dbgEl.scrollTop = __dbgEl.scrollHeight;
-}
-
 function useSwipeBack(onBack) {
   const onBackRef = React.useRef(onBack);
   onBackRef.current = onBack;
@@ -858,31 +805,29 @@ function useSwipeBack(onBack) {
     let start = null;
     let active = false;
     function onStart(e) {
+      if (e.target.closest && e.target.closest("[data-no-swipe]")) { start = null; return; }
       start = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       active = false;
       el.style.animation = "none";
       el.style.transition = "none";
-      swipeLog("start x=" + Math.round(start.x) + " y=" + Math.round(start.y));
     }
     function onMove(e) {
       if (!start) return;
       const dx = e.touches[0].clientX - start.x;
       const dy = e.touches[0].clientY - start.y;
       if (!active) {
-        if (dx > 10 && Math.abs(dx) > Math.abs(dy)) { active = true; swipeLog("active!"); }
-        else if (Math.abs(dy) > 10 || dx < -10) { start = null; swipeLog("vert -> pass"); return; }
+        if (dx > 10 && Math.abs(dx) > Math.abs(dy)) { active = true; }
+        else if (Math.abs(dy) > 10 || dx < -10) { start = null; return; }
         else return;
       }
       e.preventDefault();
       el.style.transform = "translateX(" + Math.max(0, dx) + "px)";
-      swipeLog("move dx=" + Math.round(dx) + " tf=" + el.style.transform);
     }
     function onEnd(e) {
       if (!start) return;
       const dx = e.changedTouches[0].clientX - start.x;
       start = null;
       el.style.transition = "transform 0.22s cubic-bezier(.25,.8,.25,1)";
-      swipeLog("end dx=" + Math.round(dx) + " active=" + active);
       if (active && dx > 80) {
         el.style.transform = "translateX(" + window.innerWidth + "px)";
         setTimeout(() => { onBackRef.current(); }, 230);
@@ -892,7 +837,6 @@ function useSwipeBack(onBack) {
       }
     }
     el.style.touchAction = "pan-y";
-    swipeLog("attach -> ." + (el.className || "?").split(" ")[0] + " size=" + el.offsetWidth + "x" + el.offsetHeight);
     el.addEventListener("touchstart", onStart, { passive: true });
     el.addEventListener("touchmove", onMove, { passive: false });
     el.addEventListener("touchend", onEnd, { passive: true });
@@ -1156,7 +1100,7 @@ function AttendanceBook({ cls }) {
         </select>
         <span style={{ fontSize: 12, color: "#8a7f72" }}>총 {days.length}회차</span>
       </div>
-      <div className="cm-ab-wrap">
+      <div className="cm-ab-wrap" data-no-swipe>
         <table className="cm-ab-table">
           <thead>
             <tr>
@@ -1274,7 +1218,6 @@ function AdminDay({ cls, date, onBack }) {
   const [attendance, setAttendance] = useState({});
   const [questions, setQuestions] = useState([]);
   const [hwDone, setHwDone] = useState({});
-  const [feedback, setFeedback] = useState([]);
   const [scores, setScores] = useState([]);
   const [questioned, setQuestioned] = useState({});
   const [detail, setDetail] = useState(null);
@@ -1284,7 +1227,6 @@ function AdminDay({ cls, date, onBack }) {
       attCol(cls.id, date).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data())); setAttendance(m); }),
       qCol(cls.id, date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); setQuestions(arr); }),
       hwCol(cls.id).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data().books || {})); setHwDone(m); }),
-      fbCol(cls.id, date).onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ fid: d.id, ...d.data() })); setFeedback(arr); }),
       scoresCol(cls.id, date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() })); setScores(arr); }),
       questionedCol(cls.id).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data().books || {})); setQuestioned(m); }),
     ];
@@ -1359,17 +1301,6 @@ function AdminDay({ cls, date, onBack }) {
         )}
       </div>
 
-      <div className="cm-card">
-        <h3 className="cm-h3">수업 피드백 <span className="cm-h-hint">(익명 · 작성자 알 수 없음)</span></h3>
-        {feedback.length === 0 ? (<div className="cm-empty">아직 피드백이 없어요</div>) : (
-          feedback.map((f) => (
-            <div key={f.fid} className="cm-fb">
-              {f.good && <div className="cm-fb-line"><span className="cm-fb-tag good">인상</span><span>{f.good}</span></div>}
-              {f.bad && <div className="cm-fb-line"><span className="cm-fb-tag bad">아쉬움</span><span>{f.bad}</span></div>}
-            </div>
-          ))
-        )}
-      </div>
     </div>
   );
 }
