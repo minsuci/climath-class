@@ -386,6 +386,10 @@ async function saveClassBooks(cid, books) {
   await classesCol().doc(cid).update({ books });
   await loadClasses();
 }
+async function saveClassMeta(cid, name, classDays) {
+  await classesCol().doc(cid).update({ name, classDays });
+  await loadClasses();
+}
 
 // ===== 공용: 과제 번호표 =====
 function HwGrid({ total, set, qset, bookName, onCellDown, onCellClick }) {
@@ -917,7 +921,7 @@ function AdminView() {
       </div></div>
     );
   }
-  return <AdminDays cls={cls} canEdit={canEdit(cls)} onBack={() => setCls(null)} />;
+  return <AdminDays cls={cls} canEdit={canEdit(cls)} isOwner={me.role === "owner"} onBack={() => setCls(null)} />;
 }
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
@@ -981,6 +985,44 @@ function BookManager({ cls, canEdit }) {
     <div>
       <div className="cm-hint" style={{marginBottom: 12}}>교재 <b>이름을 바꾸면</b> 그 교재로 쌓인 기존 과제·질문 기록과 <b>연결이 끊겨요</b>. 문항수만 바꾸는 건 안전해요.</div>
       <BookEditor books={books} onChange={setBooks} />
+      {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
+      <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중..." : "저장"}</button>
+    </div>
+  );
+}
+
+function ClassMetaEditor({ cls, onSaved }) {
+  const [name, setName] = useState(cls.name);
+  const [days, setDays] = useState([...(cls.classDays || [])]);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  function toggleDay(d) { setDays((s) => s.includes(d) ? s.filter((x) => x !== d) : [...s, d].sort()); }
+  async function save() {
+    if (busy) return;
+    const nm = name.trim();
+    if (!nm) { setMsg("반 이름을 입력해주세요"); return; }
+    if (CLASSES.some((c) => c.id !== cls.id && c.name === nm)) { setMsg("이미 있는 반 이름입니다"); return; }
+    if (days.length === 0) { setMsg("수업 요일을 1개 이상 선택해주세요"); return; }
+    setBusy(true); setMsg("");
+    try {
+      await saveClassMeta(cls.id, nm, days);
+      cls.name = nm; cls.classDays = days;
+      setMsg("저장됐어요 ✓");
+      onSaved();
+    } catch (e) { setMsg("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+  return (
+    <div>
+      <label className="cm-label">반 이름</label>
+      <input className="cm-input" value={name} onChange={(e) => setName(e.target.value)} />
+      <label className="cm-label">수업 요일</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4}}>
+        {DAY_NAMES.map((d, i) => (
+          <button key={i} className={"cm-ab-tab" + (days.includes(i) ? " on" : "")} onClick={() => toggleDay(i)}>{d}</button>
+        ))}
+      </div>
+      <div className="cm-hint" style={{margin: "8px 0"}}>요일을 바꾸면 <b>월간 출석부의 날짜 칸</b>이 새 요일 기준으로 표시돼요. 지난 기록은 그대로 남아요.</div>
       {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
       <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중..." : "저장"}</button>
     </div>
@@ -1193,7 +1235,8 @@ function useSwipeBack(onBack) {
   }, []);
 }
 
-function AdminDays({ cls, canEdit, onBack }) {
+function AdminDays({ cls, canEdit, isOwner, onBack }) {
+  const [, bumpVer] = useState(0);
   const [selected, setSelected] = useState(null);
   const [days, setDays] = useState(null);
   const [activeView, setActiveView] = useState("days"); // "days" | "book"
@@ -1309,7 +1352,7 @@ function AdminDays({ cls, canEdit, onBack }) {
       <div className="cm-ab-tabs">
         <button className={"cm-ab-tab" + (activeView === "days" ? " on" : "")} onClick={() => setActiveView("days")}>날짜별</button>
         <button className={"cm-ab-tab" + (activeView === "book" ? " on" : "")} onClick={() => setActiveView("book")}>월간 출석부</button>
-        <button className={"cm-ab-tab" + (activeView === "textbooks" ? " on" : "")} onClick={() => setActiveView("textbooks")}>교재</button>
+        <button className={"cm-ab-tab" + (activeView === "textbooks" ? " on" : "")} onClick={() => setActiveView("textbooks")}>설정</button>
       </div>
 
       {activeView === "days" && (
@@ -1335,12 +1378,18 @@ function AdminDays({ cls, canEdit, onBack }) {
         </div>
       )}
 
-      {activeView === "textbooks" && (
+      {activeView === "textbooks" && (<>
+        {isOwner && (
+          <div className="cm-card">
+            <h3 className="cm-h3">반 정보 <span className="cm-h-hint">(관리자 전용)</span></h3>
+            <ClassMetaEditor cls={cls} onSaved={() => bumpVer((v) => v + 1)} />
+          </div>
+        )}
         <div className="cm-card">
           <h3 className="cm-h3">교재 설정</h3>
           <BookManager cls={cls} canEdit={canEdit} />
         </div>
-      )}
+      </>)}
     </div>
   );
 }
