@@ -348,9 +348,10 @@ async function listTeachers() {
   const arr = []; s.forEach((d) => arr.push({ tid: d.id, ...d.data() }));
   return arr;
 }
-async function addTeacher(name, pin, classIds, role) {
-  await teachersCol().add({ name, pin, classIds, role: role || "teacher", time: Date.now() });
+async function addTeacher(name, pin, classIds, role, status) {
+  await teachersCol().add({ name, pin, classIds, role: role || "teacher", status: status || "active", time: Date.now() });
 }
+const isPending = (t) => t.status === "pending";
 async function updateTeacher(tid, patch) { await teachersCol().doc(tid).update(patch); }
 async function deleteTeacher(tid) { await teachersCol().doc(tid).delete(); }
 
@@ -847,12 +848,13 @@ function AdminView() {
       try {
         const tid = sessionStorage.getItem("climath_teacher");
         const t = arr.find((x) => x.tid === tid);
-        if (t) setMe(t);
+        if (t && !isPending(t)) setMe(t);
       } catch (e) {}
     });
   }, []);
 
   function tryLogin() {
+    if (isPending(picked)) { setErr("관리자 승인 대기 중입니다. 승인 후 로그인할 수 있어요."); return; }
     if (pin !== picked.pin) { setErr("PIN이 올바르지 않습니다"); return; }
     try { sessionStorage.setItem("climath_teacher", picked.tid); } catch (e) {}
     setMe(picked); setPicked(null); setPin(""); setErr("");
@@ -867,7 +869,7 @@ function AdminView() {
 
   // ---- 로그인 전 ----
   if (!me) {
-    if (mode === "register") return <TeacherRegister onDone={async () => { await refreshTeachers(); setMode("login"); }} onCancel={() => setMode("login")} />;
+    if (mode === "register") return <TeacherRegister onDone={async () => { await refreshTeachers(); setMode("login"); alert("등록 요청이 접수됐어요. 관리자 승인 후 로그인할 수 있습니다."); }} onCancel={() => setMode("login")} />;
     if (picked) {
       return (
         <div className="cm-card">
@@ -888,7 +890,8 @@ function AdminView() {
           {teachers.map((t) => (
             <button key={t.tid} className="cm-day" onClick={() => setPicked(t)}>
               <div className="cm-day-left"><span className="cm-day-date">{t.name}</span>
-                {t.role === "owner" && <span className="cm-day-sub">관리자</span>}</div>
+                {t.role === "owner" && <span className="cm-day-sub">관리자</span>}
+                {isPending(t) && <span className="cm-day-sub" style={{color: "#d6453f"}}>승인 대기</span>}</div>
               <span className="cm-day-arrow">›</span>
             </button>
           ))}
@@ -1116,7 +1119,7 @@ function TeacherRegister({ onDone, onCancel }) {
     if (p1 !== p2) { setMsg("두 번 입력한 PIN이 다릅니다"); return; }
     const existing = await listTeachers();
     if (existing.some((t) => t.name === name.trim())) { setMsg("이미 등록된 이름입니다"); return; }
-    await addTeacher(name.trim(), p1, sel, "teacher");
+    await addTeacher(name.trim(), p1, sel, "teacher", "pending");
     onDone();
   }
   return (
@@ -1173,9 +1176,17 @@ function TeacherManage({ me, teachers, onRefresh, onBack }) {
             <div style={{display: "flex", alignItems: "center", gap: 8}}>
               <strong>{t.name}</strong>
               {t.role === "owner" && <span className="cm-day-sub">관리자</span>}
+              {isPending(t) && <span className="cm-day-sub" style={{color: "#d6453f"}}>승인 대기</span>}
               <span style={{marginLeft: "auto"}}>
-                {t.tid !== me.tid && t.role !== "owner" && <button className="cm-link" onClick={() => doDelete(t)}>삭제</button>}
-                <button className="cm-link" onClick={() => { setResetTid(resetTid === t.tid ? null : t.tid); setNewPin(""); }}>PIN 변경</button>
+                {isPending(t) ? (<>
+                  <button className="cm-link" style={{color: "var(--green)", fontWeight: 700}}
+                    onClick={async () => { await updateTeacher(t.tid, { status: "active" }); onRefresh(); }}>승인</button>
+                  <button className="cm-link" style={{color: "#d6453f"}}
+                    onClick={async () => { if (confirm(t.name + " 선생님의 등록 요청을 거절(삭제)할까요?")) { await deleteTeacher(t.tid); onRefresh(); } }}>거절</button>
+                </>) : (<>
+                  {t.tid !== me.tid && t.role !== "owner" && <button className="cm-link" onClick={() => doDelete(t)}>삭제</button>}
+                  <button className="cm-link" onClick={() => { setResetTid(resetTid === t.tid ? null : t.tid); setNewPin(""); }}>PIN 변경</button>
+                </>)}
               </span>
             </div>
             {resetTid === t.tid && (
