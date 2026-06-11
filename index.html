@@ -231,8 +231,8 @@ details[open] .cm-resolved-summary::before { content: "▼ "; }
 const { useState, useEffect, useRef } = React;
 const db = window.db;
 
-// ---- 반/명단 설정 (실제 운영 시 여기만 수정) ----
-const CLASSES = [
+// ---- 초기 시딩용 반 데이터 (최초 1회만 Firestore에 복사됨. 이후 앱에서 관리) ----
+const SEED_CLASSES = [
   { id: "s-mongeum", name: "고1S 월금반", classDays: [1, 5], roster: [
     { id: "s1", name: "김서진" }, { id: "s2", name: "임서윤" }, { id: "s3", name: "김태윤" },
     { id: "s4", name: "박성준" }, { id: "s5", name: "양성은" }, { id: "s6", name: "안성빈" },
@@ -248,13 +248,15 @@ const CLASSES = [
     { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
   ]},
 ];
+let CLASSES = []; // Firestore에서 로드됨
 const findClass = (id) => CLASSES.find((c) => c.id === id);
 
-const BOOKS = [
+const DEFAULT_BOOKS = [
   { name: "수평교 + 최고난도", total: 404 },
   { name: "기출백서", total: 302 },
   { name: "BASECAMP공수1-2", total: 455 },
 ];
+const getBooks = (cls) => (cls && cls.books) || [];
 const DEFAULT_PIN = "1234";
 const ADMIN_PIN = "2030";
 
@@ -351,6 +353,39 @@ async function addTeacher(name, pin, classIds, role) {
 }
 async function updateTeacher(tid, patch) { await teachersCol().doc(tid).update(patch); }
 async function deleteTeacher(tid) { await teachersCol().doc(tid).delete(); }
+
+// ----- 반 관리 -----
+const classesCol = () => db.collection("classes");
+async function loadClasses() {
+  let s = await classesCol().orderBy("time").get();
+  if (s.empty) {
+    let t = Date.now();
+    for (const c of SEED_CLASSES) {
+      await classesCol().doc(c.id).set({ name: c.name, classDays: c.classDays, roster: c.roster, books: DEFAULT_BOOKS, time: t++ });
+    }
+    s = await classesCol().orderBy("time").get();
+  }
+  const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() }));
+  // 마이그레이션: books 필드가 없는 기존 반에 채워넣기
+  for (const c of arr) {
+    if (c.books === undefined) {
+      const isSeed = SEED_CLASSES.some((sc) => sc.id === c.id);
+      c.books = isSeed ? DEFAULT_BOOKS : [];
+      await classesCol().doc(c.id).update({ books: c.books });
+    }
+  }
+  CLASSES = arr;
+  return arr;
+}
+async function createClass(name, classDays, roster, books) {
+  const ref = await classesCol().add({ name, classDays, roster, books: books || [], time: Date.now() });
+  await loadClasses();
+  return ref.id;
+}
+async function saveClassBooks(cid, books) {
+  await classesCol().doc(cid).update({ books });
+  await loadClasses();
+}
 
 // ===== 공용: 과제 번호표 =====
 function HwGrid({ total, set, qset, bookName, onCellDown, onCellClick }) {
@@ -643,7 +678,8 @@ function ChangePin({ cls, me, onDone }) {
 }
 
 function QuestionForm({ cls, me }) {
-  const [book, setBook] = useState(BOOKS[0].name);
+  const books = getBooks(cls);
+  const [book, setBook] = useState(books.length ? books[0].name : "");
   const [num, setNum] = useState("");
   const [memo, setMemo] = useState("");
   const [sent, setSent] = useState([]);
@@ -670,7 +706,7 @@ function QuestionForm({ cls, me }) {
     <div className="cm-card">
       <h3 className="cm-h3">질문하기</h3>
       <label className="cm-label">교재</label>
-      <select className="cm-input" value={book} onChange={(e) => setBook(e.target.value)}>{BOOKS.map((b) => <option key={b.name}>{b.name}</option>)}</select>
+      <select className="cm-input" value={book} onChange={(e) => setBook(e.target.value)}>{books.map((b) => <option key={b.name}>{b.name}</option>)}</select>
       <label className="cm-label">문항 번호</label>
       <input className="cm-input" placeholder="예: 124  또는  124-(2)" value={num} onChange={(e) => setNum(e.target.value)} />
       <label className="cm-label">메모 (선택)</label>
@@ -710,7 +746,7 @@ function StudentHomework({ cls, me }) {
       <div className="cm-card cm-hint">
         완료한 번호를 <b>누르거나, 마우스로 드래그</b>해서 칠하세요. 터치 화면에서는 칸을 <b>꾹 눌러 칠하기 모드</b>로 들어간 뒤 손가락을 끌면 됩니다. 표시한 번호는 <b>날마다 지워지지 않고 계속 누적</b>돼요. <b style={{ color: "#d6453f" }}>질문한 번호는 빨간 글씨</b>로 누적 표시되고, 빨간 번호 칩을 눌러 지울 수 있어요.
       </div>
-      {BOOKS.map((b) => (
+      {getBooks(cls).map((b) => (
         <BookHwCard key={b.name} book={b} initial={done[b.name] || []}
           qNumbers={qbooks[b.name]} onClearQuestion={(n) => removeQuestioned(cls.id, me.id, b.name, n)}
           onChange={(arr) => persistBook(b.name, arr)} />
@@ -837,7 +873,7 @@ function AdminView() {
           {teachers.map((t) => (
             <button key={t.tid} className="cm-day" onClick={() => setPicked(t)}>
               <div className="cm-day-left"><span className="cm-day-date">{t.name}</span>
-                {t.role === "owner" && <span className="cm-day-sub">원장</span>}</div>
+                {t.role === "owner" && <span className="cm-day-sub">관리자</span>}</div>
               <span className="cm-day-arrow">›</span>
             </button>
           ))}
@@ -847,7 +883,16 @@ function AdminView() {
     );
   }
 
-  // ---- 선생님 관리 (원장 전용) ----
+  // ---- 새 반 만들기 ----
+  if (mode === "newclass") return <ClassCreate me={me} onDone={async (newId) => {
+    const next = [...(me.classIds || []), newId];
+    await updateTeacher(me.tid, { classIds: next });
+    setMe({ ...me, classIds: next });
+    await refreshTeachers();
+    setMode("login");
+  }} onCancel={() => setMode("login")} />;
+
+  // ---- 선생님 관리 (관리자 전용) ----
   if (mode === "manage") return <TeacherManage me={me} teachers={teachers} onRefresh={refreshTeachers} onBack={() => setMode("login")} />;
 
   // ---- 반 선택 ----
@@ -867,11 +912,132 @@ function AdminView() {
             </button>
           ))}
         </div>
+        <button className="cm-link" onClick={() => setMode("newclass")}>+ 새 반 만들기</button>
         {me.role === "owner" && <button className="cm-link" onClick={() => setMode("manage")}>⚙ 선생님 관리</button>}
       </div></div>
     );
   }
   return <AdminDays cls={cls} canEdit={canEdit(cls)} onBack={() => setCls(null)} />;
+}
+
+const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
+
+function BookEditor({ books, onChange }) {
+  function setRow(i, patch) { onChange(books.map((b, j) => j === i ? { ...b, ...patch } : b)); }
+  function removeRow(i) { onChange(books.filter((_, j) => j !== i)); }
+  return (
+    <div>
+      {books.map((b, i) => (
+        <div key={i} style={{display: "flex", gap: 8, marginBottom: 8, alignItems: "center"}}>
+          <input className="cm-input" style={{margin: 0, flex: 1}} placeholder="교재 이름"
+            value={b.name} onChange={(e) => setRow(i, { name: e.target.value })} />
+          <input className="cm-input" style={{margin: 0, width: 80}} inputMode="numeric" placeholder="문항수"
+            value={b.total || ""} onChange={(e) => setRow(i, { total: parseInt(e.target.value.replace(/\D/g, "")) || 0 })} />
+          <button className="cm-link" style={{flex: "none"}} onClick={() => removeRow(i)}>삭제</button>
+        </div>
+      ))}
+      <button className="cm-link" onClick={() => onChange([...books, { name: "", total: 0 }])}>+ 교재 추가</button>
+    </div>
+  );
+}
+
+function validateBooks(books) {
+  const cleaned = books.map((b) => ({ name: b.name.trim(), total: b.total }));
+  if (cleaned.some((b) => !b.name)) return { err: "교재 이름이 비어있어요" };
+  if (cleaned.some((b) => !b.total || b.total <= 0)) return { err: "문항수는 1 이상이어야 해요" };
+  const names = cleaned.map((b) => b.name);
+  if (new Set(names).size !== names.length) return { err: "교재 이름이 중복돼요" };
+  return { books: cleaned };
+}
+
+function BookManager({ cls, canEdit }) {
+  const [books, setBooks] = useState(getBooks(cls).map((b) => ({ ...b })));
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    if (busy) return;
+    const v = validateBooks(books);
+    if (v.err) { setMsg(v.err); return; }
+    setBusy(true); setMsg("");
+    try {
+      await saveClassBooks(cls.id, v.books);
+      cls.books = v.books;
+      setBooks(v.books.map((b) => ({ ...b })));
+      setMsg("저장됐어요 ✓");
+    } catch (e) { setMsg("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+  if (!canEdit) {
+    const list = getBooks(cls);
+    return list.length === 0 ? <div className="cm-empty">등록된 교재가 없어요</div> : (
+      <div>{list.map((b) => (
+        <div key={b.name} style={{display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--line)"}}>
+          <span>{b.name}</span><span style={{color: "var(--muted)"}}>{b.total}문항</span>
+        </div>
+      ))}</div>
+    );
+  }
+  return (
+    <div>
+      <div className="cm-hint" style={{marginBottom: 12}}>교재 <b>이름을 바꾸면</b> 그 교재로 쌓인 기존 과제·질문 기록과 <b>연결이 끊겨요</b>. 문항수만 바꾸는 건 안전해요.</div>
+      <BookEditor books={books} onChange={setBooks} />
+      {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
+      <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중..." : "저장"}</button>
+    </div>
+  );
+}
+
+function ClassCreate({ me, onDone, onCancel }) {
+  const [name, setName] = useState("");
+  const [days, setDays] = useState([]);
+  const [studentText, setStudentText] = useState("");
+  const [books, setBooks] = useState([]);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  function toggleDay(d) { setDays((s) => s.includes(d) ? s.filter((x) => x !== d) : [...s, d].sort()); }
+  async function submit() {
+    if (busy) return;
+    const nm = name.trim();
+    if (!nm) { setMsg("반 이름을 입력해주세요"); return; }
+    if (CLASSES.some((c) => c.name === nm)) { setMsg("이미 있는 반 이름입니다"); return; }
+    if (days.length === 0) { setMsg("수업 요일을 1개 이상 선택해주세요"); return; }
+    const names = studentText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+    if (names.length === 0) { setMsg("학생을 1명 이상 입력해주세요"); return; }
+    let cleanBooks = [];
+    if (books.length > 0) {
+      const v = validateBooks(books);
+      if (v.err) { setMsg(v.err); return; }
+      cleanBooks = v.books;
+    }
+    const roster = names.map((n, i) => ({ id: "s" + (i + 1), name: n }));
+    roster.push({ id: "t1", name: me.name, defaultPin: me.pin, teacher: true });
+    setBusy(true);
+    try {
+      const newId = await createClass(nm, days, roster, cleanBooks);
+      onDone(newId);
+    } catch (e) { setMsg("생성 실패: " + e.message); setBusy(false); }
+  }
+  return (
+    <div className="cm-card">
+      <h2 className="cm-h2">새 반 만들기</h2>
+      <label className="cm-label">반 이름</label>
+      <input className="cm-input" placeholder="예: 고2 정규반" value={name} onChange={(e) => setName(e.target.value)} />
+      <label className="cm-label">수업 요일</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4}}>
+        {DAY_NAMES.map((d, i) => (
+          <button key={i} className={"cm-ab-tab" + (days.includes(i) ? " on" : "")} onClick={() => toggleDay(i)}>{d}</button>
+        ))}
+      </div>
+      <label className="cm-label">학생 명단 (한 줄에 한 명, 또는 쉼표로 구분)</label>
+      <textarea className="cm-input cm-notice-ta" rows={5} placeholder={"김서진\n임서윤\n김태윤"}
+        value={studentText} onChange={(e) => setStudentText(e.target.value)} />
+      <label className="cm-label">교재 (나중에 교재 탭에서 추가/수정할 수도 있어요)</label>
+      <BookEditor books={books} onChange={setBooks} />
+      {msg && <div className="cm-err">{msg}</div>}
+      <button className="cm-btn cm-btn-primary" disabled={busy} onClick={submit}>{busy ? "만드는 중..." : "반 만들기"}</button>
+      <button className="cm-link" onClick={onCancel}>← 돌아가기</button>
+    </div>
+  );
 }
 
 function TeacherRegister({ onDone, onCancel }) {
@@ -943,7 +1109,7 @@ function TeacherManage({ me, teachers, onRefresh, onBack }) {
           <div key={t.tid} style={{borderBottom: "1px solid #e8e0d4", padding: "12px 0"}}>
             <div style={{display: "flex", alignItems: "center", gap: 8}}>
               <strong>{t.name}</strong>
-              {t.role === "owner" && <span className="cm-day-sub">원장</span>}
+              {t.role === "owner" && <span className="cm-day-sub">관리자</span>}
               <span style={{marginLeft: "auto"}}>
                 {t.tid !== me.tid && t.role !== "owner" && <button className="cm-link" onClick={() => doDelete(t)}>삭제</button>}
                 <button className="cm-link" onClick={() => { setResetTid(resetTid === t.tid ? null : t.tid); setNewPin(""); }}>PIN 변경</button>
@@ -1143,6 +1309,7 @@ function AdminDays({ cls, canEdit, onBack }) {
       <div className="cm-ab-tabs">
         <button className={"cm-ab-tab" + (activeView === "days" ? " on" : "")} onClick={() => setActiveView("days")}>날짜별</button>
         <button className={"cm-ab-tab" + (activeView === "book" ? " on" : "")} onClick={() => setActiveView("book")}>월간 출석부</button>
+        <button className={"cm-ab-tab" + (activeView === "textbooks" ? " on" : "")} onClick={() => setActiveView("textbooks")}>교재</button>
       </div>
 
       {activeView === "days" && (
@@ -1165,6 +1332,13 @@ function AdminDays({ cls, canEdit, onBack }) {
         <div className="cm-card">
           <h3 className="cm-h3">월간 출석부</h3>
           <AttendanceBook cls={cls} canEdit={canEdit} />
+        </div>
+      )}
+
+      {activeView === "textbooks" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">교재 설정</h3>
+          <BookManager cls={cls} canEdit={canEdit} />
         </div>
       )}
     </div>
@@ -1239,7 +1413,7 @@ function AttendanceBook({ cls, canEdit }) {
         s.forEach((d) => {
           const books = d.data().books || {};
           hw[d.id] = {};
-          BOOKS.forEach((b) => {
+          getBooks(cls).forEach((b) => {
             hw[d.id][b.name] = (books[b.name] || []).length;
           });
         });
@@ -1272,7 +1446,7 @@ function AttendanceBook({ cls, canEdit }) {
   if (days.length === 0) return <div className="cm-empty">이 달에 수업 기록이 없어요</div>;
 
   // 교재별 과제 완성률 (전체 합산)
-  const totalHwPages = BOOKS.reduce((s, b) => s + b.total, 0);
+  const totalHwPages = getBooks(cls).reduce((s, b) => s + b.total, 0);
 
   return (
     <div>
@@ -1307,7 +1481,7 @@ function AttendanceBook({ cls, canEdit }) {
           <tbody>
             {students.map((st) => {
               const hw = hwData[st.id] || {};
-              const totalDone = BOOKS.reduce((s, b) => s + (hw[b.name] || 0), 0);
+              const totalDone = getBooks(cls).reduce((s, b) => s + (hw[b.name] || 0), 0);
               const hwPct = totalHwPages > 0 ? Math.round(totalDone / totalHwPages * 100) : 0;
               const attCount = days.filter((d) => attData[d] && attData[d][st.id]).length;
               return (
@@ -1335,10 +1509,10 @@ function AttendanceBook({ cls, canEdit }) {
   );
 }
 
-const BOOK_TABS = ["전체", ...BOOKS.map((b) => b.name)];
 const RESOLVED_PAGE_SIZE = 5;
 
-function QuestionQueue({ questions, clsId, date, canEdit }) {
+function QuestionQueue({ questions, clsId, date, canEdit, books }) {
+  const BOOK_TABS = ["전체", ...(books || []).map((b) => b.name)];
   const [activeBook, setActiveBook] = React.useState("전체");
   const [resolvedPage, setResolvedPage] = React.useState(0);
 
@@ -1418,7 +1592,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
   const roster = cls.roster.filter((r) => !r.teacher);
   const presentIds = Object.keys(attendance);
   const waiting = questions.filter((q) => !q.resolved);
-  const hwStudents = roster.filter((r) => hwDone[r.id] && BOOKS.some((b) => (hwDone[r.id][b.name] || []).length > 0));
+  const hwStudents = roster.filter((r) => hwDone[r.id] && getBooks(cls).some((b) => (hwDone[r.id][b.name] || []).length > 0));
 
   const dayRef = useSwipeBack(onBack);
 
@@ -1438,7 +1612,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
 
       <div className="cm-card">
         <h3 className="cm-h3">질문 대기열</h3>
-        <QuestionQueue questions={questions} clsId={cls.id} date={date} canEdit={canEdit} />
+        <QuestionQueue questions={questions} clsId={cls.id} date={date} canEdit={canEdit} books={getBooks(cls)} />
       </div>
 
       <div className="cm-card">
@@ -1463,7 +1637,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
             <div key={r.id} className="cm-hw-row">
               <button className="cm-hw-name cm-hw-name-btn" onClick={() => setDetail(r)}>{r.name}</button>
               <div className="cm-hw-items">
-                {BOOKS.filter((b) => (hwDone[r.id][b.name] || []).length > 0).map((b) => (<span key={b.name} className="cm-chip">{b.name} {hwDone[r.id][b.name].length}문제</span>))}
+                {getBooks(cls).filter((b) => (hwDone[r.id][b.name] || []).length > 0).map((b) => (<span key={b.name} className="cm-chip">{b.name} {hwDone[r.id][b.name].length}문제</span>))}
               </div>
             </div>
           ))
@@ -1497,7 +1671,7 @@ function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
         <button className="cm-back" onClick={onBack}>‹ 현황으로</button>
         <div className="cm-daybar-date">{student.name} · 누적 진도</div>
       </div>
-      {BOOKS.map((b) => {
+      {getBooks(cls).map((b) => {
         const qnums = qmine[b.name] || [];
         return (
           <div className="cm-card" key={b.name}>
@@ -1547,11 +1721,12 @@ function App() {
 const rootEl = document.getElementById("root");
 let rendered = false;
 function renderApp() { if (rendered) return; rendered = true; ReactDOM.createRoot(rootEl).render(<App />); }
+function loadAndRender() { loadClasses().then(renderApp).catch((e) => { console.error("반 목록 로드 실패", e); renderApp(); }); }
 try {
   firebase.auth().signInAnonymously().catch(() => {});
-  firebase.auth().onAuthStateChanged((u) => { if (u) renderApp(); });
+  firebase.auth().onAuthStateChanged((u) => { if (u) loadAndRender(); });
 } catch (e) { /* auth 미설정 */ }
-setTimeout(renderApp, 4000);
+setTimeout(loadAndRender, 4000);
 
 </script>
 </body>
