@@ -409,7 +409,8 @@ function guessMime(name) {
   if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return "image/" + (ext === "jpg" ? "jpeg" : ext);
   return "application/octet-stream";
 }
-async function saveProgressFile(cid, key, file) {
+// 범용: 파일을 base64 조각으로 문서+parts에 저장
+async function saveFileToDoc(docRef, file) {
   if (file.size > PROGRESS_MAX_BYTES) throw new Error("파일이 너무 커요 (최대 4.5MB)");
   const b64 = await new Promise((res, rej) => {
     const r = new FileReader();
@@ -417,27 +418,41 @@ async function saveProgressFile(cid, key, file) {
     r.onerror = () => rej(new Error("파일을 읽지 못했어요"));
     r.readAsDataURL(file);
   });
-  const doc = progressDoc(cid, key);
-  const oldParts = await doc.collection("parts").get();
+  const oldParts = await docRef.collection("parts").get();
   for (const d of oldParts.docs) await d.ref.delete();
   const chunks = [];
   for (let i = 0; i < b64.length; i += PROGRESS_CHUNK) chunks.push(b64.slice(i, i + PROGRESS_CHUNK));
-  for (let i = 0; i < chunks.length; i++) await doc.collection("parts").doc(String(i)).set({ data: chunks[i] });
-  await doc.set({ name: file.name, mime: file.type || guessMime(file.name), size: file.size, chunks: chunks.length, time: Date.now() });
+  for (let i = 0; i < chunks.length; i++) await docRef.collection("parts").doc(String(i)).set({ data: chunks[i] });
+  await docRef.set({ name: file.name, mime: file.type || guessMime(file.name), size: file.size, chunks: chunks.length, time: Date.now() });
 }
-async function loadProgressFileB64(cid, key, meta) {
+async function loadFileB64FromDoc(docRef, meta) {
   const out = [];
   for (let i = 0; i < meta.chunks; i++) {
-    const d = await progressDoc(cid, key).collection("parts").doc(String(i)).get();
+    const d = await docRef.collection("parts").doc(String(i)).get();
     out.push(d.exists ? d.data().data : "");
   }
   return out.join("");
 }
-async function deleteProgressFile(cid, key) {
-  const doc = progressDoc(cid, key);
-  const oldParts = await doc.collection("parts").get();
+async function deleteFileDoc(docRef) {
+  const oldParts = await docRef.collection("parts").get();
   for (const d of oldParts.docs) await d.ref.delete();
-  await doc.delete();
+  await docRef.delete();
+}
+const saveProgressFile = (cid, key, file) => saveFileToDoc(progressDoc(cid, key), file);
+const loadProgressFileB64 = (cid, key, meta) => loadFileB64FromDoc(progressDoc(cid, key), meta);
+const deleteProgressFile = (cid, key) => deleteFileDoc(progressDoc(cid, key));
+
+// ----- 강의노트 (단원별 파일 게시) -----
+const noteUnitsCol = (cid) => classDoc(cid).collection("noteUnits");
+const noteFilesCol = (cid, uid) => noteUnitsCol(cid).doc(uid).collection("files");
+async function addNoteUnit(cid, title) { await noteUnitsCol(cid).add({ title, time: Date.now() }); }
+async function renameNoteUnit(cid, uid, title) { await noteUnitsCol(cid).doc(uid).update({ title }); }
+async function addNoteFile(cid, uid, file) { await saveFileToDoc(noteFilesCol(cid, uid).doc(), file); }
+async function deleteNoteFile(cid, uid, fid) { await deleteFileDoc(noteFilesCol(cid, uid).doc(fid)); }
+async function deleteNoteUnit(cid, uid) {
+  const fs = await noteFilesCol(cid, uid).get();
+  for (const d of fs.docs) await deleteFileDoc(d.ref);
+  await noteUnitsCol(cid).doc(uid).delete();
 }
 function b64ToBlob(b64, mime) {
   const bin = atob(b64);
@@ -710,6 +725,7 @@ function StudentHome({ cls, me, onLogout }) {
         <button className={activeTab === "hw" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("hw")}>과제</button>
         <button className={activeTab === "score" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("score")}>점수</button>
         <button className={activeTab === "prog" ? "on" : ""} onClick={() => setTab("prog")}>진도</button>
+        <button className={activeTab === "notes" ? "on" : ""} onClick={() => setTab("notes")}>노트</button>
       </div>
 
       {activeTab === "att" && (
@@ -729,6 +745,12 @@ function StudentHome({ cls, me, onLogout }) {
       {activeTab === "hw" && <StudentHomework cls={cls} me={me} />}
       {activeTab === "score" && <ScoreForm cls={cls} me={me} />}
       {activeTab === "prog" && <StudentProgressView cls={cls} me={me} />}
+      {activeTab === "notes" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">강의노트</h3>
+          <NotesManager cls={cls} canEdit={false} />
+        </div>
+      )}
     </div>
   );
 }
@@ -1069,13 +1091,13 @@ function BookManager({ cls, canEdit }) {
   );
 }
 
-function ProgressFileViewer({ cid, pkey, meta, height }) {
-  const [src, setSrc] = useState(null); // {kind, value}
+function FileContentViewer({ meta, loader, height }) {
+  const [src, setSrc] = useState(null);
   useEffect(() => {
     let revoke = null; let alive = true;
     setSrc(null);
     if (meta.html) { setSrc({ kind: "srcdoc", value: meta.html }); return; } // 구버전 호환
-    loadProgressFileB64(cid, pkey, meta).then((b64) => {
+    loader().then((b64) => {
       if (!alive) return;
       if (meta.mime === "text/html") {
         const text = new TextDecoder("utf-8").decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
@@ -1087,7 +1109,7 @@ function ProgressFileViewer({ cid, pkey, meta, height }) {
       }
     }).catch(() => alive && setSrc({ kind: "err" }));
     return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
-  }, [cid, pkey, meta]);
+  }, [meta]);
   const h = height || 420;
   if (!src) return <div className="cm-empty">불러오는 중…</div>;
   if (src.kind === "err") return <div className="cm-err">파일을 불러오지 못했어요</div>;
@@ -1097,6 +1119,10 @@ function ProgressFileViewer({ cid, pkey, meta, height }) {
     <iframe src={src.value} style={{width: "100%", height: h, border: "1px solid var(--line)", borderRadius: 10, background: "#fff"}} />
     <button className="cm-link" onClick={() => window.open(src.value, "_blank")}>새 창에서 크게 보기</button>
   </>);
+}
+
+function ProgressFileViewer({ cid, pkey, meta, height }) {
+  return <FileContentViewer meta={meta} loader={() => loadProgressFileB64(cid, pkey, meta)} height={height} />;
 }
 
 function ProgressEditor({ cid, pkey, canEdit, title }) {
@@ -1140,6 +1166,105 @@ function ProgressEditor({ cid, pkey, canEdit, title }) {
           : <div className="cm-empty">아직 게시된 진도계획표가 없어요</div>
       )}
       {msg && <div className={busy ? "cm-hint" : "cm-err"} style={{marginTop: 8}}>{msg}</div>}
+    </div>
+  );
+}
+
+function NoteFileRow({ cls, unit, file, canEdit }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{borderTop: "1px solid var(--line)", padding: "8px 0"}}>
+      <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpen(!open)}>
+        <span style={{fontSize: 14}}>{file.mime && file.mime.startsWith("image/") ? "🖼" : file.mime === "application/pdf" ? "📄" : "📝"} {file.name}</span>
+        <span style={{fontSize: 11, color: "var(--muted)"}}>{fmtDate(ymd(new Date(file.time)))}</span>
+        <span style={{marginLeft: "auto"}}>
+          {canEdit && <button className="cm-link" style={{color: "#d6453f"}} onClick={(e) => {
+            e.stopPropagation();
+            if (confirm('"' + file.name + '" 파일을 삭제할까요?')) deleteNoteFile(cls.id, unit.uid, file.fid);
+          }}>삭제</button>}
+          {open ? "▾" : "▸"}
+        </span>
+      </div>
+      {open && <div style={{marginTop: 8}}>
+        <FileContentViewer meta={file} loader={() => loadFileB64FromDoc(noteFilesCol(cls.id, unit.uid).doc(file.fid), file)} height={Math.round(window.innerHeight * 0.55)} />
+      </div>}
+    </div>
+  );
+}
+
+function NoteUnit({ cls, unit, canEdit }) {
+  const [open, setOpen] = useState(false);
+  const [files, setFiles] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const fileRef = React.useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    return noteFilesCol(cls.id, unit.uid).orderBy("time").onSnapshot((s) => {
+      const arr = []; s.forEach((d) => arr.push({ fid: d.id, ...d.data() }));
+      setFiles(arr);
+    });
+  }, [open, cls.id, unit.uid]);
+  async function onFile(e) {
+    const list = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!list.length) return;
+    setBusy(true);
+    for (const f of list) {
+      setMsg('"' + f.name + '" 올리는 중...');
+      try { await addNoteFile(cls.id, unit.uid, f); }
+      catch (err) { alert(f.name + ": " + err.message); }
+    }
+    setMsg(""); setBusy(false);
+  }
+  return (
+    <div style={{borderBottom: "1px solid var(--line)", padding: "10px 0"}}>
+      <input ref={fileRef} type="file" accept=".html,.htm,.pdf,image/*" multiple style={{display: "none"}} onChange={onFile} />
+      <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpen(!open)}>
+        <strong>{unit.title}</strong>
+        <span style={{marginLeft: "auto"}}>
+          {canEdit && open && (<>
+            <button className="cm-link" onClick={(e) => {
+              e.stopPropagation();
+              const t = prompt("단원 이름 수정", unit.title);
+              if (t && t.trim()) renameNoteUnit(cls.id, unit.uid, t.trim());
+            }}>이름 수정</button>
+            <button className="cm-link" style={{color: "#d6453f"}} onClick={(e) => {
+              e.stopPropagation();
+              if (confirm('"' + unit.title + '" 단원과 안의 노트를 전부 삭제할까요?')) deleteNoteUnit(cls.id, unit.uid);
+            }}>삭제</button>
+          </>)}
+          {open ? "▾" : "▸"}
+        </span>
+      </div>
+      {open && (
+        <div style={{marginTop: 6}}>
+          {files === null && <div className="cm-empty">불러오는 중…</div>}
+          {files && files.length === 0 && <div className="cm-empty">아직 올라온 노트가 없어요</div>}
+          {files && files.map((f) => <NoteFileRow key={f.fid} cls={cls} unit={unit} file={f} canEdit={canEdit} />)}
+          {canEdit && <button className="cm-btn cm-btn-ghost" disabled={busy} style={{marginTop: 10}} onClick={() => fileRef.current.click()}>+ 노트 올리기 (이미지 · PDF · HTML, 여러 장 가능)</button>}
+          {msg && <div className="cm-hint" style={{marginTop: 6}}>{msg}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NotesManager({ cls, canEdit }) {
+  const [units, setUnits] = useState(null);
+  useEffect(() => noteUnitsCol(cls.id).orderBy("time").onSnapshot((s) => {
+    const arr = []; s.forEach((d) => arr.push({ uid: d.id, ...d.data() }));
+    setUnits(arr);
+  }), [cls.id]);
+  if (units === null) return <div className="cm-empty">불러오는 중…</div>;
+  return (
+    <div>
+      {units.length === 0 && <div className="cm-empty">{canEdit ? "단원을 만들어 손필기 노트를 올려보세요" : "아직 게시된 강의노트가 없어요"}</div>}
+      {units.map((u) => <NoteUnit key={u.uid} cls={cls} unit={u} canEdit={canEdit} />)}
+      {canEdit && <button className="cm-link" style={{marginTop: 10}} onClick={() => {
+        const t = prompt("새 단원 이름 (예: 1. 다항식의 연산)");
+        if (t && t.trim()) addNoteUnit(cls.id, t.trim());
+      }}>+ 단원 만들기</button>}
     </div>
   );
 }
@@ -1638,6 +1763,7 @@ function AdminDays({ cls, canEdit, isOwner, onBack }) {
         <button className={"cm-ab-tab" + (activeView === "days" ? " on" : "")} onClick={() => setActiveView("days")}>날짜별</button>
         <button className={"cm-ab-tab" + (activeView === "book" ? " on" : "")} onClick={() => setActiveView("book")}>월간 출석부</button>
         <button className={"cm-ab-tab" + (activeView === "progress" ? " on" : "")} onClick={() => setActiveView("progress")}>진도표</button>
+        <button className={"cm-ab-tab" + (activeView === "notes" ? " on" : "")} onClick={() => setActiveView("notes")}>강의노트</button>
         <button className={"cm-ab-tab" + (activeView === "textbooks" ? " on" : "")} onClick={() => setActiveView("textbooks")}>설정</button>
       </div>
 
@@ -1668,6 +1794,13 @@ function AdminDays({ cls, canEdit, isOwner, onBack }) {
         <div className="cm-card">
           <h3 className="cm-h3">진도계획표 {isIndividual(cls) && <span className="cm-h-hint">(학생별 게시)</span>}</h3>
           <ProgressManager cls={cls} canEdit={canEdit} />
+        </div>
+      )}
+
+      {activeView === "notes" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">강의노트 <span className="cm-h-hint">(단원별 손필기)</span></h3>
+          <NotesManager cls={cls} canEdit={canEdit} />
         </div>
       )}
 
