@@ -398,10 +398,53 @@ async function saveClassRoster(cid, roster) {
   await classesCol().doc(cid).update({ roster });
   await loadClasses();
 }
-// ----- 진도계획표 (HTML 게시) -----
+// ----- 진도계획표 (파일 게시: HTML/PDF/이미지를 base64 조각으로 Firestore에 저장) -----
 const progressDoc = (cid, key) => classDoc(cid).collection("progress").doc(key || "class");
-async function saveProgressHtml(cid, key, html) { await progressDoc(cid, key).set({ html, time: Date.now() }); }
-async function deleteProgressHtml(cid, key) { await progressDoc(cid, key).delete(); }
+const PROGRESS_MAX_BYTES = 4.5 * 1024 * 1024;
+const PROGRESS_CHUNK = 700000;
+function guessMime(name) {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (ext === "html" || ext === "htm") return "text/html";
+  if (ext === "pdf") return "application/pdf";
+  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return "image/" + (ext === "jpg" ? "jpeg" : ext);
+  return "application/octet-stream";
+}
+async function saveProgressFile(cid, key, file) {
+  if (file.size > PROGRESS_MAX_BYTES) throw new Error("파일이 너무 커요 (최대 4.5MB)");
+  const b64 = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(",")[1]);
+    r.onerror = () => rej(new Error("파일을 읽지 못했어요"));
+    r.readAsDataURL(file);
+  });
+  const doc = progressDoc(cid, key);
+  const oldParts = await doc.collection("parts").get();
+  for (const d of oldParts.docs) await d.ref.delete();
+  const chunks = [];
+  for (let i = 0; i < b64.length; i += PROGRESS_CHUNK) chunks.push(b64.slice(i, i + PROGRESS_CHUNK));
+  for (let i = 0; i < chunks.length; i++) await doc.collection("parts").doc(String(i)).set({ data: chunks[i] });
+  await doc.set({ name: file.name, mime: file.type || guessMime(file.name), size: file.size, chunks: chunks.length, time: Date.now() });
+}
+async function loadProgressFileB64(cid, key, meta) {
+  const out = [];
+  for (let i = 0; i < meta.chunks; i++) {
+    const d = await progressDoc(cid, key).collection("parts").doc(String(i)).get();
+    out.push(d.exists ? d.data().data : "");
+  }
+  return out.join("");
+}
+async function deleteProgressFile(cid, key) {
+  const doc = progressDoc(cid, key);
+  const oldParts = await doc.collection("parts").get();
+  for (const d of oldParts.docs) await d.ref.delete();
+  await doc.delete();
+}
+function b64ToBlob(b64, mime) {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
 async function saveClassBooks(cid, books) {
   await classesCol().doc(cid).update({ books });
   await loadClasses();
@@ -1026,54 +1069,77 @@ function BookManager({ cls, canEdit }) {
   );
 }
 
+function ProgressFileViewer({ cid, pkey, meta, height }) {
+  const [src, setSrc] = useState(null); // {kind, value}
+  useEffect(() => {
+    let revoke = null; let alive = true;
+    setSrc(null);
+    if (meta.html) { setSrc({ kind: "srcdoc", value: meta.html }); return; } // 구버전 호환
+    loadProgressFileB64(cid, pkey, meta).then((b64) => {
+      if (!alive) return;
+      if (meta.mime === "text/html") {
+        const text = new TextDecoder("utf-8").decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+        setSrc({ kind: "srcdoc", value: text });
+      } else {
+        const url = URL.createObjectURL(b64ToBlob(b64, meta.mime));
+        revoke = url;
+        setSrc({ kind: meta.mime.startsWith("image/") ? "img" : "iframe", value: url });
+      }
+    }).catch(() => alive && setSrc({ kind: "err" }));
+    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
+  }, [cid, pkey, meta]);
+  const h = height || 420;
+  if (!src) return <div className="cm-empty">불러오는 중…</div>;
+  if (src.kind === "err") return <div className="cm-err">파일을 불러오지 못했어요</div>;
+  if (src.kind === "img") return <img src={src.value} style={{width: "100%", borderRadius: 10, border: "1px solid var(--line)"}} />;
+  if (src.kind === "srcdoc") return <iframe srcDoc={src.value} sandbox="allow-scripts" style={{width: "100%", height: h, border: "1px solid var(--line)", borderRadius: 10, background: "#fff"}} />;
+  return (<>
+    <iframe src={src.value} style={{width: "100%", height: h, border: "1px solid var(--line)", borderRadius: 10, background: "#fff"}} />
+    <button className="cm-link" onClick={() => window.open(src.value, "_blank")}>새 창에서 크게 보기</button>
+  </>);
+}
+
 function ProgressEditor({ cid, pkey, canEdit, title }) {
-  const [data, setData] = useState(undefined);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [meta, setMeta] = useState(undefined);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => progressDoc(cid, pkey).onSnapshot((d) => setData(d.exists ? d.data() : null)), [cid, pkey]);
-  async function post() {
-    if (busy) return;
-    const html = draft.trim();
-    if (!html) { setMsg("HTML 코드를 붙여넣어주세요"); return; }
-    setBusy(true); setMsg("");
-    try { await saveProgressHtml(cid, pkey, html); setEditing(false); setDraft(""); }
-    catch (e) { setMsg("게시 실패: " + (e.message.includes("longer than") || e.message.includes("exceeds") ? "파일이 너무 커요 (1MB 제한)" : e.message)); }
+  const fileRef = React.useRef(null);
+  useEffect(() => progressDoc(cid, pkey).onSnapshot((d) => setMeta(d.exists ? d.data() : null)), [cid, pkey]);
+  async function onFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true); setMsg("올리는 중... (파일 크기에 따라 잠시 걸려요)");
+    try { await saveProgressFile(cid, pkey, file); setMsg(""); }
+    catch (err) { setMsg(err.message); }
     setBusy(false);
   }
   async function remove() {
     if (!confirm((title || "이") + " 진도계획표를 삭제할까요?")) return;
-    await deleteProgressHtml(cid, pkey);
+    setBusy(true);
+    try { await deleteProgressFile(cid, pkey); } catch (e) { setMsg("삭제 실패: " + e.message); }
+    setBusy(false);
   }
-  if (data === undefined) return <div className="cm-empty">불러오는 중…</div>;
+  if (meta === undefined) return <div className="cm-empty">불러오는 중…</div>;
   return (
     <div>
-      {data && !editing && (<>
-        <iframe srcDoc={data.html} sandbox="allow-scripts" style={{width: "100%", height: 420, border: "1px solid var(--line)", borderRadius: 10, background: "#fff"}} />
-        <div style={{display: "flex", gap: 10, alignItems: "center", marginTop: 8}}>
-          <span style={{fontSize: 12, color: "var(--muted)"}}>{fmtDate(ymd(new Date(data.time)))} 게시</span>
+      <input ref={fileRef} type="file" accept=".html,.htm,.pdf,image/*" style={{display: "none"}} onChange={onFile} />
+      {meta && (<>
+        <ProgressFileViewer cid={cid} pkey={pkey} meta={meta} />
+        <div style={{display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap"}}>
+          <span style={{fontSize: 12, color: "var(--muted)"}}>{meta.name ? meta.name + " · " : ""}{fmtDate(ymd(new Date(meta.time)))} 게시</span>
           {canEdit && (<span style={{marginLeft: "auto"}}>
-            <button className="cm-link" onClick={() => { setDraft(data.html); setEditing(true); }}>수정</button>
-            <button className="cm-link" style={{color: "#d6453f"}} onClick={remove}>삭제</button>
+            <button className="cm-link" disabled={busy} onClick={() => fileRef.current.click()}>교체</button>
+            <button className="cm-link" style={{color: "#d6453f"}} disabled={busy} onClick={remove}>삭제</button>
           </span>)}
         </div>
       </>)}
-      {!data && !editing && (
+      {!meta && (
         canEdit
-          ? <button className="cm-btn cm-btn-ghost" onClick={() => { setDraft(""); setEditing(true); }}>+ 진도계획표 게시하기</button>
+          ? <button className="cm-btn cm-btn-ghost" disabled={busy} onClick={() => fileRef.current.click()}>+ 파일 올려서 게시하기 (HTML · PDF · 이미지)</button>
           : <div className="cm-empty">아직 게시된 진도계획표가 없어요</div>
       )}
-      {editing && (<>
-        <textarea className="cm-input cm-notice-ta" rows={8} style={{fontFamily: "monospace", fontSize: 12}}
-          placeholder="진도계획표 HTML 코드를 통째로 붙여넣으세요 (<html>부터 </html>까지)"
-          value={draft} onChange={(e) => setDraft(e.target.value)} />
-        {msg && <div className="cm-err">{msg}</div>}
-        <div style={{display: "flex", gap: 10}}>
-          <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy} onClick={post}>{busy ? "게시 중..." : "게시"}</button>
-          <button className="cm-btn cm-btn-ghost" style={{margin: 0}} onClick={() => setEditing(false)}>취소</button>
-        </div>
-      </>)}
+      {msg && <div className={busy ? "cm-hint" : "cm-err"} style={{marginTop: 8}}>{msg}</div>}
     </div>
   );
 }
@@ -1100,18 +1166,18 @@ function ProgressManager({ cls, canEdit }) {
 }
 
 function StudentProgressView({ cls, me }) {
-  const [data, setData] = useState(undefined);
+  const [meta, setMeta] = useState(undefined);
   const pkey = isIndividual(cls) ? me.id : "class";
-  useEffect(() => progressDoc(cls.id, pkey).onSnapshot((d) => setData(d.exists ? d.data() : null)), [cls.id, pkey]);
+  useEffect(() => progressDoc(cls.id, pkey).onSnapshot((d) => setMeta(d.exists ? d.data() : null)), [cls.id, pkey]);
   if (me.teacher && isIndividual(cls)) return <div className="cm-card"><div className="cm-empty">개별진도반 진도표는 선생님 화면(관리자 모드)에서 학생별로 관리해요.</div></div>;
   return (
     <div className="cm-card">
       <h3 className="cm-h3">진도계획표</h3>
-      {data === undefined && <div className="cm-empty">불러오는 중…</div>}
-      {data === null && <div className="cm-empty">아직 게시된 진도계획표가 없어요</div>}
-      {data && (<>
-        <iframe srcDoc={data.html} sandbox="allow-scripts" style={{width: "100%", height: "65vh", border: "1px solid var(--line)", borderRadius: 10, background: "#fff"}} />
-        <div style={{fontSize: 12, color: "var(--muted)", marginTop: 8}}>{fmtDate(ymd(new Date(data.time)))} 게시</div>
+      {meta === undefined && <div className="cm-empty">불러오는 중…</div>}
+      {meta === null && <div className="cm-empty">아직 게시된 진도계획표가 없어요</div>}
+      {meta && (<>
+        <ProgressFileViewer cid={cls.id} pkey={pkey} meta={meta} height={Math.round(window.innerHeight * 0.62)} />
+        <div style={{fontSize: 12, color: "var(--muted)", marginTop: 8}}>{fmtDate(ymd(new Date(meta.time)))} 게시</div>
       </>)}
     </div>
   );
