@@ -398,6 +398,10 @@ async function saveClassRoster(cid, roster) {
   await classesCol().doc(cid).update({ roster });
   await loadClasses();
 }
+// ----- 진도계획표 (HTML 게시) -----
+const progressDoc = (cid, key) => classDoc(cid).collection("progress").doc(key || "class");
+async function saveProgressHtml(cid, key, html) { await progressDoc(cid, key).set({ html, time: Date.now() }); }
+async function deleteProgressHtml(cid, key) { await progressDoc(cid, key).delete(); }
 async function saveClassBooks(cid, books) {
   await classesCol().doc(cid).update({ books });
   await loadClasses();
@@ -662,6 +666,7 @@ function StudentHome({ cls, me, onLogout }) {
         <button className={activeTab === "q" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("q")}>질문</button>
         <button className={activeTab === "hw" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("hw")}>과제</button>
         <button className={activeTab === "score" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("score")}>점수</button>
+        <button className={activeTab === "prog" ? "on" : ""} onClick={() => setTab("prog")}>진도</button>
       </div>
 
       {activeTab === "att" && (
@@ -680,6 +685,7 @@ function StudentHome({ cls, me, onLogout }) {
       {activeTab === "q" && <QuestionForm cls={cls} me={me} />}
       {activeTab === "hw" && <StudentHomework cls={cls} me={me} />}
       {activeTab === "score" && <ScoreForm cls={cls} me={me} />}
+      {activeTab === "prog" && <StudentProgressView cls={cls} me={me} />}
     </div>
   );
 }
@@ -1016,6 +1022,97 @@ function BookManager({ cls, canEdit }) {
       <BookEditor books={books} onChange={setBooks} />
       {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
       <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중..." : "저장"}</button>
+    </div>
+  );
+}
+
+function ProgressEditor({ cid, pkey, canEdit, title }) {
+  const [data, setData] = useState(undefined);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => progressDoc(cid, pkey).onSnapshot((d) => setData(d.exists ? d.data() : null)), [cid, pkey]);
+  async function post() {
+    if (busy) return;
+    const html = draft.trim();
+    if (!html) { setMsg("HTML 코드를 붙여넣어주세요"); return; }
+    setBusy(true); setMsg("");
+    try { await saveProgressHtml(cid, pkey, html); setEditing(false); setDraft(""); }
+    catch (e) { setMsg("게시 실패: " + (e.message.includes("longer than") || e.message.includes("exceeds") ? "파일이 너무 커요 (1MB 제한)" : e.message)); }
+    setBusy(false);
+  }
+  async function remove() {
+    if (!confirm((title || "이") + " 진도계획표를 삭제할까요?")) return;
+    await deleteProgressHtml(cid, pkey);
+  }
+  if (data === undefined) return <div className="cm-empty">불러오는 중…</div>;
+  return (
+    <div>
+      {data && !editing && (<>
+        <iframe srcDoc={data.html} sandbox="allow-scripts" style={{width: "100%", height: 420, border: "1px solid var(--line)", borderRadius: 10, background: "#fff"}} />
+        <div style={{display: "flex", gap: 10, alignItems: "center", marginTop: 8}}>
+          <span style={{fontSize: 12, color: "var(--muted)"}}>{fmtDate(ymd(new Date(data.time)))} 게시</span>
+          {canEdit && (<span style={{marginLeft: "auto"}}>
+            <button className="cm-link" onClick={() => { setDraft(data.html); setEditing(true); }}>수정</button>
+            <button className="cm-link" style={{color: "#d6453f"}} onClick={remove}>삭제</button>
+          </span>)}
+        </div>
+      </>)}
+      {!data && !editing && (
+        canEdit
+          ? <button className="cm-btn cm-btn-ghost" onClick={() => { setDraft(""); setEditing(true); }}>+ 진도계획표 게시하기</button>
+          : <div className="cm-empty">아직 게시된 진도계획표가 없어요</div>
+      )}
+      {editing && (<>
+        <textarea className="cm-input cm-notice-ta" rows={8} style={{fontFamily: "monospace", fontSize: 12}}
+          placeholder="진도계획표 HTML 코드를 통째로 붙여넣으세요 (<html>부터 </html>까지)"
+          value={draft} onChange={(e) => setDraft(e.target.value)} />
+        {msg && <div className="cm-err">{msg}</div>}
+        <div style={{display: "flex", gap: 10}}>
+          <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy} onClick={post}>{busy ? "게시 중..." : "게시"}</button>
+          <button className="cm-btn cm-btn-ghost" style={{margin: 0}} onClick={() => setEditing(false)}>취소</button>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+function ProgressManager({ cls, canEdit }) {
+  const [open, setOpen] = useState(null);
+  if (!isIndividual(cls)) {
+    return <ProgressEditor cid={cls.id} pkey="class" canEdit={canEdit} title={cls.name} />;
+  }
+  const students = cls.roster.filter((r) => !r.teacher);
+  return (
+    <div>
+      {students.map((st) => (
+        <div key={st.id} style={{borderBottom: "1px solid var(--line)", padding: "10px 0"}}>
+          <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpen(open === st.id ? null : st.id)}>
+            <strong>{st.name}</strong>
+            <span style={{marginLeft: "auto"}}>{open === st.id ? "▾" : "▸"}</span>
+          </div>
+          {open === st.id && <div style={{marginTop: 10}}><ProgressEditor cid={cls.id} pkey={st.id} canEdit={canEdit} title={st.name + " 학생"} /></div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StudentProgressView({ cls, me }) {
+  const [data, setData] = useState(undefined);
+  const pkey = isIndividual(cls) ? me.id : "class";
+  useEffect(() => progressDoc(cls.id, pkey).onSnapshot((d) => setData(d.exists ? d.data() : null)), [cls.id, pkey]);
+  if (me.teacher && isIndividual(cls)) return <div className="cm-card"><div className="cm-empty">개별진도반 진도표는 선생님 화면(관리자 모드)에서 학생별로 관리해요.</div></div>;
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">진도계획표</h3>
+      {data === undefined && <div className="cm-empty">불러오는 중…</div>}
+      {data === null && <div className="cm-empty">아직 게시된 진도계획표가 없어요</div>}
+      {data && (<>
+        <iframe srcDoc={data.html} sandbox="allow-scripts" style={{width: "100%", height: "65vh", border: "1px solid var(--line)", borderRadius: 10, background: "#fff"}} />
+        <div style={{fontSize: 12, color: "var(--muted)", marginTop: 8}}>{fmtDate(ymd(new Date(data.time)))} 게시</div>
+      </>)}
     </div>
   );
 }
@@ -1474,6 +1571,7 @@ function AdminDays({ cls, canEdit, isOwner, onBack }) {
       <div className="cm-ab-tabs">
         <button className={"cm-ab-tab" + (activeView === "days" ? " on" : "")} onClick={() => setActiveView("days")}>날짜별</button>
         <button className={"cm-ab-tab" + (activeView === "book" ? " on" : "")} onClick={() => setActiveView("book")}>월간 출석부</button>
+        <button className={"cm-ab-tab" + (activeView === "progress" ? " on" : "")} onClick={() => setActiveView("progress")}>진도표</button>
         <button className={"cm-ab-tab" + (activeView === "textbooks" ? " on" : "")} onClick={() => setActiveView("textbooks")}>설정</button>
       </div>
 
@@ -1497,6 +1595,13 @@ function AdminDays({ cls, canEdit, isOwner, onBack }) {
         <div className="cm-card">
           <h3 className="cm-h3">월간 출석부</h3>
           <AttendanceBook cls={cls} canEdit={canEdit} />
+        </div>
+      )}
+
+      {activeView === "progress" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">진도계획표 {isIndividual(cls) && <span className="cm-h-hint">(학생별 게시)</span>}</h3>
+          <ProgressManager cls={cls} canEdit={canEdit} />
         </div>
       )}
 
