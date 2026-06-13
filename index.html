@@ -1308,6 +1308,59 @@ function StudentProgressView({ cls, me }) {
   );
 }
 
+function RosterManager({ cls, canEdit, onChanged }) {
+  const [roster, setRoster] = useState(cls.roster);
+  const [busy, setBusy] = useState(false);
+  const students = roster.filter((r) => !r.teacher);
+  const teachers = roster.filter((r) => r.teacher);
+  async function commit(newRoster) {
+    setBusy(true);
+    try { await saveClassRoster(cls.id, newRoster); cls.roster = newRoster; setRoster(newRoster); if (onChanged) onChanged(); }
+    catch (e) { alert("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+  async function addStudent() {
+    const name = prompt("새 학생 이름");
+    if (!name || !name.trim()) return;
+    const id = "s" + Date.now().toString(36); // 시간 기반 고유 id (번호 재사용 방지)
+    await commit([...students, { id, name: name.trim() }, ...teachers]);
+  }
+  async function renameStudent(st) {
+    const name = prompt("이름 수정", st.name);
+    if (!name || !name.trim() || name.trim() === st.name) return;
+    await commit(roster.map((r) => (r.id === st.id ? { ...r, name: name.trim() } : r)));
+  }
+  async function removeStudent(st) {
+    if (!confirm(st.name + " 학생을 명단에서 뺄까요?\n\n출석·과제·질문 기록은 삭제되지 않고 남지만, 명단·출석부에서 사라져요.")) return;
+    await commit(roster.filter((r) => r.id !== st.id));
+  }
+  function move(idx, dir) {
+    const ni = idx + dir;
+    if (ni < 0 || ni >= students.length) return;
+    const arr = [...students];
+    const tmp = arr[idx]; arr[idx] = arr[ni]; arr[ni] = tmp;
+    commit([...arr, ...teachers]);
+  }
+  return (
+    <div>
+      {students.length === 0 && <div className="cm-empty">학생이 없어요</div>}
+      {students.map((st, i) => (
+        <div key={st.id} style={{display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid var(--line)"}}>
+          <span style={{color: "var(--muted)", fontSize: 13, width: 22}}>{i + 1}</span>
+          <strong>{st.name}</strong>
+          {canEdit && (<span style={{marginLeft: "auto", display: "flex", gap: 2, alignItems: "center"}}>
+            <button className="cm-link" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{padding: "0 4px"}}>▲</button>
+            <button className="cm-link" disabled={busy || i === students.length - 1} onClick={() => move(i, 1)} style={{padding: "0 4px"}}>▼</button>
+            <button className="cm-link" disabled={busy} onClick={() => renameStudent(st)}>이름</button>
+            <button className="cm-link" disabled={busy} style={{color: "#d6453f"}} onClick={() => removeStudent(st)}>삭제</button>
+          </span>)}
+        </div>
+      ))}
+      {canEdit && <button className="cm-link" style={{marginTop: 10}} disabled={busy} onClick={addStudent}>+ 학생 추가</button>}
+    </div>
+  );
+}
+
 function StudentConfig({ cls, canEdit }) {
   const init = () => cls.roster.map((r) => ({ ...r, days: [...(r.days || [])], books: (r.books || []).map((b) => ({ ...b })) }));
   const [roster, setRoster] = useState(init);
@@ -1646,7 +1699,7 @@ function useSwipeBack(onBack) {
 }
 
 function AdminDays({ cls, canEdit, isOwner, onBack }) {
-  const [, bumpVer] = useState(0);
+  const [rosterVer, bumpVer] = useState(0);
   const [selected, setSelected] = useState(null);
   const [days, setDays] = useState(null);
   const [activeView, setActiveView] = useState("days"); // "days" | "book"
@@ -1811,10 +1864,14 @@ function AdminDays({ cls, canEdit, isOwner, onBack }) {
             <ClassMetaEditor cls={cls} onSaved={() => bumpVer((v) => v + 1)} onDeleted={onBack} />
           </div>
         )}
+        <div className="cm-card">
+          <h3 className="cm-h3">학생 명단</h3>
+          <RosterManager cls={cls} canEdit={canEdit} onChanged={() => bumpVer((v) => v + 1)} />
+        </div>
         {isIndividual(cls) ? (
           <div className="cm-card">
             <h3 className="cm-h3">학생별 설정 <span className="cm-h-hint">(등원요일 · 교재)</span></h3>
-            <StudentConfig cls={cls} canEdit={canEdit} />
+            <StudentConfig key={"sc" + rosterVer} cls={cls} canEdit={canEdit} />
           </div>
         ) : (
           <div className="cm-card">
