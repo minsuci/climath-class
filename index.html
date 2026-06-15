@@ -468,6 +468,25 @@ async function saveClassMeta(cid, name, classDays) {
   await classesCol().doc(cid).update({ name, classDays });
   await loadClasses();
 }
+// ----- 합반(질문 공유) -----
+// 합반 요일이면 질문을 "대표 반"(두 id 중 사전순 첫째) 한 곳에 모은다.
+function questionCid(cls, date) {
+  const m = cls && cls.merge;
+  if (!m || !m.partnerId || !(m.days || []).includes(new Date(date + "T00:00:00").getDay())) return cls.id;
+  return [cls.id, m.partnerId].sort()[0];
+}
+const isMergedDay = (cls, date) => questionCid(cls, date) !== cls.id || (cls.merge && (cls.merge.days || []).includes(new Date(date + "T00:00:00").getDay()));
+async function setMerge(cidA, cidB, days) {
+  await classesCol().doc(cidA).update({ merge: { partnerId: cidB, days } });
+  await classesCol().doc(cidB).update({ merge: { partnerId: cidA, days } });
+  await loadClasses();
+}
+async function clearMerge(cidA, cidB) {
+  const del = firebase.firestore.FieldValue.delete();
+  await classesCol().doc(cidA).update({ merge: del });
+  if (cidB) await classesCol().doc(cidB).update({ merge: del });
+  await loadClasses();
+}
 async function deleteClass(cid) {
   await classesCol().doc(cid).delete();
   // 모든 선생님의 담당 목록에서 제거
@@ -786,7 +805,8 @@ function QuestionForm({ cls, me }) {
   const [memo, setMemo] = useState("");
   const [sent, setSent] = useState([]);
   useEffect(() => {
-    const unsub = qCol(cls.id, todayStr).where("sid", "==", me.id).onSnapshot((s) => {
+    const qcid = questionCid(cls, todayStr);
+    const unsub = qCol(qcid, todayStr).where("sid", "==", me.id).onSnapshot((s) => {
       const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); arr.sort((a, b) => a.time - b.time); setSent(arr);
     });
     return () => unsub();
@@ -795,8 +815,9 @@ function QuestionForm({ cls, me }) {
     if (!num.trim()) return;
     const nums = num.trim().split(/[^0-9\-()]+/).map((s) => s.trim()).filter((s) => s.length > 0);
     const now = Date.now();
+    const qcid = questionCid(cls, todayStr);
     await Promise.all(nums.map((n, i) =>
-      addQuestion(cls.id, todayStr, { sid: me.id, name: me.name, book, num: n, memo: memo.trim(), time: now + i, resolved: false })
+      addQuestion(qcid, todayStr, { sid: me.id, name: me.name, book, num: n, memo: memo.trim(), time: now + i, resolved: false, fromCid: cls.id, fromClass: cls.name })
     ));
     const parsedNums = nums.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
     if (parsedNums.length > 0) {
@@ -807,6 +828,7 @@ function QuestionForm({ cls, me }) {
   return (
     <div className="cm-card">
       <h3 className="cm-h3">질문하기</h3>
+      {questionCid(cls, todayStr) !== cls.id && <div className="cm-hint" style={{marginBottom: 10}}>오늘은 합반 수업이에요. 질문이 합반 대기열로 전달돼요.</div>}
       <label className="cm-label">교재</label>
       <select className="cm-input" value={book} onChange={(e) => setBook(e.target.value)}>{books.map((b) => <option key={b.name}>{b.name}</option>)}</select>
       <label className="cm-label">문항 번호</label>
@@ -1422,6 +1444,55 @@ function StudentConfig({ cls, canEdit }) {
   );
 }
 
+function MergeManager({ cls, onSaved }) {
+  const others = CLASSES.filter((c) => c.id !== cls.id);
+  const cur = cls.merge || null;
+  const [partnerId, setPartnerId] = useState(cur ? cur.partnerId : (others[0] ? others[0].id : ""));
+  const [days, setDays] = useState(cur ? [...(cur.days || [])] : []);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  function toggleDay(d) { setDays((s) => s.includes(d) ? s.filter((x) => x !== d) : [...s, d].sort()); }
+  const partnerName = (id) => { const c = CLASSES.find((x) => x.id === id); return c ? c.name : id; };
+  async function save() {
+    if (busy) return;
+    if (!partnerId) { setMsg("합반할 반을 선택해주세요"); return; }
+    if (days.length === 0) { setMsg("합반 요일을 1개 이상 선택해주세요"); return; }
+    setBusy(true); setMsg("");
+    try { await setMerge(cls.id, partnerId, days); setMsg("저장됐어요 ✓"); onSaved && onSaved(); }
+    catch (e) { setMsg("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+  async function clear() {
+    if (!confirm("합반 설정을 해제할까요?")) return;
+    setBusy(true);
+    try { await clearMerge(cls.id, cur.partnerId); setDays([]); setMsg("해제됐어요"); onSaved && onSaved(); }
+    catch (e) { setMsg("해제 실패: " + e.message); }
+    setBusy(false);
+  }
+  if (others.length === 0) return <div className="cm-empty">합반할 다른 반이 없어요</div>;
+  return (
+    <div>
+      <div className="cm-hint" style={{marginBottom: 12}}>선택한 요일에는 두 반의 <b>질문 대기열이 하나로 합쳐져요</b>. 출석·과제·점수는 각 반 그대로예요.</div>
+      {cur && <div className="cm-done" style={{marginBottom: 10}}>현재 <b>{partnerName(cur.partnerId)}</b>와 {(cur.days || []).map((d) => DAY_NAMES[d]).join("·")}요일 합반 중</div>}
+      <label className="cm-label">합반할 반</label>
+      <select className="cm-input" value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
+        {others.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <label className="cm-label">합반 요일</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4}}>
+        {DAY_NAMES.map((d, i) => (
+          <button key={i} className={"cm-ab-tab" + (days.includes(i) ? " on" : "")} onClick={() => toggleDay(i)}>{d}</button>
+        ))}
+      </div>
+      {msg && <div className={msg.includes("✓") || msg.includes("해제됐") ? "cm-done" : "cm-err"}>{msg}</div>}
+      <div style={{display: "flex", gap: 10}}>
+        <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy} onClick={save}>{busy ? "저장 중..." : "합반 저장"}</button>
+        {cur && <button className="cm-btn cm-btn-ghost" style={{margin: 0}} disabled={busy} onClick={clear}>해제</button>}
+      </div>
+    </div>
+  );
+}
+
 function ClassMetaEditor({ cls, onSaved, onDeleted }) {
   const [name, setName] = useState(cls.name);
   const [days, setDays] = useState([...(cls.classDays || [])]);
@@ -1864,6 +1935,12 @@ function AdminDays({ cls, canEdit, isOwner, onBack }) {
             <ClassMetaEditor cls={cls} onSaved={() => bumpVer((v) => v + 1)} onDeleted={onBack} />
           </div>
         )}
+        {isOwner && !isIndividual(cls) && (
+          <div className="cm-card">
+            <h3 className="cm-h3">합반 설정 <span className="cm-h-hint">(질문 공유 · 관리자 전용)</span></h3>
+            <MergeManager cls={cls} onSaved={() => bumpVer((v) => v + 1)} />
+          </div>
+        )}
         <div className="cm-card">
           <h3 className="cm-h3">학생 명단</h3>
           <RosterManager cls={cls} canEdit={canEdit} onChanged={() => bumpVer((v) => v + 1)} />
@@ -2111,7 +2188,7 @@ function AttendanceBook({ cls, canEdit }) {
 
 const RESOLVED_PAGE_SIZE = 5;
 
-function QuestionQueue({ questions, clsId, date, canEdit, books }) {
+function QuestionQueue({ questions, clsId, date, canEdit, books, merged }) {
   const BOOK_TABS = ["전체", ...(books || []).map((b) => b.name)];
   const [activeBook, setActiveBook] = React.useState("전체");
   const [resolvedPage, setResolvedPage] = React.useState(0);
@@ -2132,7 +2209,7 @@ function QuestionQueue({ questions, clsId, date, canEdit, books }) {
   const renderQ = (q) => (
     <div key={q.qid} className={"cm-q" + (q.resolved ? " done" : "")}>
       <div className="cm-q-main">
-        <div className="cm-q-top"><span className="cm-q-name">{q.name}</span><span className="cm-q-time">{hhmm(q.time)}</span></div>
+        <div className="cm-q-top"><span className="cm-q-name">{q.name}{merged && q.fromClass && <span className="cm-day-sub" style={{marginLeft: 6, fontSize: 10}}>{q.fromClass}</span>}</span><span className="cm-q-time">{hhmm(q.time)}</span></div>
         <div className="cm-q-body">{q.book} <b>{q.num}</b>번{q.memo && <span className="cm-q-memo"> · {q.memo}</span>}</div>
       </div>
       {q.resolved
@@ -2181,7 +2258,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
   useEffect(() => {
     const unsubs = [
       attCol(cls.id, date).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data())); setAttendance(m); }),
-      qCol(cls.id, date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); setQuestions(arr); }),
+      qCol(questionCid(cls, date), date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); setQuestions(arr); }),
       hwCol(cls.id).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data().books || {})); setHwDone(m); }),
       scoresCol(cls.id, date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() })); setScores(arr); }),
       questionedCol(cls.id).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data().books || {})); setQuestioned(m); }),
@@ -2213,7 +2290,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
 
       <div className="cm-card">
         <h3 className="cm-h3">질문 대기열</h3>
-        <QuestionQueue questions={questions} clsId={cls.id} date={date} canEdit={canEdit} books={getClassAllBooks(cls)} />
+        <QuestionQueue questions={questions} clsId={questionCid(cls, date)} date={date} canEdit={canEdit} books={getClassAllBooks(cls)} merged={questionCid(cls, date) !== cls.id} />
       </div>
 
       <div className="cm-card">
