@@ -828,7 +828,6 @@ function QuestionForm({ cls, me }) {
   return (
     <div className="cm-card">
       <h3 className="cm-h3">질문하기</h3>
-      {questionCid(cls, todayStr) !== cls.id && <div className="cm-hint" style={{marginBottom: 10}}>오늘은 합반 수업이에요. 질문이 합반 대기열로 전달돼요.</div>}
       <label className="cm-label">교재</label>
       <select className="cm-input" value={book} onChange={(e) => setBook(e.target.value)}>{books.map((b) => <option key={b.name}>{b.name}</option>)}</select>
       <label className="cm-label">문항 번호</label>
@@ -1472,7 +1471,7 @@ function MergeManager({ cls, onSaved }) {
   if (others.length === 0) return <div className="cm-empty">합반할 다른 반이 없어요</div>;
   return (
     <div>
-      <div className="cm-hint" style={{marginBottom: 12}}>선택한 요일에는 두 반의 <b>질문 대기열이 하나로 합쳐져요</b>. 출석·과제·점수는 각 반 그대로예요.</div>
+      <div className="cm-hint" style={{marginBottom: 12}}>선택한 요일에는 두 반이 <b>한 화면에서 함께 관리</b>돼요. 질문 대기열이 합쳐지고, 출석·과제·점수도 두 반 학생이 같이 표시돼요. (각 학생 기록은 자기 반에 저장돼서 월간 출석부는 그대로예요)</div>
       {cur && <div className="cm-done" style={{marginBottom: 10}}>현재 <b>{partnerName(cur.partnerId)}</b>와 {(cur.days || []).map((d) => DAY_NAMES[d]).join("·")}요일 합반 중</div>}
       <label className="cm-label">합반할 반</label>
       <select className="cm-input" value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
@@ -2255,26 +2254,40 @@ function AdminDay({ cls, date, canEdit, onBack }) {
   const [questioned, setQuestioned] = useState({});
   const [detail, setDetail] = useState(null);
 
-  useEffect(() => {
-    const unsubs = [
-      attCol(cls.id, date).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data())); setAttendance(m); }),
-      qCol(questionCid(cls, date), date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); setQuestions(arr); }),
-      hwCol(cls.id).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data().books || {})); setHwDone(m); }),
-      scoresCol(cls.id, date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() })); setScores(arr); }),
-      questionedCol(cls.id).onSnapshot((s) => { const m = {}; s.forEach((d) => (m[d.id] = d.data().books || {})); setQuestioned(m); }),
-    ];
-    return () => unsubs.forEach((u) => u && u());
-  }, [cls.id, date]);
-
   const dow = new Date(date + "T00:00:00").getDay();
-  const roster = cls.roster.filter((r) => !r.teacher && (!isIndividual(cls) || (r.days || []).includes(dow)));
+  // 합반: 해당 요일이면 짝 반의 출석·과제·점수도 함께 (저장은 각 반, 화면만 병합)
+  const mergePartner = (cls.merge && cls.merge.partnerId && (cls.merge.days || []).includes(dow)) ? findClass(cls.merge.partnerId) : null;
+  const mergeKey = mergePartner ? mergePartner.id : "";
+
+  useEffect(() => {
+    const cids = mergePartner ? [cls.id, mergePartner.id] : [cls.id];
+    const attStore = {}, hwStore = {}, qdStore = {}, scStore = {};
+    const flat = (store) => { const o = {}; cids.forEach((c) => Object.entries(store[c] || {}).forEach(([sid, v]) => (o[c + ":" + sid] = v))); return o; };
+    const unsubs = [];
+    cids.forEach((cid) => {
+      unsubs.push(attCol(cid, date).onSnapshot((s) => { attStore[cid] = {}; s.forEach((d) => (attStore[cid][d.id] = d.data())); setAttendance(flat(attStore)); }));
+      unsubs.push(hwCol(cid).onSnapshot((s) => { hwStore[cid] = {}; s.forEach((d) => (hwStore[cid][d.id] = d.data().books || {})); setHwDone(flat(hwStore)); }));
+      unsubs.push(questionedCol(cid).onSnapshot((s) => { qdStore[cid] = {}; s.forEach((d) => (qdStore[cid][d.id] = d.data().books || {})); setQuestioned(flat(qdStore)); }));
+      unsubs.push(scoresCol(cid, date).orderBy("time").onSnapshot((s) => {
+        scStore[cid] = []; s.forEach((d) => scStore[cid].push({ id: cid + ":" + d.id, _cid: cid, ...d.data() }));
+        const all = []; cids.forEach((c) => all.push(...(scStore[c] || []))); all.sort((a, b) => a.time - b.time); setScores(all);
+      }));
+    });
+    // 질문은 합반 대표 반 한 곳
+    unsubs.push(qCol(questionCid(cls, date), date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); setQuestions(arr); }));
+    return () => unsubs.forEach((u) => u && u());
+  }, [cls.id, date, mergeKey]);
+
+  const withKey = (r, cid) => ({ ...r, _cid: cid, _key: cid + ":" + r.id });
+  let roster = cls.roster.filter((r) => !r.teacher && (!isIndividual(cls) || (r.days || []).includes(dow))).map((r) => withKey(r, cls.id));
+  if (mergePartner) roster = roster.concat(mergePartner.roster.filter((r) => !r.teacher).map((r) => withKey(r, mergePartner.id)));
   const presentIds = Object.keys(attendance);
   const waiting = questions.filter((q) => !q.resolved);
-  const hwStudents = roster.filter((r) => hwDone[r.id] && getStudentBooks(cls, r).some((b) => (hwDone[r.id][b.name] || []).length > 0));
+  const hwStudents = roster.filter((r) => hwDone[r._key] && getStudentBooks(findClass(r._cid) || cls, r).some((b) => (hwDone[r._key][b.name] || []).length > 0));
 
   const dayRef = useSwipeBack(onBack);
 
-  if (detail) return <StudentDetail cls={cls} student={detail} hwDone={hwDone} questioned={questioned} onBack={() => setDetail(null)} />;
+  if (detail) return <StudentDetail cls={findClass(detail._cid) || cls} student={detail} hwDone={{ [detail.id]: hwDone[detail._key] || {} }} questioned={{ [detail.id]: questioned[detail._key] || {} }} onBack={() => setDetail(null)} />;
 
   return (
     <div ref={dayRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
@@ -2297,10 +2310,10 @@ function AdminDay({ cls, date, canEdit, onBack }) {
         <h3 className="cm-h3">출석 현황 <span className="cm-h-hint">(이름을 누르면 과제 표)</span></h3>
         <div className="cm-roster">
           {roster.map((r) => {
-            const a = attendance[r.id];
+            const a = attendance[r._key];
             return (
-              <button key={r.id} className={"cm-rost " + (a ? "in" : "")} onClick={() => setDetail(r)}>
-                <span className="cm-rost-name">{r.name}</span>
+              <button key={r._key} className={"cm-rost " + (a ? "in" : "")} onClick={() => setDetail(r)}>
+                <span className="cm-rost-name">{r.name}{mergePartner && r._cid !== cls.id && <span className="cm-day-sub" style={{marginLeft: 5, fontSize: 10}}>{mergePartner.name}</span>}</span>
                 <span className="cm-rost-t">{a ? hhmm(a.time) : "미출석"} ›</span>
               </button>
             );
@@ -2312,10 +2325,10 @@ function AdminDay({ cls, date, canEdit, onBack }) {
         <h3 className="cm-h3">과제 현황 <span className="cm-h-hint">(누적)</span></h3>
         {hwStudents.length === 0 ? (<div className="cm-empty">등록된 과제가 없어요</div>) : (
           hwStudents.map((r) => (
-            <div key={r.id} className="cm-hw-row">
+            <div key={r._key} className="cm-hw-row">
               <button className="cm-hw-name cm-hw-name-btn" onClick={() => setDetail(r)}>{r.name}</button>
               <div className="cm-hw-items">
-                {getStudentBooks(cls, r).filter((b) => (hwDone[r.id][b.name] || []).length > 0).map((b) => (<span key={b.name} className="cm-chip">{b.name} {hwDone[r.id][b.name].length}문제</span>))}
+                {getStudentBooks(findClass(r._cid) || cls, r).filter((b) => (hwDone[r._key][b.name] || []).length > 0).map((b) => (<span key={b.name} className="cm-chip">{b.name} {hwDone[r._key][b.name].length}문제</span>))}
               </div>
             </div>
           ))
@@ -2327,7 +2340,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
         {scores.length === 0 ? (<div className="cm-empty">제출된 점수가 없어요</div>) : (
           scores.slice().reverse().map((s) => (
             <div key={s.id} className="cm-score-row">
-              <span className="cm-score-name">{s.name}</span>
+              <span className="cm-score-name">{s.name}{mergePartner && s._cid && s._cid !== cls.id && <span className="cm-day-sub" style={{marginLeft: 5, fontSize: 10}}>{mergePartner.name}</span>}</span>
               <span className="cm-score-detail">{s.label ? s.label + " · " : ""}{s.correct}/{s.total}</span>
               <span className="cm-score-num">{s.score}점</span>
             </div>
