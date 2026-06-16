@@ -95,6 +95,19 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-day-date{font-weight:700; color:var(--navy); font-size:15px;}
 .cm-day-badge{background:var(--navy); color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;}
 .cm-day-sub{font-size:11px; color:var(--muted); background:#f0ece5; padding:2px 8px; border-radius:999px; margin-left:6px;}
+.cm-ai-scroll{max-height:52vh; overflow-y:auto; padding:8px 2px; display:flex; flex-direction:column; gap:10px;}
+.cm-ai-msg{display:flex; flex-direction:column; max-width:85%;}
+.cm-ai-msg.me{align-self:flex-end; align-items:flex-end;}
+.cm-ai-msg.ai{align-self:flex-start; align-items:flex-start;}
+.cm-ai-bubble{padding:10px 13px; border-radius:14px; font-size:14px; line-height:1.5; white-space:pre-wrap; word-break:break-word;}
+.cm-ai-msg.me .cm-ai-bubble{background:var(--navy); color:#fff; border-bottom-right-radius:4px;}
+.cm-ai-msg.ai .cm-ai-bubble{background:#f0ece5; color:var(--ink); border-bottom-left-radius:4px;}
+.cm-ai-typing{color:var(--muted); font-style:italic;}
+.cm-ai-img{max-width:180px; border-radius:10px; margin-bottom:4px;}
+.cm-ai-preview{display:flex; align-items:center; gap:10px; margin:8px 0;}
+.cm-ai-preview img{max-width:60px; max-height:60px; border-radius:8px; border:1px solid var(--line);}
+.cm-ai-input{display:flex; gap:8px; align-items:center; margin-top:12px;}
+.cm-ai-imgbtn{flex:none; width:42px; height:42px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:18px; cursor:pointer;}
 .cm-day-arrow{font-size:20px; color:var(--navy2); line-height:1;}
 
 .cm-daybar{display:flex; align-items:center; justify-content:space-between; padding:8px 2px; position:sticky; top:0; z-index:100; background:var(--bg); margin:-4px -4px 4px -4px;}
@@ -661,6 +674,73 @@ function StudentView({ cls, onBack }) {
   return <StudentHome cls={cls} me={me} onLogout={() => setMe(null)} />;
 }
 
+function AIChat({ cls, me }) {
+  const [messages, setMessages] = useState([]); // {role, text, img?:{data,mime}}
+  const [input, setInput] = useState("");
+  const [img, setImg] = useState(null); // {data(b64), mime, preview}
+  const [busy, setBusy] = useState(false);
+  const fileRef = React.useRef(null);
+  const scrollRef = React.useRef(null);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, busy]);
+
+  async function pickImg(e) {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    if (f.size > 4 * 1024 * 1024) { alert("이미지가 너무 커요 (최대 4MB)"); return; }
+    const b64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(f); });
+    setImg({ data: b64, mime: f.type || "image/jpeg", preview: "data:" + (f.type || "image/jpeg") + ";base64," + b64 });
+  }
+
+  async function send() {
+    if (busy || (!input.trim() && !img)) return;
+    const myMsg = { role: "user", text: input.trim(), img };
+    const next = [...messages, myMsg];
+    setMessages(next); setInput(""); setImg(null); setBusy(true);
+    try {
+      const apiMsgs = next.map((m) => {
+        if (m.img) {
+          const parts = [{ type: "image", source: { type: "base64", media_type: m.img.mime, data: m.img.data } }];
+          parts.push({ type: "text", text: m.text || "이 문제 푸는 거 도와줘" });
+          return { role: m.role, content: parts };
+        }
+        return { role: m.role, content: m.text };
+      });
+      const res = await fetch("/api/hint", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: apiMsgs }) });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "오류");
+      setMessages([...next, { role: "assistant", text: data.text }]);
+    } catch (e) {
+      setMessages([...next, { role: "assistant", text: "⚠ " + e.message }]);
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">AI 힌트 <span className="cm-h-hint">(답은 안 알려주고 힌트만 줘요)</span></h3>
+      <div ref={scrollRef} className="cm-ai-scroll">
+        {messages.length === 0 && <div className="cm-empty">막히는 문제를 물어보거나, 문제 사진을 올려보세요.<br/>답을 바로 알려주진 않고 힌트로 도와줄게요.</div>}
+        {messages.map((m, i) => (
+          <div key={i} className={"cm-ai-msg " + (m.role === "user" ? "me" : "ai")}>
+            {m.img && <img src={m.img.preview} className="cm-ai-img" />}
+            {m.text && <div className="cm-ai-bubble">{m.text}</div>}
+          </div>
+        ))}
+        {busy && <div className="cm-ai-msg ai"><div className="cm-ai-bubble cm-ai-typing">생각 중…</div></div>}
+      </div>
+      {img && <div className="cm-ai-preview"><img src={img.preview} /><button className="cm-link" onClick={() => setImg(null)}>✕ 사진 빼기</button></div>}
+      <div className="cm-ai-input">
+        <input ref={fileRef} type="file" accept="image/*" style={{display: "none"}} onChange={pickImg} />
+        <button className="cm-ai-imgbtn" disabled={busy} onClick={() => fileRef.current.click()}>📷</button>
+        <input className="cm-input" style={{margin: 0}} placeholder="질문을 입력하세요" value={input}
+          onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
+        <button className="cm-btn cm-btn-primary" style={{margin: 0, flex: "none"}} disabled={busy} onClick={send}>전송</button>
+      </div>
+    </div>
+  );
+}
+
 function StudentHome({ cls, me, onLogout }) {
   const [tab, setTab] = useState(me.teacher ? "q" : "att");
   const [att, setAtt] = useState(null);
@@ -745,6 +825,7 @@ function StudentHome({ cls, me, onLogout }) {
         <button className={activeTab === "score" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("score")}>점수</button>
         <button className={activeTab === "prog" ? "on" : ""} onClick={() => setTab("prog")}>진도</button>
         <button className={activeTab === "notes" ? "on" : ""} onClick={() => setTab("notes")}>노트</button>
+        <button className={activeTab === "ai" ? "on" : ""} onClick={() => setTab("ai")}>AI힌트</button>
       </div>
 
       {activeTab === "att" && (
@@ -770,6 +851,7 @@ function StudentHome({ cls, me, onLogout }) {
           <NotesManager cls={cls} canEdit={false} />
         </div>
       )}
+      {activeTab === "ai" && <AIChat cls={cls} me={me} />}
     </div>
   );
 }
