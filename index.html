@@ -484,6 +484,10 @@ async function saveClassMeta(cid, name, classDays) {
   await classesCol().doc(cid).update({ name, classDays });
   await loadClasses();
 }
+// ----- AI 힌트 로그 -----
+const aiLogsCol = (cid) => classDoc(cid).collection("aiLogs");
+async function addAiLog(cid, log) { await aiLogsCol(cid).add(log); }
+
 // ----- 합반(질문 공유) -----
 // 합반 요일이면 질문을 "대표 반"(두 id 중 사전순 첫째) 한 곳에 모은다.
 function questionCid(cls, date) {
@@ -677,6 +681,61 @@ function StudentView({ cls, onBack }) {
   return <StudentHome cls={cls} me={me} onLogout={() => setMe(null)} />;
 }
 
+function AILogView({ cls }) {
+  const [logs, setLogs] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  const [filterSid, setFilterSid] = useState("");
+  useEffect(() => aiLogsCol(cls.id).orderBy("time", "desc").onSnapshot((s) => {
+    const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() })); setLogs(arr);
+  }), [cls.id]);
+  if (logs === null) return <div className="cm-empty">불러오는 중…</div>;
+  const students = cls.roster.filter((r) => !r.teacher);
+  const shown = filterSid ? logs.filter((l) => l.sid === filterSid) : logs;
+  return (
+    <div>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12}}>
+        <button className={"cm-ab-tab" + (filterSid === "" ? " on" : "")} onClick={() => setFilterSid("")}>전체</button>
+        {students.map((st) => {
+          const cnt = logs.filter((l) => l.sid === st.id).length;
+          if (cnt === 0) return null;
+          return <button key={st.id} className={"cm-ab-tab" + (filterSid === st.id ? " on" : "")} onClick={() => setFilterSid(st.id)}>{st.name} {cnt}</button>;
+        })}
+      </div>
+      {shown.length === 0 && <div className="cm-empty">아직 AI 힌트 질문 내역이 없어요</div>}
+      {shown.map((l) => (
+        <div key={l.id} style={{borderBottom: "1px solid var(--line)", padding: "11px 0"}}>
+          <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpenId(openId === l.id ? null : l.id)}>
+            <strong>{l.name}</strong>
+            {l.img && <span title="사진 첨부">📷</span>}
+            <span style={{flex: 1, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14}}>{l.q || "(사진만)"}</span>
+            <span style={{fontSize: 11, color: "var(--muted)", flex: "none"}}>{fmtLogTime(l.time)}</span>
+          </div>
+          {openId === l.id && (
+            <div style={{marginTop: 8}}>
+              <div className="cm-ai-msg me" style={{maxWidth: "100%", alignSelf: "stretch", alignItems: "flex-end"}}>
+                <div className="cm-ai-bubble">{l.img ? "📷 사진 첨부 · " : ""}{l.q || "(사진만)"}</div>
+              </div>
+              <div className="cm-ai-msg ai" style={{maxWidth: "100%", alignSelf: "stretch", marginTop: 8}}>
+                <div className="cm-ai-bubble">{l.a}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function fmtLogTime(t) {
+  const d = new Date(t);
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (sameDay) return hh + ":" + mm;
+  return (d.getMonth() + 1) + "/" + d.getDate() + " " + hh + ":" + mm;
+}
+
 function AIChat({ cls, me }) {
   const [messages, setMessages] = useState([]); // {role, text, img?:{data,mime}}
   const [input, setInput] = useState("");
@@ -713,6 +772,9 @@ function AIChat({ cls, me }) {
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || "오류");
       setMessages([...next, { role: "assistant", text: data.text }]);
+      if (!me.teacher) {
+        addAiLog(cls.id, { sid: me.id, name: me.name, q: myMsg.text || "", a: data.text || "", img: !!myMsg.img, time: Date.now() }).catch(() => {});
+      }
     } catch (e) {
       setMessages([...next, { role: "assistant", text: "⚠ " + e.message }]);
     }
@@ -722,6 +784,7 @@ function AIChat({ cls, me }) {
   return (
     <div className="cm-card">
       <h3 className="cm-h3">AI 힌트 <span className="cm-h-hint">(답은 안 알려주고 힌트만 줘요)</span></h3>
+      {!me.teacher && <div className="cm-hint" style={{marginBottom: 8}}>질문 내역은 선생님이 볼 수 있어요.</div>}
       <div ref={scrollRef} className="cm-ai-scroll">
         {messages.length === 0 && <div className="cm-empty">막히는 문제를 물어보거나, 문제 사진을 올려보세요.<br/>답을 바로 알려주진 않고 힌트로 도와줄게요.</div>}
         {messages.map((m, i) => (
@@ -1972,6 +2035,7 @@ function AdminDays({ cls, canEdit, isOwner, onBack }) {
         <button className={"cm-ab-tab" + (activeView === "book" ? " on" : "")} onClick={() => setActiveView("book")}>월간 출석부</button>
         <button className={"cm-ab-tab" + (activeView === "progress" ? " on" : "")} onClick={() => setActiveView("progress")}>진도표</button>
         <button className={"cm-ab-tab" + (activeView === "notes" ? " on" : "")} onClick={() => setActiveView("notes")}>강의노트</button>
+        <button className={"cm-ab-tab" + (activeView === "ailog" ? " on" : "")} onClick={() => setActiveView("ailog")}>AI질문</button>
         <button className={"cm-ab-tab" + (activeView === "textbooks" ? " on" : "")} onClick={() => setActiveView("textbooks")}>설정</button>
       </div>
 
@@ -2009,6 +2073,13 @@ function AdminDays({ cls, canEdit, isOwner, onBack }) {
         <div className="cm-card">
           <h3 className="cm-h3">강의노트 <span className="cm-h-hint">(단원별 손필기)</span></h3>
           <NotesManager cls={cls} canEdit={canEdit} />
+        </div>
+      )}
+
+      {activeView === "ailog" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">AI 힌트 질문 내역 <span className="cm-h-hint">(학생이 AI에게 물어본 것)</span></h3>
+          <AILogView cls={cls} />
         </div>
       )}
 
