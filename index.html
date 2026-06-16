@@ -95,8 +95,8 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-day-date{font-weight:700; color:var(--navy); font-size:15px;}
 .cm-day-badge{background:var(--navy); color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;}
 .cm-day-sub{font-size:11px; color:var(--muted); background:#f0ece5; padding:2px 8px; border-radius:999px; margin-left:6px;}
-.cm-ai-scroll{max-height:52vh; overflow-y:auto; padding:8px 2px; display:flex; flex-direction:column; gap:10px;}
-.cm-ai-msg{display:flex; flex-direction:column; max-width:85%;}
+.cm-ai-scroll{height:62vh; min-height:340px; overflow-y:auto; padding:10px 2px; display:flex; flex-direction:column; gap:10px;}
+.cm-ai-msg{display:flex; flex-direction:column; max-width:88%;}
 .cm-ai-msg.me{align-self:flex-end; align-items:flex-end;}
 .cm-ai-msg.ai{align-self:flex-start; align-items:flex-start;}
 .cm-ai-bubble{padding:10px 13px; border-radius:14px; font-size:14px; line-height:1.5; white-space:pre-wrap; word-break:break-word;}
@@ -107,7 +107,10 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-ai-preview{display:flex; align-items:center; gap:10px; margin:8px 0;}
 .cm-ai-preview img{max-width:60px; max-height:60px; border-radius:8px; border:1px solid var(--line);}
 .cm-ai-input{display:flex; gap:8px; align-items:center; margin-top:12px;}
-.cm-ai-imgbtn{flex:none; width:42px; height:42px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:18px; cursor:pointer;}
+.cm-ai-input .cm-input{flex:1 1 0%; min-width:0; height:48px; font-size:15px;}
+.cm-ai-imgbtn{flex:0 0 48px; width:48px; height:48px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:20px; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;}
+.cm-ai-send{flex:0 0 auto; padding:0 18px; height:48px; border:none; border-radius:10px; background:var(--navy); color:#fff; font-size:15px; font-weight:600; cursor:pointer; white-space:nowrap;}
+.cm-ai-send:disabled{opacity:.5;}
 .cm-day-arrow{font-size:20px; color:var(--navy2); line-height:1;}
 
 .cm-daybar{display:flex; align-items:center; justify-content:space-between; padding:8px 2px; position:sticky; top:0; z-index:100; background:var(--bg); margin:-4px -4px 4px -4px;}
@@ -735,7 +738,7 @@ function AIChat({ cls, me }) {
         <button className="cm-ai-imgbtn" disabled={busy} onClick={() => fileRef.current.click()}>📷</button>
         <input className="cm-input" style={{margin: 0}} placeholder="질문을 입력하세요" value={input}
           onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
-        <button className="cm-btn cm-btn-primary" style={{margin: 0, flex: "none"}} disabled={busy} onClick={send}>전송</button>
+        <button className="cm-ai-send" disabled={busy} onClick={send}>전송</button>
       </div>
     </div>
   );
