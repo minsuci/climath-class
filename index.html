@@ -882,7 +882,8 @@ function StudentHome({ cls, me, onLogout }) {
     setDmDismissed(true);
   }
 
-  const activeTab = me.teacher ? tab : (att ? tab : "att");
+  const noGateTabs = ["prog", "notes", "ai"]; // 출석 없이도 볼 수 있는 탭
+  const activeTab = me.teacher ? tab : (att || noGateTabs.includes(tab) ? tab : "att");
   const showDmBanner = !!(dmNotice && dmNotice.active && dmNotice.text && !dmDismissed);
   const showClassBanner = !!(notice && notice.active && notice.text && !noticeDismissed) && !showDmBanner;
   const showBanner = showDmBanner || showClassBanner;
