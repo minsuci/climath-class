@@ -8,7 +8,7 @@
 //       이름: GEMINI_API_KEY   값: (AIza...로 시작하는 키)  로 등록
 //  4. 다시 배포(Redeploy)
 
-const MODEL = "gemini-2.5-flash"; // 무료 등급, 빠르고 똑똑함
+const MODEL = "gemini-2.5-flash-lite"; // 무료 등급, 빠르고 똑똑함
 
 const SYSTEM_PROMPT = `너는 CLIMATH 수학학원의 AI 조교야. 고등학교 학생이 수학 문제를 물어보면 도와줘.
 
