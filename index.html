@@ -228,6 +228,9 @@ details[open] .cm-resolved-summary::before { content: "▼ "; }
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+
 <script>
   // ===== Firebase 설정값 =====
   var firebaseConfig = {
@@ -681,6 +684,32 @@ function StudentView({ cls, onBack }) {
   return <StudentHome cls={cls} me={me} onLogout={() => setMe(null)} />;
 }
 
+function MathText({ text }) {
+  // $...$, $$...$$, \\(...\\), \\[...\\] 안의 LaTeX를 KaTeX로 렌더
+  const html = React.useMemo(() => {
+    if (!text) return "";
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    if (typeof katex === "undefined") return esc(text);
+    // 토큰 분리: 디스플레이($$, \[\]) 와 인라인($, \(\))
+    const re = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\$([^\$\n]+?)\$|\\\(([\s\S]+?)\\\)/g;
+    let out = ""; let last = 0; let m;
+    while ((m = re.exec(text)) !== null) {
+      out += esc(text.slice(last, m.index));
+      const display = m[1] !== undefined || m[2] !== undefined;
+      const expr = m[1] || m[2] || m[3] || m[4] || "";
+      try {
+        out += katex.renderToString(expr, { displayMode: display, throwOnError: false });
+      } catch (e) {
+        out += esc(m[0]);
+      }
+      last = m.index + m[0].length;
+    }
+    out += esc(text.slice(last));
+    return out;
+  }, [text]);
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 function AILogView({ cls }) {
   const [logs, setLogs] = useState(null);
   const [openId, setOpenId] = useState(null);
@@ -716,7 +745,7 @@ function AILogView({ cls }) {
                 <div className="cm-ai-bubble">{l.img ? "📷 사진 첨부 · " : ""}{l.q || "(사진만)"}</div>
               </div>
               <div className="cm-ai-msg ai" style={{maxWidth: "100%", alignSelf: "stretch", marginTop: 8}}>
-                <div className="cm-ai-bubble">{l.a}</div>
+                <div className="cm-ai-bubble"><MathText text={l.a} /></div>
               </div>
             </div>
           )}
@@ -790,7 +819,7 @@ function AIChat({ cls, me }) {
         {messages.map((m, i) => (
           <div key={i} className={"cm-ai-msg " + (m.role === "user" ? "me" : "ai")}>
             {m.img && <img src={m.img.preview} className="cm-ai-img" />}
-            {m.text && <div className="cm-ai-bubble">{m.text}</div>}
+            {m.text && <div className="cm-ai-bubble">{m.role === "assistant" ? <MathText text={m.text} /> : m.text}</div>}
           </div>
         ))}
         {busy && <div className="cm-ai-msg ai"><div className="cm-ai-bubble cm-ai-typing">생각 중…</div></div>}
