@@ -219,8 +219,8 @@ details[open] .cm-resolved-summary::before { content: "▼ "; }
 <div id="root"><div class="cm-status">불러오는 중…</div></div>
 
 <!-- React + Babel (빌드 없이 사용) -->
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
 
 <!-- Firebase (compat) -->
@@ -245,7 +245,7 @@ details[open] .cm-resolved-summary::before { content: "▼ "; }
   window.db = firebase.firestore();
 </script>
 
-<script type="text/babel" data-presets="react" data-type="script">
+<script type="text/plain" id="__appSource">
 
 const { useState, useEffect, useRef } = React;
 const db = window.db;
@@ -2605,6 +2605,32 @@ try {
 } catch (e) { /* auth 미설정 */ }
 setTimeout(loadAndRender, 4000);
 
+</script>
+
+<script>
+  // 우리 앱 코드를 직접 Babel로 변환해서 전역 실행 (자동 변환/외부 스크립트 간섭 회피)
+  (function () {
+    function runApp() {
+      try {
+        var src = document.getElementById("__appSource").textContent;
+        var out = Babel.transform(src, { presets: ["react"], sourceType: "script" }).code;
+        var s = document.createElement("script");
+        s.textContent = out;
+        document.body.appendChild(s);
+      } catch (e) {
+        document.getElementById("root").innerHTML =
+          '<div style="padding:40px;text-align:center;color:#c2703f;font-family:sans-serif">앱 로딩 오류<br><br>' + (e && e.message ? e.message : e) + '</div>';
+        console.error("앱 변환/실행 오류:", e);
+      }
+    }
+    if (typeof Babel !== "undefined") runApp();
+    else {
+      var wait = setInterval(function () {
+        if (typeof Babel !== "undefined") { clearInterval(wait); runApp(); }
+      }, 50);
+      setTimeout(function () { clearInterval(wait); }, 10000);
+    }
+  })();
 </script>
 </body>
 </html>
