@@ -491,6 +491,88 @@ async function saveClassMeta(cid, name, classDays) {
 const aiLogsCol = (cid) => classDoc(cid).collection("aiLogs");
 async function addAiLog(cid, log) { await aiLogsCol(cid).add(log); }
 
+// ----- 위험신호 대시보드: 전 반 최근 수업 집계 -----
+async function computeRiskData(recentN) {
+  const N = recentN || 6; // 최근 N회 수업 기준
+  const result = []; // { cid, cname, sid, name, attRate, present, sessions, hwPct, avgScore, scoreTrend, risk, reasons }
+  for (const cls of CLASSES) {
+    // 이 반의 수업일(days) 최근 N개
+    let allDays = [];
+    try {
+      const s = await daysCol(cls.id).get();
+      s.forEach((d) => allDays.push(d.id));
+    } catch (e) { continue; }
+    allDays.sort();
+    const recent = allDays.slice(-N);
+    if (recent.length === 0) continue;
+
+    // 각 날짜의 출석/점수 로드
+    const attByDate = {}, scoreByDate = {};
+    for (const date of recent) {
+      try {
+        const as = await attCol(cls.id, date).get();
+        attByDate[date] = {}; as.forEach((d) => (attByDate[date][d.id] = true));
+      } catch (e) { attByDate[date] = {}; }
+      try {
+        const ss = await scoresCol(cls.id, date).get();
+        scoreByDate[date] = {}; ss.forEach((d) => { const v = d.data(); if (v.sid) (scoreByDate[date][v.sid] = scoreByDate[date][v.sid] || []).push(v); });
+      } catch (e) { scoreByDate[date] = {}; }
+    }
+    // 과제 진도 (homework)
+    const hwBySid = {};
+    try {
+      const hs = await hwCol(cls.id).get();
+      hs.forEach((d) => (hwBySid[d.id] = d.data().books || {}));
+    } catch (e) {}
+
+    const students = cls.roster.filter((r) => !r.teacher);
+    for (const st of students) {
+      // 개별진도반이면 그 학생 등원일만 계산 대상
+      const myDates = isIndividual(cls)
+        ? recent.filter((d) => (st.days || []).includes(new Date(d + "T00:00:00").getDay()))
+        : recent;
+      if (myDates.length === 0) continue;
+      const present = myDates.filter((d) => attByDate[d] && attByDate[d][st.id]).length;
+      const attRate = Math.round(present / myDates.length * 100);
+
+      // 과제 완성률 (본인 교재 기준)
+      const books = getStudentBooks(cls, st);
+      const totalQ = books.reduce((s, b) => s + (b.total || 0), 0);
+      const doneQ = books.reduce((s, b) => s + ((hwBySid[st.id] && hwBySid[st.id][b.name]) ? hwBySid[st.id][b.name].length : 0), 0);
+      const hwPct = totalQ > 0 ? Math.round(doneQ / totalQ * 100) : null;
+
+      // 점수: 최근 순서대로
+      const myScores = [];
+      myDates.forEach((d) => { (scoreByDate[d] && scoreByDate[d][st.id] || []).forEach((v) => myScores.push(v)); });
+      const avgScore = myScores.length ? Math.round(myScores.reduce((s, v) => s + (v.score || 0), 0) / myScores.length) : null;
+      // 추세: 앞 절반 평균 vs 뒤 절반 평균
+      let scoreTrend = null;
+      if (myScores.length >= 2) {
+        const half = Math.floor(myScores.length / 2);
+        const early = myScores.slice(0, half), late = myScores.slice(half);
+        const em = early.reduce((s, v) => s + v.score, 0) / early.length;
+        const lm = late.reduce((s, v) => s + v.score, 0) / late.length;
+        scoreTrend = Math.round(lm - em);
+      }
+
+      // 위험 점수화
+      let risk = 0; const reasons = [];
+      if (attRate < 60) { risk += 3; reasons.push("결석 잦음 (" + attRate + "%)"); }
+      else if (attRate < 80) { risk += 1; reasons.push("출석률 " + attRate + "%"); }
+      if (hwPct !== null && hwPct < 30) { risk += 2; reasons.push("과제 미완 (" + hwPct + "%)"); }
+      else if (hwPct !== null && hwPct < 50) { risk += 1; reasons.push("과제 부진 (" + hwPct + "%)"); }
+      if (avgScore !== null && avgScore < 50) { risk += 2; reasons.push("점수 저조 (평균 " + avgScore + ")"); }
+      else if (avgScore !== null && avgScore < 70) { risk += 1; reasons.push("평균 " + avgScore + "점"); }
+      if (scoreTrend !== null && scoreTrend <= -15) { risk += 2; reasons.push("점수 하락 (" + scoreTrend + ")"); }
+      else if (scoreTrend !== null && scoreTrend <= -8) { risk += 1; reasons.push("점수 하락세"); }
+
+      result.push({ cid: cls.id, cname: cls.name, sid: st.id, name: st.name, attRate, present, sessions: myDates.length, hwPct, avgScore, scoreTrend, risk, reasons });
+    }
+  }
+  result.sort((a, b) => b.risk - a.risk || a.attRate - b.attRate);
+  return result;
+}
+
 // ----- 합반(질문 공유) -----
 // 합반 요일이면 질문을 "대표 반"(두 id 중 사전순 첫째) 한 곳에 모은다.
 function questionCid(cls, date) {
@@ -1110,6 +1192,60 @@ function ScoreForm({ cls, me }) {
 }
 
 // ===== 선생님 화면 =====
+function RiskDashboard({ onBack }) {
+  const [data, setData] = useState(null);
+  const [n, setN] = useState(6);
+  const [onlyRisk, setOnlyRisk] = useState(true);
+  useEffect(() => {
+    setData(null);
+    computeRiskData(n).then(setData).catch((e) => { console.error(e); setData([]); });
+  }, [n]);
+  const riskColor = (r) => r >= 4 ? "#d6453f" : r >= 2 ? "#e0913a" : "#3f7d5e";
+  const riskLabel = (r) => r >= 4 ? "높음" : r >= 2 ? "주의" : "양호";
+  const shown = data ? (onlyRisk ? data.filter((x) => x.risk >= 2) : data) : [];
+  return (
+    <div className="cm-stack">
+      <div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 12}}>
+          <h2 className="cm-h2" style={{margin: 0}}>위험신호 대시보드</h2>
+          <button className="cm-link" onClick={onBack}>← 돌아가기</button>
+        </div>
+        <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4}}>
+          <span style={{fontSize: 13, color: "var(--muted)"}}>최근</span>
+          {[4, 6, 10].map((v) => (
+            <button key={v} className={"cm-ab-tab" + (n === v ? " on" : "")} onClick={() => setN(v)}>{v}회</button>
+          ))}
+          <button className={"cm-ab-tab" + (onlyRisk ? " on" : "")} style={{marginLeft: "auto"}} onClick={() => setOnlyRisk(!onlyRisk)}>{onlyRisk ? "주의 이상만" : "전체 보기"}</button>
+        </div>
+        <div className="cm-hint">최근 {n}회 수업의 출석·과제·점수를 종합했어요. 실제 상황과 함께 참고용으로 봐주세요.</div>
+      </div>
+
+      {data === null && <div className="cm-card"><div className="cm-empty">집계하는 중… (수업이 많으면 잠시 걸려요)</div></div>}
+      {data !== null && shown.length === 0 && <div className="cm-card"><div className="cm-empty">{onlyRisk ? "주의가 필요한 학생이 없어요 👍" : "표시할 데이터가 없어요"}</div></div>}
+
+      {shown.map((x) => (
+        <div key={x.cid + ":" + x.sid} className="cm-card" style={{borderLeft: "4px solid " + riskColor(x.risk), padding: "14px 16px"}}>
+          <div style={{display: "flex", alignItems: "center", gap: 8}}>
+            <strong style={{fontSize: 16}}>{x.name}</strong>
+            <span className="cm-day-sub">{x.cname}</span>
+            <span style={{marginLeft: "auto", fontSize: 12, fontWeight: 700, color: riskColor(x.risk)}}>{riskLabel(x.risk)}</span>
+          </div>
+          <div style={{display: "flex", gap: 14, marginTop: 8, fontSize: 13, color: "var(--ink)", flexWrap: "wrap"}}>
+            <span>출석 <b>{x.attRate}%</b> <span style={{color:"var(--muted)"}}>({x.present}/{x.sessions})</span></span>
+            {x.hwPct !== null && <span>과제 <b>{x.hwPct}%</b></span>}
+            {x.avgScore !== null && <span>평균 <b>{x.avgScore}점</b>{x.scoreTrend !== null && x.scoreTrend < 0 && <span style={{color:"#d6453f"}}> ▼{Math.abs(x.scoreTrend)}</span>}{x.scoreTrend !== null && x.scoreTrend > 0 && <span style={{color:"#3f7d5e"}}> ▲{x.scoreTrend}</span>}</span>}
+          </div>
+          {x.reasons.length > 0 && (
+            <div style={{display: "flex", gap: 5, flexWrap: "wrap", marginTop: 9}}>
+              {x.reasons.map((r, i) => <span key={i} className="cm-chip" style={{background: "#f6e7df", color: "#c2703f"}}>{r}</span>)}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AdminView() {
   const [teachers, setTeachers] = useState(null); // null=로딩중
   const [me, setMe] = useState(null);
@@ -1198,6 +1334,9 @@ function AdminView() {
   // ---- 선생님 관리 (관리자 전용) ----
   if (mode === "manage") return <TeacherManage me={me} teachers={teachers} onRefresh={refreshTeachers} onBack={() => setMode("login")} />;
 
+  // ---- 위험신호 대시보드 ----
+  if (mode === "risk") return <RiskDashboard onBack={() => setMode("login")} />;
+
   // ---- 반 선택 ----
   if (!cls) {
     return (
@@ -1215,6 +1354,7 @@ function AdminView() {
             </button>
           ))}
         </div>
+        <button className="cm-link" onClick={() => setMode("risk")}>⚠ 위험신호 대시보드</button>
         <button className="cm-link" onClick={() => setMode("newclass")}>+ 새 반 만들기</button>
         {me.role === "owner" && <button className="cm-link" onClick={() => setMode("manage")}>⚙ 선생님 관리</button>}
       </div></div>
