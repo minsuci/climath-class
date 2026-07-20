@@ -714,20 +714,79 @@ function BookHwCard({ book, initial, qNumbers, onClearQuestion, onChange }) {
 }
 
 // ===== 반 선택 (학생) =====
-function ClassPicker({ onPick }) {
-  return (
-    <div className="cm-stack"><div className="cm-card">
-      <h3 className="cm-h3">반 선택</h3>
-      <div className="cm-daylist">
-        {CLASSES.map((c) => (
-          <button key={c.id} className="cm-day" onClick={() => onPick(c)}>
-            <div className="cm-day-left"><span className="cm-day-date">{c.name}</span></div>
-            <span className="cm-day-arrow">›</span>
-          </button>
-        ))}
+function StudentGate({ onClsChange }) {
+  const [matches, setMatches] = useState(null); // null = 미로그인
+  const [cls, setCls] = useState(null);
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const norm = (s) => (s || "").replace(/\s+/g, "");
+  useEffect(() => { onClsChange && onClsChange(cls); }, [cls]);
+
+  async function login() {
+    if (busy) return;
+    const nm = norm(name);
+    if (!nm) { setErr("이름을 입력해주세요"); return; }
+    if (pin.length !== 4) { setErr("PIN 4자리를 입력해주세요"); return; }
+    setBusy(true); setErr("");
+    const found = [];
+    for (const c of CLASSES) {
+      const u = (c.roster || []).find((r) => norm(r.name) === nm);
+      if (!u) continue;
+      let real = DEFAULT_PIN;
+      try { real = (await getStudentPin(c.id, u.id)) || u.defaultPin || DEFAULT_PIN; }
+      catch (e) { real = u.defaultPin || DEFAULT_PIN; }
+      if (pin === real) found.push({ cls: c, member: u });
+    }
+    setBusy(false);
+    if (found.length === 0) { setErr("이름 또는 PIN이 올바르지 않아요. 이름은 띄어쓰기 없이 정확히 입력해주세요."); return; }
+    setMatches(found);
+    if (found.length === 1) setCls(found[0].cls);
+  }
+  function fullLogout() { setMatches(null); setCls(null); setPin(""); setErr(""); }
+
+  // ---- 로그인 전 ----
+  if (!matches) {
+    return (
+      <div className="cm-card">
+        <h2 className="cm-h2">로그인</h2>
+        <label className="cm-label">이름</label>
+        <input className="cm-input" placeholder="본인 이름을 입력" value={name}
+          onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && login()} />
+        <label className="cm-label">PIN</label>
+        <input className="cm-input" type="password" inputMode="numeric" maxLength={4} placeholder="4자리"
+          value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} onKeyDown={(e) => e.key === "Enter" && login()} />
+        {err && <div className="cm-err">{err}</div>}
+        <button className="cm-btn cm-btn-primary" disabled={busy} onClick={login}>{busy ? "확인 중..." : "입장"}</button>
       </div>
-    </div></div>
-  );
+    );
+  }
+
+  // ---- 내 반 선택 (여러 반에 속한 경우만) ----
+  if (!cls) {
+    return (
+      <div className="cm-stack"><div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 12}}>
+          <h3 className="cm-h3" style={{margin: 0}}>{matches[0].member.name}님의 수업</h3>
+          <button className="cm-link" onClick={fullLogout}>로그아웃</button>
+        </div>
+        <div className="cm-daylist">
+          {matches.map((m) => (
+            <button key={m.cls.id} className="cm-day" onClick={() => setCls(m.cls)}>
+              <div className="cm-day-left"><span className="cm-day-date">{m.cls.name}</span>
+                {m.member.teacher && <span className="cm-day-sub">선생님</span>}</div>
+              <span className="cm-day-arrow">›</span>
+            </button>
+          ))}
+        </div>
+      </div></div>
+    );
+  }
+
+  const me = matches.find((m) => m.cls.id === cls.id).member;
+  return <StudentHome cls={cls} me={me}
+    onLogout={matches.length > 1 ? () => setCls(null) : fullLogout} />;
 }
 
 // ===== 학생 화면 =====
@@ -2717,12 +2776,12 @@ function App() {
   const params = new URLSearchParams(window.location.search);
   const isAdmin = params.get("admin") === "1";
   const urlClass = findClass(params.get("class"));
-  const [cls, setCls] = useState(urlClass || null);
+  const [gateCls, setGateCls] = useState(null);
 
   let sub, main;
   if (isAdmin) { sub = "수업 관리"; main = <AdminView />; }
-  else if (!cls) { sub = "반 선택"; main = <ClassPicker onPick={setCls} />; }
-  else { sub = cls.name + " · " + todayStr; main = <StudentView cls={cls} onBack={urlClass ? null : () => setCls(null)} />; }
+  else if (urlClass) { sub = urlClass.name + " · " + todayStr; main = <StudentView cls={urlClass} onBack={null} />; }
+  else { sub = gateCls ? gateCls.name + " · " + todayStr : "로그인"; main = <StudentGate onClsChange={setGateCls} />; }
 
   return (
     <div>
