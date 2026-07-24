@@ -371,6 +371,37 @@ async function getStudentPin(cid, sid) {
 }
 async function saveStudentPin(cid, sid, p) { await studentsCol(cid).doc(sid).set({ pin: p }, { merge: true }); }
 
+// ----- 사람(이름) 단위 통합 PIN: 이름이 같으면 같은 사람, 모든 반에 하나의 PIN -----
+const normName = (s) => (s || "").replace(/\s+/g, "");
+const personPinDoc = (name) => db.collection("userPins").doc(normName(name));
+async function getPersonPin(name) {
+  try { const d = await personPinDoc(name).get(); return d.exists ? d.data().pin : null; }
+  catch (e) { return null; }
+}
+async function savePersonPin(name, pin) { await personPinDoc(name).set({ pin, time: Date.now() }); }
+
+// 이름으로 로그인 검증: 통합 PIN → (없으면) 반별 개별 PIN → 기본 PIN 순서로 확인.
+// 반별 개별 PIN으로 성공하면 통합 PIN으로 자동 이전(마이그레이션).
+async function verifyPersonPin(name, pin, candidates) {
+  const gpin = await getPersonPin(name);
+  if (gpin) return pin === gpin;
+  // 반별 커스텀 PIN 확인 (있는 것만)
+  for (const x of candidates) {
+    let custom = null;
+    try { custom = await getStudentPin(x.cls.id, x.member.id); } catch (e) {}
+    if (custom && pin === custom) {
+      try { await savePersonPin(name, pin); } catch (e) {} // 통합 PIN으로 이전
+      return true;
+    }
+  }
+  // 기본 PIN (초기비번은 통합 저장 안 함 - 나중에 바꾼 비번이 기준이 되도록)
+  for (const x of candidates) {
+    const def = x.member.defaultPin || DEFAULT_PIN;
+    if (pin === def) return true;
+  }
+  return false;
+}
+
 // ----- 선생님 계정 -----
 const teachersCol = () => db.collection("teachers");
 async function listTeachers() {
@@ -730,19 +761,20 @@ function StudentGate({ onClsChange }) {
     if (!nm) { setErr("이름을 입력해주세요"); return; }
     if (pin.length !== 4) { setErr("PIN 4자리를 입력해주세요"); return; }
     setBusy(true); setErr("");
-    const found = [];
-    for (const c of CLASSES) {
-      const u = (c.roster || []).find((r) => norm(r.name) === nm);
-      if (!u) continue;
-      let real = DEFAULT_PIN;
-      try { real = (await getStudentPin(c.id, u.id)) || u.defaultPin || DEFAULT_PIN; }
-      catch (e) { real = u.defaultPin || DEFAULT_PIN; }
-      if (pin === real) found.push({ cls: c, member: u });
+    // 이름이 있는 모든 반 = 같은 사람의 반들
+    const candidates = CLASSES
+      .map((c) => ({ cls: c, member: (c.roster || []).find((r) => norm(r.name) === nm) }))
+      .filter((x) => x.member);
+    if (candidates.length === 0) {
+      setBusy(false);
+      setErr("명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해주세요.");
+      return;
     }
+    const okPin = await verifyPersonPin(nm, pin, candidates);
     setBusy(false);
-    if (found.length === 0) { setErr("이름 또는 PIN이 올바르지 않아요. 이름은 띄어쓰기 없이 정확히 입력해주세요."); return; }
-    setMatches(found);
-    if (found.length === 1) setCls(found[0].cls);
+    if (!okPin) { setErr("PIN이 올바르지 않아요."); return; }
+    setMatches(candidates);
+    if (candidates.length === 1) setCls(candidates[0].cls);
   }
   function fullLogout() { setMatches(null); setCls(null); setPin(""); setErr(""); }
 
@@ -800,8 +832,8 @@ function StudentView({ cls, onBack }) {
   async function login() {
     const u = cls.roster.find((r) => norm(r.name) === norm(name));
     if (!u) { setErr("명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해줘."); return; }
-    const real = (await getStudentPin(cls.id, u.id)) || u.defaultPin || DEFAULT_PIN;
-    if (pin !== real) { setErr("PIN이 올바르지 않습니다"); return; }
+    const okPin = await verifyPersonPin(norm(name), pin, [{ cls, member: u }]);
+    if (!okPin) { setErr("PIN이 올바르지 않습니다"); return; }
     setErr(""); setPin(""); setName(""); setMe(u);
   }
 
@@ -1100,7 +1132,7 @@ function ChangePin({ cls, me, onDone }) {
   async function save() {
     if (p1.length !== 4) { setMsg("PIN은 4자리로 입력해줘"); return; }
     if (p1 !== p2) { setMsg("두 번 입력한 PIN이 달라"); return; }
-    try { await saveStudentPin(cls.id, me.id, p1); setMsg("비밀번호가 변경됐어요"); setTimeout(onDone, 800); }
+    try { await savePersonPin(me.name, p1); setMsg("비밀번호가 변경됐어요"); setTimeout(onDone, 800); }
     catch (e) { setMsg("저장에 실패했어요. 잠시 후 다시 시도해줘"); }
   }
   return (
