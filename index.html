@@ -522,6 +522,20 @@ async function saveClassMeta(cid, name, classDays) {
 const aiLogsCol = (cid) => classDoc(cid).collection("aiLogs");
 async function addAiLog(cid, log) { await aiLogsCol(cid).add(log); }
 
+// ----- 상담 기록 (consultations 컬렉션) -----
+const CONSULT_CATS = [
+  { key: "learning", label: "학습·성적", color: "#2b5f8a", bg: "#e3edf5" },
+  { key: "attitude", label: "태도·생활", color: "#3f7d5e", bg: "#e7f0ea" },
+  { key: "career", label: "진로·입시", color: "#8a5a2b", bg: "#f6ecdf" },
+];
+const catInfo = (k) => CONSULT_CATS.find((c) => c.key === k) || { label: k, color: "#7c8294", bg: "#f0ece5" };
+const CONSULT_WITH = [{ key: "student", label: "학생" }, { key: "parent", label: "학부모" }];
+
+const consultCol = () => db.collection("consultations");
+async function addConsult(rec) { await consultCol().add({ ...rec, time: Date.now() }); }
+async function updateConsult(id, patch) { await consultCol().doc(id).update(patch); }
+async function deleteConsult(id) { await consultCol().doc(id).delete(); }
+
 // ----- 위험신호 대시보드: 전 반 최근 수업 집계 -----
 async function computeRiskData(recentN) {
   const N = recentN || 6; // 최근 N회 수업 기준
@@ -881,6 +895,189 @@ function MathText({ text }) {
     return out;
   }, [text]);
   return <span dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+function ConsultForm({ cls, meName, editing, onDone, onCancel }) {
+  const students = cls.roster.filter((r) => !r.teacher);
+  const [sid, setSid] = useState(editing ? editing.sid : (students[0] ? students[0].id : ""));
+  const [withWho, setWithWho] = useState(editing ? editing.withWho : "student");
+  const [cat, setCat] = useState(editing ? editing.cat : "learning");
+  const [date, setDate] = useState(editing ? editing.date : todayStr);
+  const [content, setContent] = useState(editing ? editing.content : "");
+  const [needFollow, setNeedFollow] = useState(editing ? !!editing.needFollow : false);
+  const [followNote, setFollowNote] = useState(editing ? (editing.followNote || "") : "");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (busy) return;
+    if (!sid) { setMsg("학생을 선택해주세요"); return; }
+    if (!content.trim()) { setMsg("상담 내용을 입력해주세요"); return; }
+    const st = students.find((s) => s.id === sid);
+    setBusy(true); setMsg("");
+    try {
+      const rec = {
+        cid: cls.id, cname: cls.name, sid, sname: st ? st.name : "",
+        withWho, cat, date, content: content.trim(),
+        needFollow, followNote: needFollow ? followNote.trim() : "",
+        teacher: meName || "",
+      };
+      if (editing) {
+        await updateConsult(editing.id, { ...rec, followDone: needFollow ? !!editing.followDone : false });
+      } else {
+        await addConsult({ ...rec, followDone: false });
+      }
+      onDone();
+    } catch (e) { setMsg("저장 실패: " + e.message); setBusy(false); }
+  }
+
+  return (
+    <div style={{borderTop: "1px solid var(--line)", paddingTop: 14, marginTop: 6}}>
+      <h4 className="cm-h3" style={{fontSize: 15, margin: "0 0 10px"}}>{editing ? "상담 기록 수정" : "새 상담 기록"}</h4>
+      <label className="cm-label">학생</label>
+      <select className="cm-input" value={sid} onChange={(e) => setSid(e.target.value)}>
+        {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+      </select>
+      <label className="cm-label">상담 대상</label>
+      <div style={{display: "flex", gap: 6, marginBottom: 4}}>
+        {CONSULT_WITH.map((w) => (
+          <button key={w.key} className={"cm-ab-tab" + (withWho === w.key ? " on" : "")} onClick={() => setWithWho(w.key)}>{w.label}</button>
+        ))}
+      </div>
+      <label className="cm-label">분류</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4}}>
+        {CONSULT_CATS.map((c) => (
+          <button key={c.key} className={"cm-ab-tab" + (cat === c.key ? " on" : "")} onClick={() => setCat(c.key)}>{c.label}</button>
+        ))}
+      </div>
+      <label className="cm-label">상담 날짜</label>
+      <input className="cm-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      <label className="cm-label">상담 내용</label>
+      <textarea className="cm-input cm-notice-ta" rows={5} placeholder="상담 내용을 입력하세요"
+        value={content} onChange={(e) => setContent(e.target.value)} />
+      <div style={{display: "flex", alignItems: "center", gap: 8, margin: "10px 0 4px", cursor: "pointer"}} onClick={() => setNeedFollow(!needFollow)}>
+        <span style={{width: 20, height: 20, borderRadius: 6, border: "1px solid var(--line)", background: needFollow ? "var(--clay)" : "#fff", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flex: "none"}}>{needFollow ? "✓" : ""}</span>
+        <span style={{fontSize: 14, fontWeight: 600}}>후속 조치가 필요해요</span>
+      </div>
+      {needFollow && (
+        <textarea className="cm-input cm-notice-ta" rows={2} placeholder="어떤 조치가 필요한가요? (예: 다음 주 학부모 재통화, 보충 수업 배정)"
+          value={followNote} onChange={(e) => setFollowNote(e.target.value)} />
+      )}
+      {msg && <div className="cm-err">{msg}</div>}
+      <div style={{display: "flex", gap: 10}}>
+        <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy} onClick={submit}>{busy ? "저장 중..." : "저장"}</button>
+        <button className="cm-btn cm-btn-ghost" style={{margin: 0}} onClick={onCancel}>취소</button>
+      </div>
+    </div>
+  );
+}
+
+function ConsultView({ cls, canEdit, meName }) {
+  const [list, setList] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  const [filter, setFilter] = useState("all"); // all | follow | 학생id
+  const [catFilter, setCatFilter] = useState("");
+
+  useEffect(() => consultCol().where("cid", "==", cls.id).onSnapshot((s) => {
+    const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() }));
+    arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.time - a.time);
+    setList(arr);
+  }, (e) => { console.error("상담 로드 실패", e); setList([]); }), [cls.id]);
+
+  if (list === null) return <div className="cm-empty">불러오는 중…</div>;
+
+  const followPending = list.filter((c) => c.needFollow && !c.followDone);
+  let shown = list;
+  if (filter === "follow") shown = followPending;
+  else if (filter !== "all") shown = list.filter((c) => c.sid === filter);
+  if (catFilter) shown = shown.filter((c) => c.cat === catFilter);
+
+  const students = cls.roster.filter((r) => !r.teacher);
+
+  return (
+    <div>
+      {followPending.length > 0 && filter !== "follow" && (
+        <div style={{background: "#f6e7df", border: "1px solid #e8c9b5", borderRadius: 12, padding: "11px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8}}>
+          <span style={{fontSize: 14, color: "#c2703f", fontWeight: 700}}>후속 조치 대기 {followPending.length}건</span>
+          <button className="cm-link" style={{marginLeft: "auto"}} onClick={() => setFilter("follow")}>보기 →</button>
+        </div>
+      )}
+
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8}}>
+        <button className={"cm-ab-tab" + (filter === "all" ? " on" : "")} onClick={() => setFilter("all")}>전체 {list.length}</button>
+        <button className={"cm-ab-tab" + (filter === "follow" ? " on" : "")} onClick={() => setFilter("follow")}>후속조치 {followPending.length}</button>
+        {students.map((st) => {
+          const cnt = list.filter((c) => c.sid === st.id).length;
+          if (cnt === 0) return null;
+          return <button key={st.id} className={"cm-ab-tab" + (filter === st.id ? " on" : "")} onClick={() => setFilter(st.id)}>{st.name} {cnt}</button>;
+        })}
+      </div>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12}}>
+        <button className={"cm-ab-tab" + (catFilter === "" ? " on" : "")} onClick={() => setCatFilter("")}>전체 분류</button>
+        {CONSULT_CATS.map((c) => (
+          <button key={c.key} className={"cm-ab-tab" + (catFilter === c.key ? " on" : "")} onClick={() => setCatFilter(c.key)}>{c.label}</button>
+        ))}
+      </div>
+
+      {shown.length === 0 && <div className="cm-empty">{filter === "follow" ? "후속 조치가 필요한 상담이 없어요 👍" : "아직 상담 기록이 없어요"}</div>}
+
+      {shown.map((c) => {
+        const ci = catInfo(c.cat);
+        const pending = c.needFollow && !c.followDone;
+        return (
+          <div key={c.id} style={{borderBottom: "1px solid var(--line)", padding: "12px 0", borderLeft: pending ? "3px solid var(--clay)" : "3px solid transparent", paddingLeft: 10, marginLeft: -10}}>
+            <div style={{display: "flex", alignItems: "center", gap: 7, cursor: "pointer", flexWrap: "wrap"}} onClick={() => setOpenId(openId === c.id ? null : c.id)}>
+              <strong>{c.sname}</strong>
+              <span className="cm-chip" style={{background: ci.bg, color: ci.color}}>{ci.label}</span>
+              <span className="cm-day-sub">{c.withWho === "parent" ? "학부모" : "학생"}</span>
+              {pending && <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f", fontWeight: 700}}>후속조치</span>}
+              {c.needFollow && c.followDone && <span className="cm-chip" style={{background: "#e7f0ea", color: "#3f7d5e"}}>조치완료</span>}
+              <span style={{marginLeft: "auto", fontSize: 11, color: "var(--muted)"}}>{c.date}</span>
+            </div>
+            {openId !== c.id && (
+              <div style={{fontSize: 13, color: "var(--muted)", marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{c.content}</div>
+            )}
+            {openId === c.id && (
+              <div style={{marginTop: 9}}>
+                <div style={{fontSize: 14, lineHeight: 1.65, whiteSpace: "pre-wrap"}}>{c.content}</div>
+                {c.needFollow && (
+                  <div style={{background: c.followDone ? "#e7f0ea" : "#f6e7df", borderRadius: 10, padding: "9px 12px", marginTop: 10}}>
+                    <div style={{fontSize: 12, fontWeight: 700, color: c.followDone ? "#3f7d5e" : "#c2703f", marginBottom: 3}}>{c.followDone ? "✓ 조치 완료" : "후속 조치 필요"}</div>
+                    <div style={{fontSize: 13, whiteSpace: "pre-wrap"}}>{c.followNote || "(내용 없음)"}</div>
+                  </div>
+                )}
+                <div style={{display: "flex", gap: 10, alignItems: "center", marginTop: 10, flexWrap: "wrap"}}>
+                  <span style={{fontSize: 11, color: "var(--muted)"}}>{c.teacher ? c.teacher + " 선생님 · " : ""}{fmtLogTime(c.time)} 기록</span>
+                  {canEdit && (
+                    <span style={{marginLeft: "auto", display: "flex", gap: 4}}>
+                      {c.needFollow && (
+                        <button className="cm-link" onClick={() => updateConsult(c.id, { followDone: !c.followDone })}>
+                          {c.followDone ? "조치 취소" : "조치 완료"}
+                        </button>
+                      )}
+                      <button className="cm-link" onClick={() => { setEditing(c); setAdding(false); }}>수정</button>
+                      <button className="cm-link" style={{color: "#d6453f"}} onClick={() => { if (confirm("이 상담 기록을 삭제할까요?")) deleteConsult(c.id); }}>삭제</button>
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {canEdit && !adding && !editing && (
+        <button className="cm-btn cm-btn-ghost" style={{marginTop: 14}} onClick={() => setAdding(true)}>+ 상담 기록 추가</button>
+      )}
+      {canEdit && (adding || editing) && (
+        <ConsultForm cls={cls} meName={meName} editing={editing}
+          onDone={() => { setAdding(false); setEditing(null); }}
+          onCancel={() => { setAdding(false); setEditing(null); }} />
+      )}
+    </div>
+  );
 }
 
 function AILogView({ cls }) {
@@ -1451,7 +1648,7 @@ function AdminView() {
       </div></div>
     );
   }
-  return <AdminDays cls={cls} canEdit={canEdit(cls)} isOwner={me.role === "owner"} onBack={() => setCls(null)} />;
+  return <AdminDays cls={cls} canEdit={canEdit(cls)} isOwner={me.role === "owner"} meName={me.name} onBack={() => setCls(null)} />;
 }
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
@@ -2177,7 +2374,7 @@ function useSwipeBack(onBack) {
   }, []);
 }
 
-function AdminDays({ cls, canEdit, isOwner, onBack }) {
+function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
   const [rosterVer, bumpVer] = useState(0);
   const [selected, setSelected] = useState(null);
   const [days, setDays] = useState(null);
@@ -2297,6 +2494,7 @@ function AdminDays({ cls, canEdit, isOwner, onBack }) {
         <button className={"cm-ab-tab" + (activeView === "progress" ? " on" : "")} onClick={() => setActiveView("progress")}>진도표</button>
         <button className={"cm-ab-tab" + (activeView === "notes" ? " on" : "")} onClick={() => setActiveView("notes")}>강의노트</button>
         <button className={"cm-ab-tab" + (activeView === "ailog" ? " on" : "")} onClick={() => setActiveView("ailog")}>AI질문</button>
+        <button className={"cm-ab-tab" + (activeView === "consult" ? " on" : "")} onClick={() => setActiveView("consult")}>상담</button>
         <button className={"cm-ab-tab" + (activeView === "textbooks" ? " on" : "")} onClick={() => setActiveView("textbooks")}>설정</button>
       </div>
 
@@ -2341,6 +2539,13 @@ function AdminDays({ cls, canEdit, isOwner, onBack }) {
         <div className="cm-card">
           <h3 className="cm-h3">AI 힌트 질문 내역 <span className="cm-h-hint">(학생이 AI에게 물어본 것)</span></h3>
           <AILogView cls={cls} />
+        </div>
+      )}
+
+      {activeView === "consult" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">상담 기록 <span className="cm-h-hint">(학생 · 학부모)</span></h3>
+          <ConsultView cls={cls} canEdit={canEdit} meName={meName} />
         </div>
       )}
 
