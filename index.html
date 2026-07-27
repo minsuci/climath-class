@@ -536,86 +536,46 @@ async function addConsult(rec) { await consultCol().add({ ...rec, time: Date.now
 async function updateConsult(id, patch) { await consultCol().doc(id).update(patch); }
 async function deleteConsult(id) { await consultCol().doc(id).delete(); }
 
-// ----- 위험신호 대시보드: 전 반 최근 수업 집계 -----
-async function computeRiskData(recentN) {
-  const N = recentN || 6; // 최근 N회 수업 기준
-  const result = []; // { cid, cname, sid, name, attRate, present, sessions, hwPct, avgScore, scoreTrend, risk, reasons }
-  for (const cls of CLASSES) {
-    // 이 반의 수업일(days) 최근 N개
-    let allDays = [];
-    try {
-      const s = await daysCol(cls.id).get();
-      s.forEach((d) => allDays.push(d.id));
-    } catch (e) { continue; }
-    allDays.sort();
-    const recent = allDays.slice(-N);
-    if (recent.length === 0) continue;
+// ----- 위험신호: 선생님이 상담에 표시한 위험도 기준 -----
+const RISK_LEVELS = [
+  { v: 0, label: "없음", color: "#7c8294", bg: "#f0ece5" },
+  { v: 1, label: "관심", color: "#2b5f8a", bg: "#e3edf5" },
+  { v: 2, label: "주의", color: "#c2703f", bg: "#f6e7df" },
+  { v: 3, label: "위험", color: "#d6453f", bg: "#fae3e2" },
+];
+const riskInfo = (v) => RISK_LEVELS.find((r) => r.v === (v || 0)) || RISK_LEVELS[0];
 
-    // 각 날짜의 출석/점수 로드
-    const attByDate = {}, scoreByDate = {};
-    for (const date of recent) {
-      try {
-        const as = await attCol(cls.id, date).get();
-        attByDate[date] = {}; as.forEach((d) => (attByDate[date][d.id] = true));
-      } catch (e) { attByDate[date] = {}; }
-      try {
-        const ss = await scoresCol(cls.id, date).get();
-        scoreByDate[date] = {}; ss.forEach((d) => { const v = d.data(); if (v.sid) (scoreByDate[date][v.sid] = scoreByDate[date][v.sid] || []).push(v); });
-      } catch (e) { scoreByDate[date] = {}; }
-    }
-    // 과제 진도 (homework)
-    const hwBySid = {};
-    try {
-      const hs = await hwCol(cls.id).get();
-      hs.forEach((d) => (hwBySid[d.id] = d.data().books || {}));
-    } catch (e) {}
-
-    const students = cls.roster.filter((r) => !r.teacher);
-    for (const st of students) {
-      // 개별진도반이면 그 학생 등원일만 계산 대상
-      const myDates = isIndividual(cls)
-        ? recent.filter((d) => (st.days || []).includes(new Date(d + "T00:00:00").getDay()))
-        : recent;
-      if (myDates.length === 0) continue;
-      const present = myDates.filter((d) => attByDate[d] && attByDate[d][st.id]).length;
-      const attRate = Math.round(present / myDates.length * 100);
-
-      // 과제 완성률 (본인 교재 기준)
-      const books = getStudentBooks(cls, st);
-      const totalQ = books.reduce((s, b) => s + (b.total || 0), 0);
-      const doneQ = books.reduce((s, b) => s + ((hwBySid[st.id] && hwBySid[st.id][b.name]) ? hwBySid[st.id][b.name].length : 0), 0);
-      const hwPct = totalQ > 0 ? Math.round(doneQ / totalQ * 100) : null;
-
-      // 점수: 최근 순서대로
-      const myScores = [];
-      myDates.forEach((d) => { (scoreByDate[d] && scoreByDate[d][st.id] || []).forEach((v) => myScores.push(v)); });
-      const avgScore = myScores.length ? Math.round(myScores.reduce((s, v) => s + (v.score || 0), 0) / myScores.length) : null;
-      // 추세: 앞 절반 평균 vs 뒤 절반 평균
-      let scoreTrend = null;
-      if (myScores.length >= 2) {
-        const half = Math.floor(myScores.length / 2);
-        const early = myScores.slice(0, half), late = myScores.slice(half);
-        const em = early.reduce((s, v) => s + v.score, 0) / early.length;
-        const lm = late.reduce((s, v) => s + v.score, 0) / late.length;
-        scoreTrend = Math.round(lm - em);
-      }
-
-      // 위험 점수화
-      let risk = 0; const reasons = [];
-      if (attRate < 60) { risk += 3; reasons.push("결석 잦음 (" + attRate + "%)"); }
-      else if (attRate < 80) { risk += 1; reasons.push("출석률 " + attRate + "%"); }
-      if (hwPct !== null && hwPct < 30) { risk += 2; reasons.push("과제 미완 (" + hwPct + "%)"); }
-      else if (hwPct !== null && hwPct < 50) { risk += 1; reasons.push("과제 부진 (" + hwPct + "%)"); }
-      if (avgScore !== null && avgScore < 50) { risk += 2; reasons.push("점수 저조 (평균 " + avgScore + ")"); }
-      else if (avgScore !== null && avgScore < 70) { risk += 1; reasons.push("평균 " + avgScore + "점"); }
-      if (scoreTrend !== null && scoreTrend <= -15) { risk += 2; reasons.push("점수 하락 (" + scoreTrend + ")"); }
-      else if (scoreTrend !== null && scoreTrend <= -8) { risk += 1; reasons.push("점수 하락세"); }
-
-      result.push({ cid: cls.id, cname: cls.name, sid: st.id, name: st.name, attRate, present, sessions: myDates.length, hwPct, avgScore, scoreTrend, risk, reasons });
-    }
-  }
-  result.sort((a, b) => b.risk - a.risk || a.attRate - b.attRate);
-  return result;
+// 전 반 상담을 훑어 학생별 "가장 최근 위험도"를 집계
+async function computeRiskData() {
+  const s = await consultCol().get();
+  const all = [];
+  s.forEach((d) => all.push({ id: d.id, ...d.data() }));
+  // 학생별로 최신 상담 순 정렬
+  const byStudent = {};
+  all.forEach((c) => {
+    const key = c.cid + ":" + c.sid;
+    (byStudent[key] = byStudent[key] || []).push(c);
+  });
+  const out = [];
+  Object.keys(byStudent).forEach((key) => {
+    const arr = byStudent[key].sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.time || 0) - (a.time || 0));
+    const latestRisked = arr.find((c) => (c.risk || 0) > 0);
+    const current = arr[0];
+    // 최신 상담이 "없음"이면 해제된 것으로 본다
+    const active = latestRisked && arr.indexOf(latestRisked) === 0 ? latestRisked : (latestRisked && (current.risk || 0) > 0 ? current : null);
+    if (!active) return;
+    const pendingFollow = arr.filter((c) => c.needFollow && !c.followDone);
+    out.push({
+      cid: active.cid, cname: active.cname, sid: active.sid, sname: active.sname,
+      risk: active.risk || 0, cat: active.cat, withWho: active.withWho,
+      date: active.date, content: active.content, teacher: active.teacher,
+      pendingFollow: pendingFollow.length,
+      pendingNotes: pendingFollow.map((c) => c.followNote || c.content).slice(0, 3),
+      total: arr.length,
+    });
+  });
+  out.sort((a, b) => b.risk - a.risk || (b.date || "").localeCompare(a.date || ""));
+  return out;
 }
 
 // ----- 합반(질문 공유) -----
@@ -906,6 +866,7 @@ function ConsultForm({ cls, meName, editing, onDone, onCancel }) {
   const [content, setContent] = useState(editing ? editing.content : "");
   const [needFollow, setNeedFollow] = useState(editing ? !!editing.needFollow : false);
   const [followNote, setFollowNote] = useState(editing ? (editing.followNote || "") : "");
+  const [risk, setRisk] = useState(editing ? (editing.risk || 0) : 0);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -918,7 +879,7 @@ function ConsultForm({ cls, meName, editing, onDone, onCancel }) {
     try {
       const rec = {
         cid: cls.id, cname: cls.name, sid, sname: st ? st.name : "",
-        withWho, cat, date, content: content.trim(),
+        withWho, cat, date, content: content.trim(), risk,
         needFollow, followNote: needFollow ? followNote.trim() : "",
         teacher: meName || "",
       };
@@ -955,6 +916,13 @@ function ConsultForm({ cls, meName, editing, onDone, onCancel }) {
       <label className="cm-label">상담 내용</label>
       <textarea className="cm-input cm-notice-ta" rows={5} placeholder="상담 내용을 입력하세요"
         value={content} onChange={(e) => setContent(e.target.value)} />
+      <label className="cm-label">위험 신호</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4}}>
+        {RISK_LEVELS.map((r) => (
+          <button key={r.v} className={"cm-ab-tab" + (risk === r.v ? " on" : "")} onClick={() => setRisk(r.v)}>{r.label}</button>
+        ))}
+      </div>
+      <div className="cm-hint" style={{marginBottom: 4}}>표시하면 <b>위험신호 대시보드</b>에 올라와요. 나아지면 다음 상담에서 "없음"으로 기록하면 내려가요.</div>
       <div style={{display: "flex", alignItems: "center", gap: 8, margin: "10px 0 4px", cursor: "pointer"}} onClick={() => setNeedFollow(!needFollow)}>
         <span style={{width: 20, height: 20, borderRadius: 6, border: "1px solid var(--line)", background: needFollow ? "var(--clay)" : "#fff", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flex: "none"}}>{needFollow ? "✓" : ""}</span>
         <span style={{fontSize: 14, fontWeight: 600}}>후속 조치가 필요해요</span>
@@ -1032,6 +1000,7 @@ function ConsultView({ cls, canEdit, meName }) {
               <strong>{c.sname}</strong>
               <span className="cm-chip" style={{background: ci.bg, color: ci.color}}>{ci.label}</span>
               <span className="cm-day-sub">{c.withWho === "parent" ? "학부모" : "학생"}</span>
+              {(c.risk || 0) > 0 && <span className="cm-chip" style={{background: riskInfo(c.risk).bg, color: riskInfo(c.risk).color, fontWeight: 700}}>⚠ {riskInfo(c.risk).label}</span>}
               {pending && <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f", fontWeight: 700}}>후속조치</span>}
               {c.needFollow && c.followDone && <span className="cm-chip" style={{background: "#e7f0ea", color: "#3f7d5e"}}>조치완료</span>}
               <span style={{marginLeft: "auto", fontSize: 11, color: "var(--muted)"}}>{c.date}</span>
@@ -1482,54 +1451,75 @@ function ScoreForm({ cls, me }) {
 // ===== 선생님 화면 =====
 function RiskDashboard({ onBack }) {
   const [data, setData] = useState(null);
-  const [n, setN] = useState(6);
-  const [onlyRisk, setOnlyRisk] = useState(true);
-  useEffect(() => {
+  const [minRisk, setMinRisk] = useState(1);
+  function reload() {
     setData(null);
-    computeRiskData(n).then(setData).catch((e) => { console.error(e); setData([]); });
-  }, [n]);
-  const riskColor = (r) => r >= 4 ? "#d6453f" : r >= 2 ? "#e0913a" : "#3f7d5e";
-  const riskLabel = (r) => r >= 4 ? "높음" : r >= 2 ? "주의" : "양호";
-  const shown = data ? (onlyRisk ? data.filter((x) => x.risk >= 2) : data) : [];
+    computeRiskData().then(setData).catch((e) => { console.error(e); setData([]); });
+  }
+  useEffect(() => { reload(); }, []);
+
+  const shown = data ? data.filter((x) => x.risk >= minRisk) : [];
+  const counts = data ? { 3: data.filter((x) => x.risk === 3).length, 2: data.filter((x) => x.risk === 2).length, 1: data.filter((x) => x.risk === 1).length } : {};
+
   return (
     <div className="cm-stack">
       <div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 12}}>
-          <h2 className="cm-h2" style={{margin: 0}}>위험신호 대시보드</h2>
+          <h2 className="cm-h2" style={{margin: 0}}>위험신호</h2>
           <button className="cm-link" onClick={onBack}>← 돌아가기</button>
         </div>
-        <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4}}>
-          <span style={{fontSize: 13, color: "var(--muted)"}}>최근</span>
-          {[4, 6, 10].map((v) => (
-            <button key={v} className={"cm-ab-tab" + (n === v ? " on" : "")} onClick={() => setN(v)}>{v}회</button>
-          ))}
-          <button className={"cm-ab-tab" + (onlyRisk ? " on" : "")} style={{marginLeft: "auto"}} onClick={() => setOnlyRisk(!onlyRisk)}>{onlyRisk ? "주의 이상만" : "전체 보기"}</button>
+        {data !== null && (
+          <div style={{display: "flex", gap: 10, marginBottom: 12}}>
+            {[3, 2, 1].map((v) => {
+              const ri = riskInfo(v);
+              return (
+                <div key={v} style={{flex: 1, background: ri.bg, borderRadius: 12, padding: "11px 8px", textAlign: "center"}}>
+                  <div style={{fontSize: 22, fontWeight: 700, color: ri.color, fontFamily: "'Fraunces',serif"}}>{counts[v] || 0}</div>
+                  <div style={{fontSize: 12, color: ri.color}}>{ri.label}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
+          <span style={{fontSize: 13, color: "var(--muted)"}}>표시</span>
+          <button className={"cm-ab-tab" + (minRisk === 1 ? " on" : "")} onClick={() => setMinRisk(1)}>관심 이상</button>
+          <button className={"cm-ab-tab" + (minRisk === 2 ? " on" : "")} onClick={() => setMinRisk(2)}>주의 이상</button>
+          <button className={"cm-ab-tab" + (minRisk === 3 ? " on" : "")} onClick={() => setMinRisk(3)}>위험만</button>
+          <button className="cm-link" style={{marginLeft: "auto"}} onClick={reload}>새로고침</button>
         </div>
-        <div className="cm-hint">최근 {n}회 수업의 출석·과제·점수를 종합했어요. 실제 상황과 함께 참고용으로 봐주세요.</div>
+        <div className="cm-hint" style={{marginTop: 8}}>상담 기록에 표시한 위험 신호를 모았어요. 학생마다 <b>가장 최근 상담</b> 기준이에요.</div>
       </div>
 
-      {data === null && <div className="cm-card"><div className="cm-empty">집계하는 중… (수업이 많으면 잠시 걸려요)</div></div>}
-      {data !== null && shown.length === 0 && <div className="cm-card"><div className="cm-empty">{onlyRisk ? "주의가 필요한 학생이 없어요 👍" : "표시할 데이터가 없어요"}</div></div>}
+      {data === null && <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>}
+      {data !== null && shown.length === 0 && (
+        <div className="cm-card"><div className="cm-empty">표시된 위험 신호가 없어요 👍<br/><span style={{fontSize: 12}}>반 → 상담 탭에서 상담을 기록할 때 위험 신호를 표시할 수 있어요.</span></div></div>
+      )}
 
-      {shown.map((x) => (
-        <div key={x.cid + ":" + x.sid} className="cm-card" style={{borderLeft: "4px solid " + riskColor(x.risk), padding: "14px 16px"}}>
-          <div style={{display: "flex", alignItems: "center", gap: 8}}>
-            <strong style={{fontSize: 16}}>{x.name}</strong>
-            <span className="cm-day-sub">{x.cname}</span>
-            <span style={{marginLeft: "auto", fontSize: 12, fontWeight: 700, color: riskColor(x.risk)}}>{riskLabel(x.risk)}</span>
-          </div>
-          <div style={{display: "flex", gap: 14, marginTop: 8, fontSize: 13, color: "var(--ink)", flexWrap: "wrap"}}>
-            <span>출석 <b>{x.attRate}%</b> <span style={{color:"var(--muted)"}}>({x.present}/{x.sessions})</span></span>
-            {x.hwPct !== null && <span>과제 <b>{x.hwPct}%</b></span>}
-            {x.avgScore !== null && <span>평균 <b>{x.avgScore}점</b>{x.scoreTrend !== null && x.scoreTrend < 0 && <span style={{color:"#d6453f"}}> ▼{Math.abs(x.scoreTrend)}</span>}{x.scoreTrend !== null && x.scoreTrend > 0 && <span style={{color:"#3f7d5e"}}> ▲{x.scoreTrend}</span>}</span>}
-          </div>
-          {x.reasons.length > 0 && (
-            <div style={{display: "flex", gap: 5, flexWrap: "wrap", marginTop: 9}}>
-              {x.reasons.map((r, i) => <span key={i} className="cm-chip" style={{background: "#f6e7df", color: "#c2703f"}}>{r}</span>)}
+      {shown.map((x) => {
+        const ri = riskInfo(x.risk);
+        const ci = catInfo(x.cat);
+        return (
+          <div key={x.cid + ":" + x.sid} className="cm-card" style={{borderLeft: "4px solid " + ri.color, padding: "14px 16px"}}>
+            <div style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap"}}>
+              <strong style={{fontSize: 16}}>{x.sname}</strong>
+              <span className="cm-day-sub">{x.cname}</span>
+              <span className="cm-chip" style={{background: ci.bg, color: ci.color}}>{ci.label}</span>
+              <span style={{marginLeft: "auto", fontSize: 12, fontWeight: 700, color: ri.color}}>⚠ {ri.label}</span>
             </div>
-          )}
-        </div>
-      ))}
+            <div style={{fontSize: 14, lineHeight: 1.6, marginTop: 8, whiteSpace: "pre-wrap"}}>{x.content}</div>
+            {x.pendingFollow > 0 && (
+              <div style={{background: "#f6e7df", borderRadius: 10, padding: "9px 12px", marginTop: 10}}>
+                <div style={{fontSize: 12, fontWeight: 700, color: "#c2703f", marginBottom: 3}}>후속 조치 대기 {x.pendingFollow}건</div>
+                {x.pendingNotes.map((n, i) => <div key={i} style={{fontSize: 13, marginTop: 2}}>· {n}</div>)}
+              </div>
+            )}
+            <div style={{fontSize: 11, color: "var(--muted)", marginTop: 9}}>
+              {x.date} · {x.withWho === "parent" ? "학부모 상담" : "학생 상담"}{x.teacher ? " · " + x.teacher + " 선생님" : ""} · 누적 {x.total}회
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1642,7 +1632,7 @@ function AdminView() {
             </button>
           ))}
         </div>
-        <button className="cm-link" onClick={() => setMode("risk")}>⚠ 위험신호 대시보드</button>
+        <button className="cm-link" onClick={() => setMode("risk")}>⚠ 위험신호</button>
         <button className="cm-link" onClick={() => setMode("newclass")}>+ 새 반 만들기</button>
         {me.role === "owner" && <button className="cm-link" onClick={() => setMode("manage")}>⚙ 선생님 관리</button>}
       </div></div>
