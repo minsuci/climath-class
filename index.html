@@ -277,6 +277,31 @@ const DEFAULT_BOOKS = [
 ];
 const getBooks = (cls) => (cls && cls.books) || [];
 const isIndividual = (cls) => cls && cls.type === "individual";
+// ----- 수강 기간: 시작일/마지막 등원일 -----
+// endDate가 지나면 자동으로 명단에서 빠짐 (기록은 그대로 남음)
+function isActiveOn(st, date) {
+  if (!st) return false;
+  const d = date || todayStr;
+  if (st.startDate && d < st.startDate) return false;
+  if (st.endDate && d > st.endDate) return false;
+  return true;
+}
+const isEnded = (st) => !!(st && st.endDate && todayStr > st.endDate);
+// 기간 연장: 기준일(없거나 이미 지났으면 오늘)에서 n개월 뒤
+function addMonths(baseStr, n) {
+  const base = (baseStr && baseStr >= todayStr) ? baseStr : todayStr;
+  const d = new Date(base + "T00:00:00");
+  const day = d.getDate();
+  d.setMonth(d.getMonth() + n);
+  if (d.getDate() < day) d.setDate(0); // 말일 보정 (1/31 +1개월 → 2/28)
+  return ymd(d);
+}
+// 그 날짜에 수업 대상인 학생인가 (요일 + 기간)
+function attendsOn(cls, st, date) {
+  if (!isActiveOn(st, date)) return false;
+  if (!isIndividual(cls)) return true;
+  return (st.days || []).includes(new Date(date + "T00:00:00").getDay());
+}
 const getStudentBooks = (cls, st) => isIndividual(cls) ? ((st && st.books) || []) : getBooks(cls);
 function getClassAllBooks(cls) {
   if (!isIndividual(cls)) return getBooks(cls);
@@ -545,37 +570,72 @@ const RISK_LEVELS = [
 ];
 const riskInfo = (v) => RISK_LEVELS.find((r) => r.v === (v || 0)) || RISK_LEVELS[0];
 
-// 전 반 상담을 훑어 학생별 "가장 최근 위험도"를 집계
+// 날짜(YYYY-MM-DD) → 오늘까지 경과일
+function daysSince(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + "T00:00:00");
+  if (isNaN(d)) return null;
+  const t = new Date(todayStr + "T00:00:00");
+  return Math.round((t - d) / 86400000);
+}
+
+// 전 반 상담을 훑어 ① 표시된 위험신호 ② 상담 공백(오래됨) 집계
 async function computeRiskData() {
   const s = await consultCol().get();
   const all = [];
   s.forEach((d) => all.push({ id: d.id, ...d.data() }));
-  // 학생별로 최신 상담 순 정렬
+
   const byStudent = {};
   all.forEach((c) => {
     const key = c.cid + ":" + c.sid;
     (byStudent[key] = byStudent[key] || []).push(c);
   });
-  const out = [];
-  Object.keys(byStudent).forEach((key) => {
-    const arr = byStudent[key].sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.time || 0) - (a.time || 0));
-    const latestRisked = arr.find((c) => (c.risk || 0) > 0);
-    const current = arr[0];
-    // 최신 상담이 "없음"이면 해제된 것으로 본다
-    const active = latestRisked && arr.indexOf(latestRisked) === 0 ? latestRisked : (latestRisked && (current.risk || 0) > 0 ? current : null);
-    if (!active) return;
-    const pendingFollow = arr.filter((c) => c.needFollow && !c.followDone);
-    out.push({
-      cid: active.cid, cname: active.cname, sid: active.sid, sname: active.sname,
-      risk: active.risk || 0, cat: active.cat, withWho: active.withWho,
-      date: active.date, content: active.content, teacher: active.teacher,
-      pendingFollow: pendingFollow.length,
-      pendingNotes: pendingFollow.map((c) => c.followNote || c.content).slice(0, 3),
-      total: arr.length,
+
+  const flagged = [];
+  const gaps = [];
+
+  CLASSES.forEach((cls) => {
+    (cls.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => {
+      const key = cls.id + ":" + st.id;
+      const arr = (byStudent[key] || []).sort(
+        (a, b) => (b.date || "").localeCompare(a.date || "") || (b.time || 0) - (a.time || 0)
+      );
+      const pendingFollow = arr.filter((c) => c.needFollow && !c.followDone);
+
+      // ① 위험 표시: 가장 최근 상담 기준 (최근 상담이 "없음"이면 해제된 것)
+      const latest = arr[0];
+      if (latest && (latest.risk || 0) > 0) {
+        flagged.push({
+          cid: cls.id, cname: cls.name, sid: st.id, sname: st.name,
+          risk: latest.risk, cat: latest.cat, withWho: latest.withWho,
+          date: latest.date, content: latest.content, teacher: latest.teacher,
+          ageDays: daysSince(latest.date),
+          pendingFollow: pendingFollow.length,
+          pendingNotes: pendingFollow.map((c) => c.followNote || c.content).slice(0, 3),
+          total: arr.length,
+        });
+      }
+
+      // ② 상담 공백: 마지막 상담일로부터 경과일 (기록 없으면 null)
+      gaps.push({
+        cid: cls.id, cname: cls.name, sid: st.id, sname: st.name,
+        lastDate: latest ? latest.date : null,
+        gapDays: latest ? daysSince(latest.date) : null,
+        total: arr.length,
+        hasRisk: latest ? (latest.risk || 0) > 0 : false,
+      });
     });
   });
-  out.sort((a, b) => b.risk - a.risk || (b.date || "").localeCompare(a.date || ""));
-  return out;
+
+  flagged.sort((a, b) => b.risk - a.risk || (b.date || "").localeCompare(a.date || ""));
+  // 기록 없는 학생 먼저, 그다음 오래된 순
+  gaps.sort((a, b) => {
+    if (a.gapDays === null && b.gapDays === null) return 0;
+    if (a.gapDays === null) return -1;
+    if (b.gapDays === null) return 1;
+    return b.gapDays - a.gapDays;
+  });
+  return { flagged, gaps };
 }
 
 // ----- 합반(질문 공유) -----
@@ -1451,15 +1511,18 @@ function ScoreForm({ cls, me }) {
 // ===== 선생님 화면 =====
 function RiskDashboard({ onBack }) {
   const [data, setData] = useState(null);
-  const [minRisk, setMinRisk] = useState(1);
+  const [tab, setTab] = useState("flag"); // flag | gap
+  const [gapDays, setGapDays] = useState(60);
   function reload() {
     setData(null);
-    computeRiskData().then(setData).catch((e) => { console.error(e); setData([]); });
+    computeRiskData().then(setData).catch((e) => { console.error(e); setData({ flagged: [], gaps: [] }); });
   }
   useEffect(() => { reload(); }, []);
 
-  const shown = data ? data.filter((x) => x.risk >= minRisk) : [];
-  const counts = data ? { 3: data.filter((x) => x.risk === 3).length, 2: data.filter((x) => x.risk === 2).length, 1: data.filter((x) => x.risk === 1).length } : {};
+  const flagged = data ? data.flagged : [];
+  const overdue = data ? data.gaps.filter((g) => g.gapDays === null || g.gapDays >= gapDays) : [];
+  const counts = { 3: flagged.filter((x) => x.risk === 3).length, 2: flagged.filter((x) => x.risk === 2).length, 1: flagged.filter((x) => x.risk === 1).length };
+  const gapText = (g) => g.gapDays === null ? "상담 기록 없음" : g.gapDays + "일째";
 
   return (
     <div className="cm-stack">
@@ -1468,8 +1531,19 @@ function RiskDashboard({ onBack }) {
           <h2 className="cm-h2" style={{margin: 0}}>위험신호</h2>
           <button className="cm-link" onClick={onBack}>← 돌아가기</button>
         </div>
-        {data !== null && (
-          <div style={{display: "flex", gap: 10, marginBottom: 12}}>
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
+          <button className={"cm-ab-tab" + (tab === "flag" ? " on" : "")} onClick={() => setTab("flag")}>표시된 신호 {flagged.length}</button>
+          <button className={"cm-ab-tab" + (tab === "gap" ? " on" : "")} onClick={() => setTab("gap")}>상담 공백 {overdue.length}</button>
+          <button className="cm-link" style={{marginLeft: "auto"}} onClick={reload}>새로고침</button>
+        </div>
+      </div>
+
+      {data === null && <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>}
+
+      {/* ---- 표시된 신호 ---- */}
+      {data !== null && tab === "flag" && (<>
+        <div className="cm-card">
+          <div style={{display: "flex", gap: 10}}>
             {[3, 2, 1].map((v) => {
               const ri = riskInfo(v);
               return (
@@ -1480,46 +1554,75 @@ function RiskDashboard({ onBack }) {
               );
             })}
           </div>
-        )}
-        <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
-          <span style={{fontSize: 13, color: "var(--muted)"}}>표시</span>
-          <button className={"cm-ab-tab" + (minRisk === 1 ? " on" : "")} onClick={() => setMinRisk(1)}>관심 이상</button>
-          <button className={"cm-ab-tab" + (minRisk === 2 ? " on" : "")} onClick={() => setMinRisk(2)}>주의 이상</button>
-          <button className={"cm-ab-tab" + (minRisk === 3 ? " on" : "")} onClick={() => setMinRisk(3)}>위험만</button>
-          <button className="cm-link" style={{marginLeft: "auto"}} onClick={reload}>새로고침</button>
+          <div className="cm-hint" style={{marginTop: 10}}>상담에 표시한 신호예요. 학생마다 <b>가장 최근 상담</b> 기준이고, 나아지면 다음 상담에서 "없음"으로 기록하면 내려가요.</div>
         </div>
-        <div className="cm-hint" style={{marginTop: 8}}>상담 기록에 표시한 위험 신호를 모았어요. 학생마다 <b>가장 최근 상담</b> 기준이에요.</div>
-      </div>
 
-      {data === null && <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>}
-      {data !== null && shown.length === 0 && (
-        <div className="cm-card"><div className="cm-empty">표시된 위험 신호가 없어요 👍<br/><span style={{fontSize: 12}}>반 → 상담 탭에서 상담을 기록할 때 위험 신호를 표시할 수 있어요.</span></div></div>
-      )}
+        {flagged.length === 0 && <div className="cm-card"><div className="cm-empty">표시된 위험 신호가 없어요 👍</div></div>}
 
-      {shown.map((x) => {
-        const ri = riskInfo(x.risk);
-        const ci = catInfo(x.cat);
-        return (
-          <div key={x.cid + ":" + x.sid} className="cm-card" style={{borderLeft: "4px solid " + ri.color, padding: "14px 16px"}}>
-            <div style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap"}}>
-              <strong style={{fontSize: 16}}>{x.sname}</strong>
-              <span className="cm-day-sub">{x.cname}</span>
-              <span className="cm-chip" style={{background: ci.bg, color: ci.color}}>{ci.label}</span>
-              <span style={{marginLeft: "auto", fontSize: 12, fontWeight: 700, color: ri.color}}>⚠ {ri.label}</span>
-            </div>
-            <div style={{fontSize: 14, lineHeight: 1.6, marginTop: 8, whiteSpace: "pre-wrap"}}>{x.content}</div>
-            {x.pendingFollow > 0 && (
-              <div style={{background: "#f6e7df", borderRadius: 10, padding: "9px 12px", marginTop: 10}}>
-                <div style={{fontSize: 12, fontWeight: 700, color: "#c2703f", marginBottom: 3}}>후속 조치 대기 {x.pendingFollow}건</div>
-                {x.pendingNotes.map((n, i) => <div key={i} style={{fontSize: 13, marginTop: 2}}>· {n}</div>)}
+        {flagged.map((x) => {
+          const ri = riskInfo(x.risk);
+          const ci = catInfo(x.cat);
+          const stale = x.ageDays !== null && x.ageDays >= 45;
+          return (
+            <div key={x.cid + ":" + x.sid} className="cm-card" style={{borderLeft: "4px solid " + ri.color, padding: "14px 16px"}}>
+              <div style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap"}}>
+                <strong style={{fontSize: 16}}>{x.sname}</strong>
+                <span className="cm-day-sub">{x.cname}</span>
+                <span className="cm-chip" style={{background: ci.bg, color: ci.color}}>{ci.label}</span>
+                <span style={{marginLeft: "auto", fontSize: 12, fontWeight: 700, color: ri.color}}>⚠ {ri.label}</span>
               </div>
-            )}
-            <div style={{fontSize: 11, color: "var(--muted)", marginTop: 9}}>
-              {x.date} · {x.withWho === "parent" ? "학부모 상담" : "학생 상담"}{x.teacher ? " · " + x.teacher + " 선생님" : ""} · 누적 {x.total}회
+              <div style={{fontSize: 14, lineHeight: 1.6, marginTop: 8, whiteSpace: "pre-wrap"}}>{x.content}</div>
+              {x.pendingFollow > 0 && (
+                <div style={{background: "#f6e7df", borderRadius: 10, padding: "9px 12px", marginTop: 10}}>
+                  <div style={{fontSize: 12, fontWeight: 700, color: "#c2703f", marginBottom: 3}}>후속 조치 대기 {x.pendingFollow}건</div>
+                  {x.pendingNotes.map((n, i) => <div key={i} style={{fontSize: 13, marginTop: 2}}>· {n}</div>)}
+                </div>
+              )}
+              {stale && (
+                <div style={{background: "#f0ece5", borderRadius: 10, padding: "8px 12px", marginTop: 10, fontSize: 12, color: "#7c6f5f"}}>
+                  이 신호가 표시된 지 {x.ageDays}일 됐어요. 지금도 유효한지 확인이 필요해요.
+                </div>
+              )}
+              <div style={{fontSize: 11, color: "var(--muted)", marginTop: 9}}>
+                {x.date}{x.ageDays !== null && " (" + (x.ageDays === 0 ? "오늘" : x.ageDays + "일 전") + ")"} · {x.withWho === "parent" ? "학부모 상담" : "학생 상담"}{x.teacher ? " · " + x.teacher + " 선생님" : ""} · 누적 {x.total}회
+              </div>
             </div>
+          );
+        })}
+      </>)}
+
+      {/* ---- 상담 공백 ---- */}
+      {data !== null && tab === "gap" && (<>
+        <div className="cm-card">
+          <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
+            <span style={{fontSize: 13, color: "var(--muted)"}}>기준</span>
+            {[30, 60, 90].map((v) => (
+              <button key={v} className={"cm-ab-tab" + (gapDays === v ? " on" : "")} onClick={() => setGapDays(v)}>{v}일 이상</button>
+            ))}
           </div>
-        );
-      })}
+          <div className="cm-hint" style={{marginTop: 10}}>마지막 상담으로부터 오래된 순이에요. 위험 여부를 판단한 게 아니라, <b>한동안 이야기 나눈 적 없는 학생</b>을 알려주는 목록이에요.</div>
+        </div>
+
+        {overdue.length === 0 && <div className="cm-card"><div className="cm-empty">모든 학생을 최근에 만났어요 👍</div></div>}
+
+        {overdue.map((g) => {
+          const never = g.gapDays === null;
+          const hot = never || g.gapDays >= 90;
+          return (
+            <div key={g.cid + ":" + g.sid} className="cm-card" style={{borderLeft: "4px solid " + (hot ? "#c2703f" : "#c9bfae"), padding: "13px 16px"}}>
+              <div style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap"}}>
+                <strong style={{fontSize: 15}}>{g.sname}</strong>
+                <span className="cm-day-sub">{g.cname}</span>
+                {g.hasRisk && <span className="cm-chip" style={{background: "#fae3e2", color: "#d6453f"}}>위험 표시됨</span>}
+                <span style={{marginLeft: "auto", fontSize: 13, fontWeight: 700, color: hot ? "#c2703f" : "var(--muted)"}}>{gapText(g)}</span>
+              </div>
+              <div style={{fontSize: 11, color: "var(--muted)", marginTop: 6}}>
+                {never ? "아직 상담 기록이 없어요" : "마지막 상담 " + g.lastDate + " · 누적 " + g.total + "회"}
+              </div>
+            </div>
+          );
+        })}
+      </>)}
     </div>
   );
 }
@@ -1894,10 +1997,16 @@ function ProgressManager({ cls, canEdit }) {
   const students = cls.roster.filter((r) => !r.teacher);
   return (
     <div>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12}}>
+        <button className={"cm-ab-tab" + (statusFilter === "active" ? " on" : "")} onClick={() => setStatusFilter("active")}>수강 중 {allStudents.length - endedCount}</button>
+        <button className={"cm-ab-tab" + (statusFilter === "ended" ? " on" : "")} onClick={() => setStatusFilter("ended")}>종료 {endedCount}</button>
+        <button className={"cm-ab-tab" + (statusFilter === "all" ? " on" : "")} onClick={() => setStatusFilter("all")}>전체 {allStudents.length}</button>
+      </div>
+      {students.length === 0 && <div className="cm-empty">{statusFilter === "ended" ? "수강이 종료된 학생이 없어요" : "학생이 없어요"}</div>}
       {students.map((st) => (
         <div key={st.id} style={{borderBottom: "1px solid var(--line)", padding: "10px 0"}}>
           <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpen(open === st.id ? null : st.id)}>
-            <strong>{st.name}</strong>
+            <strong style={isEnded(st) ? {color: "var(--muted)"} : undefined}>{st.name}</strong>
             <span style={{marginLeft: "auto"}}>{open === st.id ? "▾" : "▸"}</span>
           </div>
           {open === st.id && <div style={{marginTop: 10}}><ProgressEditor cid={cls.id} pkey={st.id} canEdit={canEdit} title={st.name + " 학생"} /></div>}
@@ -1964,7 +2073,8 @@ function RosterManager({ cls, canEdit, onChanged }) {
       {students.map((st, i) => (
         <div key={st.id} style={{display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid var(--line)"}}>
           <span style={{color: "var(--muted)", fontSize: 13, width: 22}}>{i + 1}</span>
-          <strong>{st.name}</strong>
+          <strong style={isEnded(st) ? {color: "var(--muted)"} : undefined}>{st.name}</strong>
+          {isEnded(st) && <span className="cm-chip" style={{background: "#f0ece5", color: "#7c6f5f"}}>수강 종료 {st.endDate}</span>}
           {canEdit && (<span style={{marginLeft: "auto", display: "flex", gap: 2, alignItems: "center"}}>
             <button className="cm-link" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{padding: "0 4px"}}>▲</button>
             <button className="cm-link" disabled={busy || i === students.length - 1} onClick={() => move(i, 1)} style={{padding: "0 4px"}}>▼</button>
@@ -1984,7 +2094,12 @@ function StudentConfig({ cls, canEdit }) {
   const [open, setOpen] = useState(null);
   const [msg, setMsg] = useState({});
   const [busy, setBusy] = useState(false);
-  const students = roster.filter((r) => !r.teacher);
+  const [statusFilter, setStatusFilter] = useState("active"); // active | ended | all
+  const allStudents = roster.filter((r) => !r.teacher);
+  const students = allStudents.filter((r) =>
+    statusFilter === "all" ? true : statusFilter === "ended" ? isEnded(r) : !isEnded(r)
+  );
+  const endedCount = allStudents.filter(isEnded).length;
   function patch(sid, p) { setRoster((rs) => rs.map((r) => (r.id === sid ? { ...r, ...p } : r))); }
   function toggleDay(st, d) {
     const days = (st.days || []).includes(d) ? st.days.filter((x) => x !== d) : [...(st.days || []), d].sort();
@@ -1997,7 +2112,7 @@ function StudentConfig({ cls, canEdit }) {
     if (v.err) { setMsg({ [st.id]: v.err }); return; }
     setBusy(true); setMsg({});
     try {
-      const newRoster = roster.map((r) => (r.id === st.id ? { ...r, days: st.days, books: v.books } : r));
+      const newRoster = roster.map((r) => (r.id === st.id ? { ...r, days: st.days, books: v.books, startDate: st.startDate || "", endDate: st.endDate || "" } : r));
       await saveClassRoster(cls.id, newRoster);
       cls.roster = newRoster;
       setRoster(newRoster.map((r) => ({ ...r, days: [...(r.days || [])], books: (r.books || []).map((b) => ({ ...b })) })));
@@ -2015,6 +2130,8 @@ function StudentConfig({ cls, canEdit }) {
               {(st.days || []).length ? st.days.map((d) => DAY_NAMES[d]).join("·") : "요일 미설정"}
               {" · 교재 " + ((st.books || []).length) + "권"}
             </span>
+            {isEnded(st) && <span className="cm-chip" style={{background: "#f0ece5", color: "#7c6f5f"}}>수강 종료</span>}
+            {!isEnded(st) && st.endDate && <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f"}}>~{st.endDate}</span>}
             <span style={{marginLeft: "auto"}}>{open === st.id ? "▾" : "▸"}</span>
           </div>
           {open === st.id && (
@@ -2025,6 +2142,27 @@ function StudentConfig({ cls, canEdit }) {
                   <button key={i} disabled={!canEdit} className={"cm-ab-tab" + ((st.days || []).includes(i) ? " on" : "")} onClick={() => canEdit && toggleDay(st, i)}>{d}</button>
                 ))}
               </div>
+              <label className="cm-label">수강 기간 <span className="cm-h-hint">(마지막 등원일이 지나면 명단에서 자동으로 빠져요)</span></label>
+              <div style={{display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap"}}>
+                <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" disabled={!canEdit}
+                  value={st.startDate || ""} onChange={(e) => patch(st.id, { startDate: e.target.value })} />
+                <span style={{color: "var(--muted)"}}>~</span>
+                <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" disabled={!canEdit}
+                  value={st.endDate || ""} onChange={(e) => patch(st.id, { endDate: e.target.value })} />
+                {canEdit && (st.startDate || st.endDate) && (
+                  <button className="cm-link" onClick={() => patch(st.id, { startDate: "", endDate: "" })}>지우기</button>
+                )}
+              </div>
+              {canEdit && (
+                <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4, alignItems: "center"}}>
+                  <span style={{fontSize: 12, color: "var(--muted)"}}>빠른 연장</span>
+                  {[1, 2, 3, 6].map((n) => (
+                    <button key={n} className="cm-ab-tab" onClick={() => patch(st.id, { endDate: addMonths(st.endDate, n) })}>+{n}개월</button>
+                  ))}
+                  <button className="cm-ab-tab" onClick={() => patch(st.id, { endDate: "" })}>기한 없음</button>
+                </div>
+              )}
+              <div className="cm-hint" style={{marginBottom: 10}}>비워두면 기간 제한 없이 계속 다녀요.{isEnded(st) && " 이 학생은 수강이 끝나 현재 명단에서 빠져 있어요."}</div>
               <label className="cm-label">교재</label>
               {canEdit
                 ? <BookEditor books={st.books || []} onChange={(b) => patch(st.id, { books: b })} />
@@ -2693,7 +2831,7 @@ function AttendanceBook({ cls, canEdit }) {
             </thead>
             <tbody>
               {students.map((st) => {
-                const myDays = days.filter((d) => (st.days || []).includes(dowOf(d)));
+                const myDays = days.filter((d) => (st.days || []).includes(dowOf(d)) && isActiveOn(st, d));
                 const hw = hwData[st.id] || {};
                 const myBooks = getStudentBooks(cls, st);
                 const myTotal = myBooks.reduce((s, b) => s + b.total, 0);
@@ -2702,7 +2840,7 @@ function AttendanceBook({ cls, canEdit }) {
                 const attCount = myDays.filter((d) => attData[d] && attData[d][st.id]).length;
                 return (
                   <tr key={st.id}>
-                    <td className="cm-ab-name">{st.name}<br/><span style={{fontSize:10,color:"#8a7f72"}}>{(st.days || []).map((d) => DAY_NAMES[d]).join("·") || "요일 미설정"}</span></td>
+                    <td className="cm-ab-name" style={isEnded(st) ? {opacity: .55} : undefined}>{st.name}<br/><span style={{fontSize:10,color:"#8a7f72"}}>{isEnded(st) ? "수강 종료" : ((st.days || []).map((d) => DAY_NAMES[d]).join("·") || "요일 미설정")}</span></td>
                     <td style={{textAlign: "left"}}>
                       {myDays.length === 0 ? <span style={{color: "#bbb", fontSize: 12}}>이 달 기록 없음</span> : (
                         <div style={{display: "flex", gap: 5, flexWrap: "wrap"}}>
@@ -2891,8 +3029,8 @@ function AdminDay({ cls, date, canEdit, onBack }) {
   }, [cls.id, date, mergeKey]);
 
   const withKey = (r, cid) => ({ ...r, _cid: cid, _key: cid + ":" + r.id });
-  let roster = cls.roster.filter((r) => !r.teacher && (!isIndividual(cls) || (r.days || []).includes(dow))).map((r) => withKey(r, cls.id));
-  if (mergePartner) roster = roster.concat(mergePartner.roster.filter((r) => !r.teacher).map((r) => withKey(r, mergePartner.id)));
+  let roster = cls.roster.filter((r) => !r.teacher && attendsOn(cls, r, date)).map((r) => withKey(r, cls.id));
+  if (mergePartner) roster = roster.concat(mergePartner.roster.filter((r) => !r.teacher && attendsOn(mergePartner, r, date)).map((r) => withKey(r, mergePartner.id)));
   const presentIds = Object.keys(attendance);
   const waiting = questions.filter((q) => !q.resolved);
   const hwStudents = roster.filter((r) => hwDone[r._key] && getStudentBooks(findClass(r._cid) || cls, r).some((b) => (hwDone[r._key][b.name] || []).length > 0));
