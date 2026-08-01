@@ -384,6 +384,14 @@ async function getMyHw(cid, sid) {
   const d = await hwCol(cid).doc(sid).get();
   return d.exists ? (d.data().books || {}) : {};
 }
+async function setAttendance(cid, date, student, on) {
+  if (on) await attCol(cid, date).doc(student.id).set({ name: student.name, time: Date.now(), byTeacher: true });
+  else await attCol(cid, date).doc(student.id).delete();
+  touchDay(cid, date);
+}
+async function saveHwBookFor(cid, sid, sname, bookName, arr) {
+  await hwCol(cid).doc(sid).set({ name: sname, books: { [bookName]: arr } }, { merge: true });
+}
 async function saveHwBook(cid, me, bookName, arr) {
   await hwCol(cid).doc(me.id).set({ name: me.name, books: { [bookName]: arr } }, { merge: true });
   touchDay(cid, todayStr);
@@ -3110,7 +3118,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
 
   const dayRef = useSwipeBack(onBack);
 
-  if (detail) return <StudentDetail cls={findClass(detail._cid) || cls} student={detail} hwDone={{ [detail.id]: hwDone[detail._key] || {} }} questioned={{ [detail.id]: questioned[detail._key] || {} }} onBack={() => setDetail(null)} />;
+  if (detail) return <StudentDetail cls={findClass(detail._cid) || cls} student={detail} hwDone={{ [detail.id]: hwDone[detail._key] || {} }} questioned={{ [detail.id]: questioned[detail._key] || {} }} canEdit={canEdit} onBack={() => setDetail(null)} />;
 
   return (
     <div ref={dayRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
@@ -3130,15 +3138,30 @@ function AdminDay({ cls, date, canEdit, onBack }) {
       </div>
 
       <div className="cm-card">
-        <h3 className="cm-h3">출석 현황 <span className="cm-h-hint">(이름을 누르면 과제 표)</span></h3>
+        <div style={{display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap"}}>
+          <h3 className="cm-h3" style={{margin: 0}}>출석 현황 <span className="cm-h-hint">(체크로 출석 · 이름 누르면 상세)</span></h3>
+          {canEdit && roster.length > 0 && (
+            <button className="cm-link" style={{marginLeft: "auto"}} onClick={async () => {
+              const missing = roster.filter((r) => !attendance[r._key]);
+              if (missing.length === 0) { if (confirm("모두 출석 상태예요. 전체 출석을 취소할까요?")) { for (const r of roster) await setAttendance(r._cid, date, r, false); } return; }
+              if (!confirm("미출석 " + missing.length + "명을 모두 출석 처리할까요?")) return;
+              for (const r of missing) await setAttendance(r._cid, date, r, true);
+            }}>{roster.every((r) => attendance[r._key]) ? "전체 취소" : "전체 출석"}</button>
+          )}
+        </div>
         <div className="cm-roster">
           {roster.map((r) => {
             const a = attendance[r._key];
             return (
-              <button key={r._key} className={"cm-rost " + (a ? "in" : "")} onClick={() => setDetail(r)}>
-                <span className="cm-rost-name">{r.name}{mergePartner && r._cid !== cls.id && <span className="cm-day-sub" style={{marginLeft: 5, fontSize: 10}}>{mergePartner.name}</span>}</span>
-                <span className="cm-rost-t">{a ? hhmm(a.time) : "미출석"} ›</span>
-              </button>
+              <div key={r._key} className={"cm-rost " + (a ? "in" : "")} style={{display: "flex", alignItems: "center", gap: 10, cursor: "default"}}>
+                <span onClick={(e) => { e.stopPropagation(); if (canEdit) setAttendance(r._cid, date, r, !a); }}
+                  title={canEdit ? "탭하여 출석 처리" : ""}
+                  style={{width: 26, height: 26, flex: "none", borderRadius: 8, border: "1.5px solid " + (a ? "var(--green)" : "var(--line)"),
+                    background: a ? "var(--green)" : "#fff", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 15, cursor: canEdit ? "pointer" : "default"}}>{a ? "✓" : ""}</span>
+                <span className="cm-rost-name" style={{flex: 1, cursor: "pointer"}} onClick={() => setDetail(r)}>{r.name}{mergePartner && r._cid !== cls.id && <span className="cm-day-sub" style={{marginLeft: 5, fontSize: 10}}>{mergePartner.name}</span>}</span>
+                <span className="cm-rost-t" style={{cursor: "pointer"}} onClick={() => setDetail(r)}>{a ? hhmm(a.time) : "미출석"} ›</span>
+              </div>
             );
           })}
         </div>
@@ -3175,18 +3198,29 @@ function AdminDay({ cls, date, canEdit, onBack }) {
   );
 }
 
-function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
+function StudentDetail({ cls, student, hwDone, questioned, canEdit, onBack }) {
   const mine = hwDone[student.id] || {};
   const qmine = (questioned && questioned[student.id]) || {};
   const detailDivRef = useSwipeBack(onBack);
+  const [editHw, setEditHw] = useState(false);
+  const targetCid = student._cid || cls.id;
   return (
     <div ref={detailDivRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 현황으로</button>
         <div className="cm-daybar-date">{student.name} · 누적 진도</div>
+        {canEdit && <button className="cm-link" style={{marginLeft: "auto"}} onClick={() => setEditHw(!editHw)}>{editHw ? "완료" : "과제 체크"}</button>}
       </div>
+      {editHw && <div className="cm-hint">번호를 눌러 체크하거나, 길게 눌러 드래그하면 여러 개를 한 번에 칠할 수 있어요. 학생이 직접 체크한 것과 똑같이 기록돼요.</div>}
       {getStudentBooks(cls, student).map((b) => {
         const qnums = qmine[b.name] || [];
+        if (editHw) {
+          return (
+            <BookHwCard key={"e" + b.name} book={b} initial={mine[b.name] || []} qNumbers={qnums}
+              onClearQuestion={(n) => removeQuestioned(targetCid, student.id, b.name, n)}
+              onChange={(arr) => saveHwBookFor(targetCid, student.id, student.name, b.name, arr)} />
+          );
+        }
         return (
           <div className="cm-card" key={b.name}>
             <div className="cm-book-head">
@@ -3197,7 +3231,7 @@ function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
               <div className="cm-qchips">
                 <span className="cm-qchips-label">질문한 번호</span>
                 {qnums.slice().sort((x, y) => x - y).map((n) => (
-                  <button key={n} className="cm-qchip" onClick={() => removeQuestioned(cls.id, student.id, b.name, n)}>{n} ✕</button>
+                  <button key={n} className="cm-qchip" onClick={() => removeQuestioned(targetCid, student.id, b.name, n)}>{n} ✕</button>
                 ))}
               </div>
             )}
