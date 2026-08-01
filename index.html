@@ -248,12 +248,27 @@ details[open] .cm-resolved-summary::before { content: "▼ "; }
 .cm-rep-note{font-size:13px; line-height:1.7; white-space:pre-wrap; color:var(--ink);}
 .cm-rep-foot{margin-top:24px; font-size:11px; color:var(--muted); text-align:right;}
 .cm-rep-ul{margin:0; padding-left:18px; font-size:13px; line-height:1.7; color:var(--ink);}
+.cm-rep-pick{display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px;}
+.cm-rep-pick label{display:flex; align-items:center; gap:6px; font-size:13px; padding:7px 9px; border:1px solid var(--line); border-radius:9px; background:#fff; cursor:pointer;}
+.cm-rep-pick input{margin:0;}
+.cm-rep-cmt{margin-top:10px;}
+.cm-rep-prog{font-size:13px; color:var(--muted); text-align:center; padding:10px;}
+.cm-rep-none{font-size:12px; color:var(--clay); margin-top:6px;}
 @media print{
   body *{visibility:hidden;}
-  .cm-rep, .cm-rep *{visibility:visible;}
-  .cm-rep{position:absolute; left:0; top:0; width:100%; border:0; padding:0; margin:0; border-radius:0;}
+  .cm-reps, .cm-reps *{visibility:visible;}
+  .cm-reps{position:absolute; left:0; top:0; width:100%;}
+  .cm-rep{border:0; padding:0; margin:0 0 0 0; border-radius:0; page-break-after:always; break-after:page;}
+  .cm-rep:last-of-type{page-break-after:auto; break-after:auto;}
+  .cm-rep-table{font-size:10.5px;}
+  .cm-rep-table th, .cm-rep-table td{padding:4px 6px;}
+  .cm-rep-title{font-size:19px;}
+  .cm-rep-stat{padding:7px 11px; min-width:76px;}
+  .cm-rep-stat b{font-size:18px;}
+  .cm-rep-sec{margin-top:14px;}
+  .cm-rep-ul, .cm-rep-note{font-size:11px;}
   .cm-noprint{display:none!important;}
-  @page{margin:14mm;}
+  @page{size:A4; margin:13mm;}
 }
 </style>
 </head>
@@ -3391,164 +3406,258 @@ function PlogCard({ cls, student, date, canEdit, teacherName }) {
   );
 }
 
-// ===== 학습관리표 (기간별 리포트 · 인쇄) =====
+// ===== 학습관리표 (월간 결과지 · 기간 지정 · 인쇄/PDF) =====
+// 최근 n개월 목록 ["2026-07", "2026-06", ...]
+function monthOptions(n) {
+  const out = [];
+  const d = new Date(todayStr + "T00:00:00");
+  d.setDate(1);
+  for (let i = 0; i < n; i++) {
+    out.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
+    d.setMonth(d.getMonth() - 1);
+  }
+  return out;
+}
+function monthRange(ym) {
+  const y = Number(ym.split("-")[0]), m = Number(ym.split("-")[1]);
+  const last = new Date(y, m, 0).getDate();
+  return [ym + "-01", ym + "-" + String(last).padStart(2, "0")];
+}
+const monthLabel = (ym) => ym.split("-")[0] + "년 " + Number(ym.split("-")[1]) + "월";
+
+// 여러 학생을 한 번에 뽑아도 읽기 횟수가 늘지 않도록 날짜 단위로 한 번씩만 조회
+async function buildReportAgg(cls, sids, from, to, onProgress) {
+  const days = (await listDays(cls.id)).filter((d) => d >= from && d <= to).sort();
+  const att = {}, scores = {}, logs = {}, hw = {};
+  sids.forEach((s) => { att[s] = 0; scores[s] = []; logs[s] = []; });
+  for (let i = 0; i < days.length; i++) {
+    const d = days[i];
+    const a = await attCol(cls.id, d).get();
+    a.forEach((x) => { if (att[x.id] !== undefined) att[x.id]++; });
+    const sc = await scoresCol(cls.id, d).get();
+    sc.forEach((x) => { const v = x.data(); if (scores[v.sid]) scores[v.sid].push({ date: d, ...v }); });
+    if (onProgress) onProgress(i + 1, days.length);
+  }
+  const pl = await plogCol(cls.id).get();
+  pl.forEach((x) => {
+    const v = { id: x.id, ...x.data() };
+    if (logs[v.sid] && v.date >= from && v.date <= to) logs[v.sid].push(v);
+  });
+  Object.keys(logs).forEach((k) => logs[k].sort((a, b) => (a.date || "").localeCompare(b.date || "")));
+  const hwSnap = await hwCol(cls.id).get();
+  hwSnap.forEach((x) => { hw[x.id] = x.data().books || {}; });
+  return { days, att, scores, logs, hw };
+}
+
+// 결과지 한 장 (A4 1장 기준)
+function ReportSheet({ cls, st, from, to, agg, comment, periodLabel }) {
+  const logs = agg.logs[st.id] || [];
+  const scores = agg.scores[st.id] || [];
+  const hw = agg.hw[st.id] || {};
+  const attended = agg.att[st.id] || 0;
+  const expected = agg.days.filter((d) => attendsOn(cls, st, d)).length;
+  const avg = scores.length ? Math.round(scores.reduce((s, x) => s + (x.score || 0), 0) / scores.length) : null;
+  const allStuck = logs.reduce((acc, p) => acc.concat((p.stuck || []).map((s) => ({ s, date: p.date }))), []);
+  const books = getStudentBooks(cls, st);
+
+  return (
+    <div className="cm-rep">
+      <h2 className="cm-rep-title">{st.name} 학습관리표</h2>
+      <div className="cm-rep-sub">
+        CLIMATH · {cls.name} · {periodLabel || (from.split("-").join(".") + " ~ " + to.split("-").join("."))}
+      </div>
+
+      <div className="cm-rep-stats">
+        <div className="cm-rep-stat"><b>{attended}{expected > 0 && <span style={{ fontSize: 14 }}> / {expected}</span>}</b><span>출석</span></div>
+        <div className="cm-rep-stat"><b>{logs.length}</b><span>진도 기록</span></div>
+        <div className="cm-rep-stat"><b>{allStuck.length}</b><span>막힌 부분</span></div>
+        <div className="cm-rep-stat"><b>{avg === null ? "-" : avg}</b><span>평균 점수</span></div>
+      </div>
+
+      <div className="cm-rep-sec">
+        <div className="cm-rep-h">수업별 진도</div>
+        {logs.length === 0 ? (
+          <div className="cm-empty">이 기간에 기록된 진도가 없어요</div>
+        ) : (
+          <table className="cm-rep-table">
+            <thead><tr><th style={{ width: 62 }}>날짜</th><th>교재 · 범위</th><th>막혔던 부분</th></tr></thead>
+            <tbody>
+              {logs.map((p) => (
+                <tr key={p.id}>
+                  <td>{shortDate(p.date)}</td>
+                  <td>{plogLine(p) || "-"}{p.memo && <div style={{ color: "#7c8294", fontSize: 11.5, marginTop: 4 }}>{p.memo}</div>}</td>
+                  <td>{(p.stuck || []).length === 0 ? "-" : <ul className="cm-rep-ul" style={{ fontSize: 12.5, paddingLeft: 15 }}>{p.stuck.map((s, i) => <li key={i}>{s}</li>)}</ul>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {allStuck.length > 0 && (
+        <div className="cm-rep-sec">
+          <div className="cm-rep-h">보완이 필요한 부분 모아보기</div>
+          <ul className="cm-rep-ul">
+            {allStuck.map((x, i) => <li key={i}>{x.s} <span style={{ color: "#7c8294", fontSize: 11.5 }}>({shortDate(x.date)})</span></li>)}
+          </ul>
+        </div>
+      )}
+
+      {scores.length > 0 && (
+        <div className="cm-rep-sec">
+          <div className="cm-rep-h">테스트 점수</div>
+          <table className="cm-rep-table">
+            <thead><tr><th style={{ width: 62 }}>날짜</th><th>구분</th><th style={{ width: 68 }}>맞은 개수</th><th style={{ width: 52 }}>점수</th></tr></thead>
+            <tbody>
+              {scores.map((s, i) => (
+                <tr key={i}><td>{shortDate(s.date)}</td><td>{s.label || "-"}</td><td>{s.correct}/{s.total}</td><td><b>{s.score}</b></td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {books.length > 0 && (
+        <div className="cm-rep-sec">
+          <div className="cm-rep-h">교재 진행률 (누적)</div>
+          <table className="cm-rep-table">
+            <thead><tr><th>교재</th><th style={{ width: 88 }}>푼 문항</th><th style={{ width: 58 }}>진행률</th></tr></thead>
+            <tbody>
+              {books.map((b) => {
+                const n = (hw[b.name] || []).length;
+                return <tr key={b.name}><td>{b.name}</td><td>{n} / {b.total}</td><td>{b.total > 0 ? Math.round(n / b.total * 100) : 0}%</td></tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(comment || "").trim() && (
+        <div className="cm-rep-sec">
+          <div className="cm-rep-h">선생님 총평</div>
+          <div className="cm-rep-note">{comment.trim()}</div>
+        </div>
+      )}
+
+      <div className="cm-rep-foot">출력일 {fmtDate(todayStr)} · CLIMATH</div>
+    </div>
+  );
+}
+
 function StudyReport({ cls }) {
   const students = cls.roster.filter((r) => !r.teacher);
+  const months = monthOptions(12);
+  const [mode, setMode] = useState("month");          // "month" | "range"
+  const [month, setMonth] = useState(months[0]);
+  const [picks, setPicks] = useState(() => students.filter((r) => !isEnded(r)).map((r) => r.id));
   const [sid, setSid] = useState("");
   const [from, setFrom] = useState(shiftMonth(todayStr, -1));
   const [to, setTo] = useState(todayStr);
-  const [comment, setComment] = useState("");
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [comments, setComments] = useState({});
+  const [out, setOut] = useState(null);               // { list, agg, from, to, label }
+  const [prog, setProg] = useState("");
   const [err, setErr] = useState("");
 
+  const toggle = (id) => setPicks(picks.includes(id) ? picks.filter((x) => x !== id) : picks.concat(id));
+
   const build = async () => {
-    if (!sid) { setErr("학생을 선택해주세요"); return; }
-    if (from > to) { setErr("기간이 거꾸로예요"); return; }
-    setErr(""); setLoading(true); setData(null);
+    let f, t, list, label;
+    if (mode === "month") {
+      if (picks.length === 0) { setErr("학생을 1명 이상 선택해주세요"); return; }
+      const r = monthRange(month); f = r[0]; t = r[1];
+      list = students.filter((s) => picks.includes(s.id));
+      label = monthLabel(month);
+    } else {
+      if (!sid) { setErr("학생을 선택해주세요"); return; }
+      if (from > to) { setErr("기간이 거꾸로예요"); return; }
+      f = from; t = to;
+      list = students.filter((s) => s.id === sid);
+      label = "";
+    }
+    setErr(""); setOut(null); setProg("불러오는 중…");
     try {
-      const st = students.find((r) => r.id === sid);
-      const logs = await fetchPlogRange(cls.id, sid, from, to);
-      const allDays = await listDays(cls.id);
-      const days = allDays.filter((d) => d >= from && d <= to).sort();
-      let attended = 0;
-      const scores = [];
-      for (let i = 0; i < days.length; i++) {
-        const d = days[i];
-        const a = await attCol(cls.id, d).doc(sid).get();
-        if (a.exists) attended++;
-        const ss = await scoresCol(cls.id, d).get();
-        ss.forEach((x) => { const v = x.data(); if (v.sid === sid) scores.push({ date: d, ...v }); });
-      }
-      const expected = days.filter((d) => attendsOn(cls, st, d)).length;
-      const hwSnap = await hwCol(cls.id).doc(sid).get();
-      const hw = hwSnap.exists ? (hwSnap.data().books || {}) : {};
-      setData({ st, logs, attended, expected, scores, hw });
+      const agg = await buildReportAgg(cls, list.map((s) => s.id), f, t,
+        (i, n) => setProg("수업 기록 읽는 중… " + i + "/" + n));
+      setOut({ list, agg, from: f, to: t, label });
     } catch (e) {
       setErr("불러오지 못했어요: " + e.message);
     }
-    setLoading(false);
+    setProg("");
   };
-
-  const avg = data && data.scores.length
-    ? Math.round(data.scores.reduce((s, x) => s + (x.score || 0), 0) / data.scores.length) : null;
-  const allStuck = data ? data.logs.reduce((acc, p) => acc.concat((p.stuck || []).map((s) => ({ s, date: p.date }))), []) : [];
 
   return (
     <div>
       <div className="cm-noprint">
-        <label className="cm-label">학생</label>
-        <select className="cm-input" value={sid} onChange={(e) => { setSid(e.target.value); setData(null); }}>
-          <option value="">-- 학생을 선택하세요 --</option>
-          {students.map((r) => <option key={r.id} value={r.id}>{r.name}{isEnded(r) ? " (수강 종료)" : ""}</option>)}
-        </select>
-
-        <label className="cm-label">기간</label>
-        <div className="cm-range2">
-          <input className="cm-input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-          <span className="cm-tilde">~</span>
-          <input className="cm-input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-          {[1, 2, 3, 6].map((n) => (
-            <button key={n} className="cm-ab-tab" onClick={() => { setFrom(shiftMonth(todayStr, -n)); setTo(todayStr); }}>최근 {n}개월</button>
-          ))}
+        <div className="cm-ab-tabs">
+          <button className={"cm-ab-tab" + (mode === "month" ? " on" : "")} onClick={() => { setMode("month"); setOut(null); }}>월간 결과지</button>
+          <button className={"cm-ab-tab" + (mode === "range" ? " on" : "")} onClick={() => { setMode("range"); setOut(null); }}>기간 지정</button>
         </div>
 
-        <label className="cm-label">선생님 총평 (선택 · 관리표에 실림)</label>
-        <textarea className="cm-input cm-notice-ta" rows={3} placeholder="이번 기간 학습 태도, 앞으로의 방향 등"
-          value={comment} onChange={(e) => setComment(e.target.value)} />
+        {mode === "month" ? (<>
+          <label className="cm-label">월</label>
+          <select className="cm-input" value={month} onChange={(e) => { setMonth(e.target.value); setOut(null); }}>
+            {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
+
+          <label className="cm-label">대상 학생 <span className="cm-h-hint">({picks.length}명 선택됨)</span></label>
+          <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+            <button className="cm-ab-tab" onClick={() => setPicks(students.map((r) => r.id))}>전체 선택</button>
+            <button className="cm-ab-tab" onClick={() => setPicks(students.filter((r) => !isEnded(r)).map((r) => r.id))}>수강중만</button>
+            <button className="cm-ab-tab" onClick={() => setPicks([])}>전체 해제</button>
+          </div>
+          <div className="cm-rep-pick">
+            {students.map((r) => (
+              <label key={r.id}>
+                <input type="checkbox" checked={picks.includes(r.id)} onChange={() => toggle(r.id)} />
+                <span>{r.name}{isEnded(r) ? " (종료)" : ""}</span>
+              </label>
+            ))}
+          </div>
+        </>) : (<>
+          <label className="cm-label">학생</label>
+          <select className="cm-input" value={sid} onChange={(e) => { setSid(e.target.value); setOut(null); }}>
+            <option value="">-- 학생을 선택하세요 --</option>
+            {students.map((r) => <option key={r.id} value={r.id}>{r.name}{isEnded(r) ? " (수강 종료)" : ""}</option>)}
+          </select>
+          <label className="cm-label">기간</label>
+          <div className="cm-range2">
+            <input className="cm-input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <span className="cm-tilde">~</span>
+            <input className="cm-input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+            {[1, 2, 3, 6].map((n) => (
+              <button key={n} className="cm-ab-tab" onClick={() => { setFrom(shiftMonth(todayStr, -n)); setTo(todayStr); }}>최근 {n}개월</button>
+            ))}
+          </div>
+        </>)}
 
         {err && <div className="cm-err">{err}</div>}
-        <button className="cm-btn cm-btn-primary" disabled={loading} onClick={build}>
-          {loading ? "만드는 중…" : "학습관리표 만들기"}
+        <button className="cm-btn cm-btn-primary" disabled={!!prog} onClick={build}>
+          {prog ? "만드는 중…" : mode === "month" ? "월간 결과지 만들기" : "학습관리표 만들기"}
         </button>
-        {data && (
+        {prog && <div className="cm-rep-prog">{prog}</div>}
+        {out && (<>
           <button className="cm-btn cm-btn-ghost" style={{ width: "100%", marginTop: 10, padding: 12 }}
-            onClick={() => window.print()}>인쇄 / PDF로 저장</button>
-        )}
+            onClick={() => window.print()}>인쇄 / PDF로 저장 ({out.list.length}장)</button>
+          <div className="cm-hint" style={{ marginTop: 8 }}>
+            학생 1명당 A4 한 장으로 나뉘어 나가요. 인쇄 창에서 <b>대상을 "PDF로 저장"</b>으로 바꾸면 파일로 받을 수 있어요.
+          </div>
+        </>)}
       </div>
 
-      {data && (
-        <div className="cm-rep">
-          <h2 className="cm-rep-title">{data.st.name} 학습관리표</h2>
-          <div className="cm-rep-sub">
-            CLIMATH · {cls.name} · {from.split("-").join(".")} ~ {to.split("-").join(".")}
-          </div>
-
-          <div className="cm-rep-stats">
-            <div className="cm-rep-stat"><b>{data.attended}{data.expected > 0 && <span style={{ fontSize: 14 }}> / {data.expected}</span>}</b><span>출석</span></div>
-            <div className="cm-rep-stat"><b>{data.logs.length}</b><span>진도 기록</span></div>
-            <div className="cm-rep-stat"><b>{allStuck.length}</b><span>막힌 부분</span></div>
-            <div className="cm-rep-stat"><b>{avg === null ? "-" : avg}</b><span>평균 점수</span></div>
-          </div>
-
-          <div className="cm-rep-sec">
-            <div className="cm-rep-h">수업별 진도</div>
-            {data.logs.length === 0 ? (
-              <div className="cm-empty">이 기간에 기록된 진도가 없어요</div>
-            ) : (
-              <table className="cm-rep-table">
-                <thead><tr><th style={{ width: 70 }}>날짜</th><th>교재 · 범위</th><th>막혔던 부분</th></tr></thead>
-                <tbody>
-                  {data.logs.map((p) => (
-                    <tr key={p.id}>
-                      <td>{shortDate(p.date)}</td>
-                      <td>{plogLine(p) || "-"}{p.memo && <div style={{ color: "#7c8294", fontSize: 11.5, marginTop: 4 }}>{p.memo}</div>}</td>
-                      <td>{(p.stuck || []).length === 0 ? "-" : <ul className="cm-rep-ul" style={{ fontSize: 12.5 }}>{p.stuck.map((s, i) => <li key={i}>{s}</li>)}</ul>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          {allStuck.length > 0 && (
-            <div className="cm-rep-sec">
-              <div className="cm-rep-h">보완이 필요한 부분 모아보기</div>
-              <ul className="cm-rep-ul">
-                {allStuck.map((x, i) => <li key={i}>{x.s} <span style={{ color: "#7c8294", fontSize: 11.5 }}>({shortDate(x.date)})</span></li>)}
-              </ul>
+      {out && (
+        <div className="cm-reps">
+          {out.list.map((st) => (
+            <div key={st.id}>
+              <ReportSheet cls={cls} st={st} from={out.from} to={out.to} agg={out.agg}
+                comment={comments[st.id] || ""} periodLabel={out.label} />
+              <textarea className="cm-input cm-notice-ta cm-noprint cm-rep-cmt" rows={2}
+                placeholder={st.name + " 총평 (선택 · 위 결과지에 실려요)"}
+                value={comments[st.id] || ""}
+                onChange={(e) => setComments({ ...comments, [st.id]: e.target.value })} />
             </div>
-          )}
-
-          {data.scores.length > 0 && (
-            <div className="cm-rep-sec">
-              <div className="cm-rep-h">테스트 점수</div>
-              <table className="cm-rep-table">
-                <thead><tr><th style={{ width: 70 }}>날짜</th><th>구분</th><th style={{ width: 70 }}>맞은 개수</th><th style={{ width: 56 }}>점수</th></tr></thead>
-                <tbody>
-                  {data.scores.map((s, i) => (
-                    <tr key={i}><td>{shortDate(s.date)}</td><td>{s.label || "-"}</td><td>{s.correct}/{s.total}</td><td><b>{s.score}</b></td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {getStudentBooks(cls, data.st).length > 0 && (
-            <div className="cm-rep-sec">
-              <div className="cm-rep-h">교재 진행률 (누적)</div>
-              <table className="cm-rep-table">
-                <thead><tr><th>교재</th><th style={{ width: 90 }}>푼 문항</th><th style={{ width: 60 }}>진행률</th></tr></thead>
-                <tbody>
-                  {getStudentBooks(cls, data.st).map((b) => {
-                    const n = (data.hw[b.name] || []).length;
-                    return <tr key={b.name}><td>{b.name}</td><td>{n} / {b.total}</td><td>{b.total > 0 ? Math.round(n / b.total * 100) : 0}%</td></tr>;
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {comment.trim() && (
-            <div className="cm-rep-sec">
-              <div className="cm-rep-h">선생님 총평</div>
-              <div className="cm-rep-note">{comment.trim()}</div>
-            </div>
-          )}
-
-          <div className="cm-rep-foot">출력일 {fmtDate(todayStr)} · CLIMATH</div>
+          ))}
         </div>
       )}
     </div>
