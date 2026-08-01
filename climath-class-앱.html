@@ -1,0 +1,3728 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>CLIMATH 수업</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Noto+Sans+KR:wght@400;500;700&display=swap');
+
+*{box-sizing:border-box;}
+html,body{margin:0; padding:0;}
+#root{
+  --navy:#15233f; --navy2:#27406e; --cream:#f4efe6; --paper:#fffdf8;
+  --clay:#c2703f; --ink:#1c2333; --muted:#7c8294; --green:#3f7d5e; --line:#e7e0d2;
+  font-family:'Noto Sans KR',system-ui,sans-serif;
+  background:
+    radial-gradient(1200px 400px at 80% -10%, rgba(39,64,110,.10), transparent),
+    var(--cream);
+  min-height:100vh; color:var(--ink);
+}
+.cm-header{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:18px 22px; border-bottom:1px solid var(--line);
+  background:var(--navy); color:#fff; position:sticky; top:0; z-index:5;
+}
+.cm-brand{display:flex; flex-direction:column; gap:2px;}
+.cm-logo{font-family:'Fraunces',serif; font-weight:600; letter-spacing:.14em; font-size:20px;}
+.cm-sub{font-size:11px; color:#aab6d0; letter-spacing:.02em;}
+.cm-toggle{display:flex; background:rgba(255,255,255,.10); border-radius:999px; padding:3px;}
+.cm-toggle button{border:0; background:transparent; color:#c4cde0; font-size:13px; font-weight:500; padding:7px 16px; border-radius:999px; cursor:pointer; font-family:inherit;}
+.cm-toggle button.on{background:#fff; color:var(--navy);}
+
+.cm-main{max-width:560px; margin:0 auto; padding:22px 16px 40px;}
+.cm-stack{display:flex; flex-direction:column; gap:14px;}
+
+.cm-card{background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:20px; box-shadow:0 1px 0 rgba(21,35,63,.03), 0 8px 24px -16px rgba(21,35,63,.25);}
+.cm-h2{font-family:'Fraunces',serif; font-size:22px; margin:0 0 14px; color:var(--navy);}
+.cm-h3{font-family:'Fraunces',serif; font-size:17px; margin:0 0 14px; color:var(--navy);}
+.cm-h-hint{font-family:'Noto Sans KR',sans-serif; font-size:12px; font-weight:400; color:var(--muted);}
+.cm-label{display:block; font-size:12px; color:var(--muted); margin:12px 0 5px; font-weight:500;}
+.cm-input{width:100%; border:1px solid var(--line); background:#fff; border-radius:10px; padding:12px 13px; font-size:15px; font-family:inherit; color:var(--ink); outline:none; transition:border-color .15s;}
+.cm-input:focus{border-color:var(--navy2);}
+.cm-tilde{color:var(--muted);}
+
+.cm-btn{width:100%; border:0; border-radius:11px; padding:13px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit; margin-top:16px; transition:transform .08s, filter .15s;}
+.cm-btn:active{transform:translateY(1px);}
+.cm-btn-primary{background:var(--navy); color:#fff;}
+.cm-btn-primary:hover{filter:brightness(1.12);}
+.cm-big{padding:18px; font-size:17px;}
+.cm-btn-ghost{width:auto; margin:0; background:transparent; color:var(--clay); border:1px solid var(--clay); padding:8px 16px; font-size:13px; border-radius:9px;}
+.cm-btn-ghost:hover{background:var(--clay); color:#fff;}
+.cm-link{background:none; border:0; color:var(--muted); font-size:13px; cursor:pointer; font-family:inherit; text-decoration:underline; text-underline-offset:3px;}
+.cm-err{color:var(--clay); font-size:13px; margin-top:10px;}
+
+.cm-welcome{display:flex; align-items:center; justify-content:space-between;}
+.cm-welcome-name{font-family:'Fraunces',serif; font-size:20px; color:var(--navy);}
+.cm-welcome-sub{font-size:13px; color:var(--muted); margin-top:3px;}
+
+.cm-tabs{display:flex; gap:6px; background:#ece4d4; padding:5px; border-radius:12px;}
+.cm-tabs button{flex:1; border:0; background:transparent; padding:10px 4px; border-radius:9px; font-size:14px; font-weight:500; color:var(--muted); cursor:pointer; font-family:inherit;}
+.cm-tabs button.on{background:#fff; color:var(--navy); box-shadow:0 1px 4px rgba(21,35,63,.10);}
+.cm-tabs button:disabled{opacity:.4; cursor:not-allowed;}
+
+.cm-done{color:var(--green); font-weight:700; font-size:16px; text-align:center; padding:14px;}
+.cm-sentlist{margin-top:18px; border-top:1px dashed var(--line); padding-top:14px;}
+.cm-mini-h{font-size:12px; color:var(--muted); margin-bottom:8px; font-weight:500;}
+.cm-sent-item{display:flex; justify-content:space-between; align-items:center; padding:8px 0; font-size:14px;}
+.cm-tag-ok{font-size:12px; color:var(--green); font-weight:700;}
+.cm-tag-wait{font-size:12px; color:var(--clay); font-weight:700;}
+
+.cm-hint{font-size:13px; color:var(--muted); line-height:1.5;}
+.cm-hint b{color:var(--clay);}
+
+.cm-book-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;}
+.cm-book-count{font-family:'Fraunces',serif; font-size:15px; color:var(--green); font-weight:600;}
+.cm-book-pct{font-size:13px; color:var(--ink2); font-weight:500; font-family:inherit;}
+.cm-paintbadge{margin-left:10px; font-family:'Noto Sans KR',sans-serif; font-size:11px; font-weight:700; color:#fff; background:var(--green); padding:3px 10px; border-radius:999px; vertical-align:middle;}
+.cm-rangebar{display:flex; align-items:center; gap:8px; margin-bottom:16px;}
+.cm-rangebar .cm-input{padding:9px 11px; font-size:14px;}
+.cm-rangebtn{white-space:nowrap;}
+.cm-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(34px,1fr)); gap:5px; user-select:none; -webkit-user-select:none;}
+.cm-cell{display:flex; align-items:center; justify-content:center; padding:7px 0; font-size:11px; border-radius:7px; background:#f0eadd; color:var(--muted); border:1px solid var(--line);}
+button.cm-cell{cursor:pointer; font-family:inherit;}
+.cm-cell.clickable:hover{border-color:var(--green); color:var(--green);}
+.cm-cell.done{background:#dcefe3; color:var(--green); font-weight:700; border-color:#9fcfb4;}
+.cm-cell.done.clickable:hover{border-color:var(--clay); color:var(--clay);}
+.cm-cell.q{color:#d6453f; font-weight:700;}
+
+.cm-daylist{display:flex; flex-direction:column; gap:8px;}
+.cm-day{display:flex; align-items:center; justify-content:space-between; width:100%; text-align:left; cursor:pointer; font-family:inherit; background:#fff; border:1px solid var(--line); border-radius:12px; padding:15px 16px; transition:border-color .15s, transform .08s;}
+.cm-day:hover{border-color:var(--navy2);}
+.cm-day:active{transform:translateY(1px);}
+.cm-day.today{border-color:var(--navy); background:#f7f9fc;}
+.cm-day-left{display:flex; align-items:center; gap:8px;}
+.cm-day-date{font-weight:700; color:var(--navy); font-size:15px;}
+.cm-day-badge{background:var(--navy); color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;}
+.cm-day-sub{font-size:11px; color:var(--muted); background:#f0ece5; padding:2px 8px; border-radius:999px; margin-left:6px;}
+.cm-ai-scroll{height:62vh; min-height:340px; overflow-y:auto; padding:10px 2px; display:flex; flex-direction:column; gap:10px;}
+.cm-ai-msg{display:flex; flex-direction:column; max-width:88%;}
+.cm-ai-msg.me{align-self:flex-end; align-items:flex-end;}
+.cm-ai-msg.ai{align-self:flex-start; align-items:flex-start;}
+.cm-ai-bubble{padding:10px 13px; border-radius:14px; font-size:14px; line-height:1.5; white-space:pre-wrap; word-break:break-word;}
+.cm-ai-msg.me .cm-ai-bubble{background:var(--navy); color:#fff; border-bottom-right-radius:4px;}
+.cm-ai-msg.ai .cm-ai-bubble{background:#f0ece5; color:var(--ink); border-bottom-left-radius:4px;}
+.cm-ai-typing{color:var(--muted); font-style:italic;}
+.cm-ai-img{max-width:180px; border-radius:10px; margin-bottom:4px;}
+.cm-ai-preview{display:flex; align-items:center; gap:10px; margin:8px 0;}
+.cm-ai-preview img{max-width:60px; max-height:60px; border-radius:8px; border:1px solid var(--line);}
+.cm-ai-input{display:flex; gap:8px; align-items:center; margin-top:12px;}
+.cm-ai-input .cm-input{flex:1 1 0%; min-width:0; height:48px; font-size:15px;}
+.cm-ai-imgbtn{flex:0 0 48px; width:48px; height:48px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:20px; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;}
+.cm-ai-send{flex:0 0 auto; padding:0 18px; height:48px; border:none; border-radius:10px; background:var(--navy); color:#fff; font-size:15px; font-weight:600; cursor:pointer; white-space:nowrap;}
+.cm-ai-send:disabled{opacity:.5;}
+.cm-day-arrow{font-size:20px; color:var(--navy2); line-height:1;}
+
+.cm-daybar{display:flex; align-items:center; justify-content:space-between; padding:8px 2px; position:sticky; top:0; z-index:100; background:var(--bg); margin:-4px -4px 4px -4px;}
+.cm-back{background:none; border:0; color:var(--navy2); font-size:14px; font-weight:700; cursor:pointer; font-family:inherit; padding:4px 0;}
+@keyframes slideInRight{from{transform:translateX(60%);opacity:0;}to{transform:translateX(0);opacity:1;}}
+.cm-slide-in{animation:slideInRight 0.2s cubic-bezier(.25,.8,.25,1) both;}
+.cm-daybar-date{font-family:'Fraunces',serif; font-size:16px; color:var(--navy); display:flex; align-items:center; gap:8px;}
+.cm-live{font-family:'Noto Sans KR',sans-serif; font-size:11px; color:var(--clay); font-weight:700; letter-spacing:.05em;}
+
+.cm-admin-top{display:flex; align-items:center; gap:24px;}
+.cm-stat{text-align:left;}
+.cm-stat-num{font-family:'Fraunces',serif; font-size:30px; color:var(--navy); line-height:1;}
+.cm-stat-num span{font-size:16px; color:var(--muted);}
+.cm-clay{color:var(--clay)!important;}
+.cm-stat-lab{font-size:12px; color:var(--muted); margin-top:4px;}
+.cm-admin-top .cm-link{margin-left:auto;}
+
+.cm-empty{color:var(--muted); font-size:14px; text-align:center; padding:14px;}
+.cm-q{display:flex; align-items:center; gap:12px; padding:13px 0; border-bottom:1px solid var(--line);}
+.cm-q:last-child{border-bottom:0;}
+.cm-q-main{flex:1; min-width:0;}
+.cm-q-top{display:flex; justify-content:space-between; align-items:baseline;}
+.cm-q-name{font-weight:700; color:var(--navy);}
+.cm-q-time{font-size:12px; color:var(--muted);}
+.cm-q-body{font-size:15px; margin-top:3px;}
+.cm-q-body b{color:var(--clay);}
+.cm-q-memo{color:var(--muted); font-size:13px;}
+.cm-q.done{opacity:.5;}
+.cm-resolved-box { border: 1px solid #e8e0d4; border-radius: 10px; overflow: hidden; }
+.cm-resolved-summary { cursor: pointer; padding: 10px 14px; font-size: 13px; color: #8a7f72; font-weight: 600; list-style: none; background: #f7f4f0; user-select: none; }
+.cm-resolved-summary::-webkit-details-marker { display: none; }
+.cm-resolved-summary::before { content: "▶ "; font-size: 11px; }
+details[open] .cm-resolved-summary::before { content: "▼ "; }
+.cm-resolved-box .cm-q { margin: 0; border-radius: 0; border-top: 1px solid #ede8e0; }
+.cm-q-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.cm-q-tab { padding: 4px 10px; border-radius: 20px; border: 1px solid #d4c9b8; background: #fff; font-size: 12px; color: #8a7f72; cursor: pointer; }
+.cm-q-tab.on { background: #2c3e5c; color: #fff; border-color: #2c3e5c; }
+.cm-q-pages { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px; font-size: 13px; color: #8a7f72; }
+.cm-q-page-btn { background: none; border: 1px solid #d4c9b8; border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 13px; color: #5a5248; }
+.cm-q-page-btn:disabled { opacity: 0.3; cursor: default; }
+/* 출석부 */
+.cm-ab-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -16px; padding: 0 16px 8px; }
+.cm-ab-table { border-collapse: collapse; font-size: 11px; min-width: 100%; }
+.cm-ab-table th, .cm-ab-table td { border: 1px solid #e8e0d4; padding: 4px 6px; white-space: nowrap; text-align: center; }
+.cm-ab-table th { background: #f7f4f0; font-weight: 700; color: #5a5248; position: sticky; top: 0; }
+.cm-ab-name { position: sticky; left: 0; background: #f7f4f0; font-weight: 700; color: #2c3e5c; text-align: left !important; z-index: 2; min-width: 60px; }
+.cm-ab-table th.cm-ab-name { z-index: 3; }
+.cm-ab-att-o { color: #2ecc71; font-weight: 700; cursor: pointer; user-select: none; }
+.cm-ab-att-x { color: #e74c3c; cursor: pointer; user-select: none; }
+.cm-ab-att-o:active, .cm-ab-att-x:active { opacity: 0.5; }
+.cm-ab-score { color: #c0392b; font-weight: 600; font-size: 10px; }
+.cm-ab-hw { color: #8a7f72; font-size: 10px; }
+.cm-ab-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.cm-ab-tab { padding: 4px 12px; border-radius: 20px; border: 1px solid #d4c9b8; background: #fff; font-size: 12px; color: #8a7f72; cursor: pointer; font-family: inherit; }
+.cm-ab-tab.on { background: #2c3e5c; color: #fff; border-color: #2c3e5c; }
+.cm-ab-month-sel { font-size: 13px; border: 1px solid #d4c9b8; border-radius: 8px; padding: 4px 8px; font-family: inherit; color: #2c3e5c; background: #fff; margin-bottom: 12px; }
+.cm-q-resolved{font-size:13px; color:var(--green); font-weight:700; white-space:nowrap;}
+
+.cm-roster{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+.cm-rost{display:flex; justify-content:space-between; align-items:center; padding:11px 13px; border-radius:10px; background:#f3ede0; font-size:14px; color:var(--muted); border:1px solid transparent; width:100%; cursor:pointer; font-family:inherit; text-align:left; transition:border-color .15s, transform .08s;}
+.cm-rost:hover{border-color:var(--navy2);}
+.cm-rost:active{transform:translateY(1px);}
+.cm-rost.in{background:#e7f0ea; color:var(--navy); font-weight:500;}
+.cm-rost-name{font-weight:700;}
+.cm-rost-t{font-size:12px;}
+
+.cm-hw-row{display:flex; gap:12px; padding:11px 0; border-bottom:1px solid var(--line); align-items:flex-start;}
+.cm-hw-row:last-child{border-bottom:0;}
+.cm-hw-name{font-weight:700; color:var(--navy); min-width:60px; font-size:14px; padding-top:3px;}
+.cm-hw-name-btn{background:none; border:0; cursor:pointer; font-family:inherit; text-align:left; text-decoration:underline; text-underline-offset:3px;}
+.cm-hw-items{display:flex; flex-wrap:wrap; gap:6px;}
+.cm-chip{background:#eef2f8; color:var(--navy2); font-size:12px; padding:4px 10px; border-radius:999px;}
+.cm-scorebig{text-align:center; color:var(--muted); font-size:14px; margin-top:16px;}
+.cm-scorebig b{font-family:'Fraunces',serif; font-size:30px; color:var(--navy); margin:0 5px;}
+.cm-scorebig span{font-size:12px;}
+.cm-score-row{display:flex; align-items:baseline; gap:10px; padding:10px 0; border-bottom:1px solid var(--line);}
+.cm-score-row:last-child{border-bottom:0;}
+.cm-score-name{font-weight:700; color:var(--navy); min-width:58px;}
+.cm-score-detail{flex:1; font-size:13px; color:var(--muted);}
+.cm-score-num{font-family:'Fraunces',serif; font-size:18px; color:var(--green); font-weight:600;}
+.cm-qchips{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:14px;}
+.cm-qchips-label{font-size:12px; color:#d6453f; font-weight:700; margin-right:4px;}
+.cm-qchip{background:#fbe9e7; color:#d6453f; border:1px solid #f0c4bf; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:700; cursor:pointer; font-family:inherit;}
+.cm-qchip:hover{background:#d6453f; color:#fff; border-color:#d6453f;}
+
+.cm-status{text-align:center; padding:60px 20px; color:var(--muted); font-size:14px;}
+
+.cm-notice-overlay{
+  position:fixed; inset:0; background:rgba(21,35,63,.88);
+  z-index:100; display:flex; align-items:center; justify-content:center; padding:24px;
+}
+.cm-notice-box{
+  background:#fff; border-radius:22px; padding:30px 28px;
+  max-width:440px; width:100%; text-align:center; box-shadow:0 24px 64px rgba(21,35,63,.5);
+}
+.cm-notice-label{font-family:'Fraunces',serif; font-size:20px; color:var(--navy); margin-bottom:16px;}
+.cm-notice-text{font-size:15px; color:var(--ink); line-height:1.75; white-space:pre-wrap; margin-bottom:22px;}
+.cm-notice-box.dm{border-top:4px solid var(--clay);}
+
+.cm-notice-preview{background:#f0f4ff; border-left:3px solid var(--navy2); border-radius:0 9px 9px 0; padding:10px 14px; font-size:13px; color:var(--navy); margin-bottom:14px; line-height:1.5;}
+.cm-notice-dot{color:var(--clay); margin-right:4px;}
+.cm-notice-ta{resize:vertical; min-height:80px; line-height:1.55;}
+/* ===== 진도 기록 ===== */
+.cm-ab-tabs{flex-wrap:wrap;}
+.cm-plog-row{display:flex; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); align-items:flex-start;}
+.cm-plog-info{flex:1; display:flex; flex-direction:column; gap:4px; min-width:0;}
+.cm-plog-none{font-size:12px; color:var(--clay); font-weight:700;}
+.cm-plog-prev{font-size:12px; color:var(--muted); line-height:1.5;}
+.cm-chip-ok{background:#e7f0ea; color:var(--green); font-weight:700;}
+.cm-stuck-row{display:flex; gap:6px; align-items:center; margin-bottom:6px;}
+.cm-x{flex:0 0 38px; height:44px; border:1px solid var(--line); background:#fff; border-radius:9px; color:var(--muted); cursor:pointer; font-family:inherit; font-size:14px;}
+.cm-range2{display:flex; gap:8px; align-items:center;}
+.cm-range2 .cm-input{flex:1; min-width:0;}
+.cm-plog-item{border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:#fff;}
+.cm-plog-head{display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px;}
+.cm-plog-date{font-weight:700; color:var(--navy); font-size:14px;}
+.cm-plog-range{font-size:14px; color:var(--ink); margin-bottom:6px;}
+.cm-stuck-list{margin:0; padding-left:18px; font-size:13px; color:#4a5165; line-height:1.65;}
+.cm-stuck-label{font-size:11px; color:var(--clay); font-weight:700; margin-bottom:3px;}
+.cm-plog-memo{font-size:13px; color:var(--muted); margin-top:7px; white-space:pre-wrap; line-height:1.55;}
+.cm-plog-actions{display:flex; gap:12px; margin-top:9px;}
+/* ===== 학습관리표 ===== */
+.cm-rep{background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px; margin-top:16px;}
+.cm-rep-title{font-family:'Fraunces',serif; font-size:22px; color:var(--navy); margin:0 0 4px;}
+.cm-rep-sub{font-size:13px; color:var(--muted); margin-bottom:18px;}
+.cm-rep-sec{margin-top:22px;}
+.cm-rep-h{font-size:14px; font-weight:700; color:var(--navy); border-bottom:2px solid var(--navy); padding-bottom:5px; margin-bottom:10px;}
+.cm-rep-table{width:100%; border-collapse:collapse; font-size:12.5px;}
+.cm-rep-table th{background:#f3ede0; color:var(--navy); font-weight:700; padding:7px 8px; border:1px solid var(--line); text-align:left; white-space:nowrap;}
+.cm-rep-table td{padding:7px 8px; border:1px solid var(--line); vertical-align:top; line-height:1.6;}
+.cm-rep-stats{display:flex; gap:10px; flex-wrap:wrap;}
+.cm-rep-stat{background:#f7f4f0; border:1px solid var(--line); border-radius:10px; padding:10px 14px; min-width:88px;}
+.cm-rep-stat b{display:block; font-family:'Fraunces',serif; font-size:22px; color:var(--navy); line-height:1.2;}
+.cm-rep-stat span{font-size:11px; color:var(--muted);}
+.cm-rep-note{font-size:13px; line-height:1.7; white-space:pre-wrap; color:var(--ink);}
+.cm-rep-foot{margin-top:24px; font-size:11px; color:var(--muted); text-align:right;}
+.cm-rep-ul{margin:0; padding-left:18px; font-size:13px; line-height:1.7; color:var(--ink);}
+.cm-rep-pick{display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px;}
+.cm-rep-pick label{display:flex; align-items:center; gap:6px; font-size:13px; padding:7px 9px; border:1px solid var(--line); border-radius:9px; background:#fff; cursor:pointer;}
+.cm-rep-pick input{margin:0;}
+.cm-rep-cmt{margin-top:10px;}
+.cm-rep-prog{font-size:13px; color:var(--muted); text-align:center; padding:10px;}
+.cm-rep-none{font-size:12px; color:var(--clay); margin-top:6px;}
+@media print{
+  body *{visibility:hidden;}
+  .cm-reps, .cm-reps *{visibility:visible;}
+  .cm-reps{position:absolute; left:0; top:0; width:100%;}
+  .cm-rep{border:0; padding:0; margin:0 0 0 0; border-radius:0; page-break-after:always; break-after:page;}
+  .cm-rep:last-of-type{page-break-after:auto; break-after:auto;}
+  .cm-rep-table{font-size:10.5px;}
+  .cm-rep-table th, .cm-rep-table td{padding:4px 6px;}
+  .cm-rep-title{font-size:19px;}
+  .cm-rep-stat{padding:7px 11px; min-width:76px;}
+  .cm-rep-stat b{font-size:18px;}
+  .cm-rep-sec{margin-top:14px;}
+  .cm-rep-ul, .cm-rep-note{font-size:11px;}
+  .cm-noprint{display:none!important;}
+  @page{size:A4; margin:13mm;}
+}
+</style>
+</head>
+<body>
+<div id="root"><div class="cm-status">불러오는 중…</div></div>
+
+<!-- React + Babel (빌드 없이 사용) -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
+
+<!-- Firebase (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js" onerror="window.__katexFailed=1"></script>
+
+<script>
+  // ===== Firebase 설정값 =====
+  var firebaseConfig = {
+    apiKey: "AIzaSyBIhpjPGsA1tH9AFspHtNifeeHUnhN0XUA",
+    authDomain: "climath-class.firebaseapp.com",
+    projectId: "climath-class",
+    storageBucket: "climath-class.firebasestorage.app",
+    messagingSenderId: "321968656061",
+    appId: "1:321968656061:web:29d98c125c7480d44371d4"
+  };
+  firebase.initializeApp(firebaseConfig);
+  window.db = firebase.firestore();
+</script>
+
+<script type="text/plain" id="__appSource">
+
+const { useState, useEffect, useRef } = React;
+const db = window.db;
+
+// ---- 초기 시딩용 반 데이터 (최초 1회만 Firestore에 복사됨. 이후 앱에서 관리) ----
+const SEED_CLASSES = [
+  { id: "s-mongeum", name: "고1S 월금반", classDays: [1, 5], roster: [
+    { id: "s1", name: "김서진" }, { id: "s2", name: "임서윤" }, { id: "s3", name: "김태윤" },
+    { id: "s4", name: "박성준" }, { id: "s5", name: "양성은" }, { id: "s6", name: "안성빈" },
+    { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
+  ]},
+  { id: "s-hwamok", name: "고1S 화목반", classDays: [2, 4], roster: [
+    { id: "s1", name: "박범의" }, { id: "s2", name: "민우영" }, { id: "s3", name: "윤지섭" }, { id: "s4", name: "안현준" },
+    { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
+  ]},
+  { id: "jasago", name: "고1자사고반", classDays: [6], roster: [
+    { id: "s1", name: "마서준" }, { id: "s2", name: "김하준" }, { id: "s3", name: "김중원" },
+    { id: "s4", name: "진현겸" }, { id: "s5", name: "공하빈" },
+    { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
+  ]},
+];
+let CLASSES = []; // Firestore에서 로드됨
+const findClass = (id) => CLASSES.find((c) => c.id === id);
+
+const DEFAULT_BOOKS = [
+  { name: "수평교 + 최고난도", total: 404 },
+  { name: "기출백서", total: 302 },
+  { name: "BASECAMP공수1-2", total: 455 },
+];
+const getBooks = (cls) => (cls && cls.books) || [];
+const isIndividual = (cls) => cls && cls.type === "individual";
+// ----- 수강 기간: 시작일/마지막 등원일 -----
+// endDate가 지나면 자동으로 명단에서 빠짐 (기록은 그대로 남음)
+function isActiveOn(st, date) {
+  if (!st) return false;
+  const d = date || todayStr;
+  if (st.startDate && d < st.startDate) return false;
+  if (st.endDate && d > st.endDate) return false;
+  return true;
+}
+const isEnded = (st) => !!(st && st.endDate && todayStr > st.endDate);
+// 기간 연장: 기준일(없거나 이미 지났으면 오늘)에서 n개월 뒤
+function addMonths(baseStr, n) {
+  const base = (baseStr && baseStr >= todayStr) ? baseStr : todayStr;
+  const d = new Date(base + "T00:00:00");
+  const day = d.getDate();
+  d.setMonth(d.getMonth() + n);
+  if (d.getDate() < day) d.setDate(0); // 말일 보정 (1/31 +1개월 → 2/28)
+  return ymd(d);
+}
+// 그 날짜에 수업 대상인 학생인가 (요일 + 기간)
+function attendsOn(cls, st, date) {
+  if (!isActiveOn(st, date)) return false;
+  if (!isIndividual(cls)) return true;
+  return (st.days || []).includes(new Date(date + "T00:00:00").getDay());
+}
+const getStudentBooks = (cls, st) => isIndividual(cls) ? ((st && st.books) || []) : getBooks(cls);
+function getClassAllBooks(cls) {
+  if (!isIndividual(cls)) return getBooks(cls);
+  const seen = {}; const out = [];
+  (cls.roster || []).forEach((r) => {
+    if (r.teacher) return;
+    (r.books || []).forEach((b) => { if (!seen[b.name]) { seen[b.name] = 1; out.push(b); } });
+  });
+  return out;
+}
+const DEFAULT_PIN = "1234";
+const ADMIN_PIN = "2030";
+
+function ymd(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+const todayStr = ymd(new Date());
+const WD = ["일", "월", "화", "수", "목", "금", "토"];
+function fmtDate(d) {
+  const dt = new Date(d + "T00:00:00");
+  return d.split("-").join(".") + " (" + WD[dt.getDay()] + ")";
+}
+const hhmm = (ts) => new Date(ts).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+
+// ===== Firestore (반별로 분리: classes/{cid}/days/{date}/...) =====
+const classDoc = (cid) => db.collection("classes").doc(cid);
+const daysCol = (cid) => classDoc(cid).collection("days");
+const dayDoc = (cid, date) => daysCol(cid).doc(date);
+const touchDay = (cid, date) => dayDoc(cid, date).set({ updated: Date.now() }, { merge: true });
+const attCol = (cid, date) => dayDoc(cid, date).collection("attendance");
+const qCol = (cid, date) => dayDoc(cid, date).collection("questions");
+const hwCol = (cid) => classDoc(cid).collection("homework");
+async function checkIn(cid, date, me) {
+  await attCol(cid, date).doc(me.id).set({ name: me.name, time: Date.now() });
+  touchDay(cid, date);
+}
+async function addQuestion(cid, date, q) { await qCol(cid, date).add(q); touchDay(cid, date); }
+async function resolveQuestion(cid, date, qid) { await qCol(cid, date).doc(qid).update({ resolved: true }); }
+async function getMyHw(cid, sid) {
+  const d = await hwCol(cid).doc(sid).get();
+  return d.exists ? (d.data().books || {}) : {};
+}
+async function saveHwBook(cid, me, bookName, arr) {
+  await hwCol(cid).doc(me.id).set({ name: me.name, books: { [bookName]: arr } }, { merge: true });
+  touchDay(cid, todayStr);
+}
+const FV = firebase.firestore.FieldValue;
+const questionedCol = (cid) => classDoc(cid).collection("questioned");
+async function addQuestioned(cid, sid, name, bookName, n) {
+  await questionedCol(cid).doc(sid).set({ name, books: { [bookName]: FV.arrayUnion(n) } }, { merge: true });
+}
+async function removeQuestioned(cid, sid, bookName, n) {
+  await questionedCol(cid).doc(sid).set({ books: { [bookName]: FV.arrayRemove(n) } }, { merge: true });
+}
+function listenQuestioned(cid, sid, cb) {
+  return questionedCol(cid).doc(sid).onSnapshot((d) => cb(d.exists ? (d.data().books || {}) : {}));
+}
+const noticeDoc = (cid) => classDoc(cid).collection("config").doc("notice");
+async function postNotice(cid, text) {
+  await noticeDoc(cid).set({ text, time: Date.now(), active: true });
+}
+async function clearNotice(cid) {
+  await noticeDoc(cid).set({ active: false, text: "" }, { merge: true });
+}
+function listenNotice(cid, cb) {
+  return noticeDoc(cid).onSnapshot((d) => cb(d.exists ? d.data() : null));
+}
+const dmCol = (cid) => classDoc(cid).collection("dms");
+const dmDoc = (cid, sid) => dmCol(cid).doc(sid);
+async function postDm(cid, sid, text) {
+  await dmDoc(cid, sid).set({ text, time: Date.now(), active: true });
+}
+async function clearDm(cid, sid) {
+  await dmDoc(cid, sid).set({ active: false, text: "" }, { merge: true });
+}
+function listenDm(cid, sid, cb) {
+  return dmDoc(cid, sid).onSnapshot((d) => cb(d.exists ? d.data() : null));
+}
+const scoresCol = (cid, date) => dayDoc(cid, date).collection("scores");
+async function addScore(cid, date, s) { await scoresCol(cid, date).add(s); touchDay(cid, date); }
+async function listDays(cid) {
+  const s = await daysCol(cid).get();
+  const arr = [];
+  s.forEach((d) => arr.push(d.id));
+  if (!arr.includes(todayStr)) arr.push(todayStr);
+  return arr.sort().reverse();
+}
+const studentsCol = (cid) => classDoc(cid).collection("students");
+async function getStudentPin(cid, sid) {
+  try { const d = await studentsCol(cid).doc(sid).get(); return d.exists ? (d.data().pin || null) : null; }
+  catch (e) { return null; }
+}
+async function saveStudentPin(cid, sid, p) { await studentsCol(cid).doc(sid).set({ pin: p }, { merge: true }); }
+
+// ----- 사람(이름) 단위 통합 PIN: 이름이 같으면 같은 사람, 모든 반에 하나의 PIN -----
+const normName = (s) => (s || "").replace(/\s+/g, "");
+const personPinDoc = (name) => db.collection("userPins").doc(normName(name));
+async function getPersonPin(name) {
+  try { const d = await personPinDoc(name).get(); return d.exists ? d.data().pin : null; }
+  catch (e) { return null; }
+}
+async function savePersonPin(name, pin) { await personPinDoc(name).set({ pin, time: Date.now() }); }
+
+// 이름으로 로그인 검증: 통합 PIN → (없으면) 반별 개별 PIN → 기본 PIN 순서로 확인.
+// 반별 개별 PIN으로 성공하면 통합 PIN으로 자동 이전(마이그레이션).
+async function verifyPersonPin(name, pin, candidates) {
+  const gpin = await getPersonPin(name);
+  if (gpin) return pin === gpin;
+  // 반별 커스텀 PIN 확인 (있는 것만)
+  for (const x of candidates) {
+    let custom = null;
+    try { custom = await getStudentPin(x.cls.id, x.member.id); } catch (e) {}
+    if (custom && pin === custom) {
+      try { await savePersonPin(name, pin); } catch (e) {} // 통합 PIN으로 이전
+      return true;
+    }
+  }
+  // 기본 PIN (초기비번은 통합 저장 안 함 - 나중에 바꾼 비번이 기준이 되도록)
+  for (const x of candidates) {
+    const def = x.member.defaultPin || DEFAULT_PIN;
+    if (pin === def) return true;
+  }
+  return false;
+}
+
+// ----- 선생님 계정 -----
+const teachersCol = () => db.collection("teachers");
+async function listTeachers() {
+  const s = await teachersCol().orderBy("time").get();
+  const arr = []; s.forEach((d) => arr.push({ tid: d.id, ...d.data() }));
+  return arr;
+}
+async function addTeacher(name, pin, classIds, role, status) {
+  await teachersCol().add({ name, pin, classIds, role: role || "teacher", status: status || "active", time: Date.now() });
+}
+const isPending = (t) => t.status === "pending";
+async function updateTeacher(tid, patch) { await teachersCol().doc(tid).update(patch); }
+async function deleteTeacher(tid) { await teachersCol().doc(tid).delete(); }
+
+// ----- 반 관리 -----
+const classesCol = () => db.collection("classes");
+async function loadClasses() {
+  let s = await classesCol().orderBy("time").get();
+  if (s.empty) {
+    let t = Date.now();
+    for (const c of SEED_CLASSES) {
+      await classesCol().doc(c.id).set({ name: c.name, classDays: c.classDays, roster: c.roster, books: DEFAULT_BOOKS, time: t++ });
+    }
+    s = await classesCol().orderBy("time").get();
+  }
+  const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() }));
+  // 마이그레이션: books 필드가 없는 기존 반에 채워넣기
+  for (const c of arr) {
+    if (c.books === undefined) {
+      const isSeed = SEED_CLASSES.some((sc) => sc.id === c.id);
+      c.books = isSeed ? DEFAULT_BOOKS : [];
+      await classesCol().doc(c.id).update({ books: c.books });
+    }
+  }
+  CLASSES = arr;
+  return arr;
+}
+async function createClass(name, classDays, roster, books, type) {
+  const ref = await classesCol().add({ name, classDays, roster, books: books || [], type: type || "regular", time: Date.now() });
+  await loadClasses();
+  return ref.id;
+}
+async function saveClassRoster(cid, roster) {
+  await classesCol().doc(cid).update({ roster });
+  await loadClasses();
+}
+// ----- 진도계획표 (파일 게시: HTML/PDF/이미지를 base64 조각으로 Firestore에 저장) -----
+const progressDoc = (cid, key) => classDoc(cid).collection("progress").doc(key || "class");
+const PROGRESS_MAX_BYTES = 4.5 * 1024 * 1024;
+const PROGRESS_CHUNK = 700000;
+function guessMime(name) {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (ext === "html" || ext === "htm") return "text/html";
+  if (ext === "pdf") return "application/pdf";
+  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return "image/" + (ext === "jpg" ? "jpeg" : ext);
+  return "application/octet-stream";
+}
+// 범용: 파일을 base64 조각으로 문서+parts에 저장
+async function saveFileToDoc(docRef, file) {
+  if (file.size > PROGRESS_MAX_BYTES) throw new Error("파일이 너무 커요 (최대 4.5MB)");
+  const b64 = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(",")[1]);
+    r.onerror = () => rej(new Error("파일을 읽지 못했어요"));
+    r.readAsDataURL(file);
+  });
+  const oldParts = await docRef.collection("parts").get();
+  for (const d of oldParts.docs) await d.ref.delete();
+  const chunks = [];
+  for (let i = 0; i < b64.length; i += PROGRESS_CHUNK) chunks.push(b64.slice(i, i + PROGRESS_CHUNK));
+  for (let i = 0; i < chunks.length; i++) await docRef.collection("parts").doc(String(i)).set({ data: chunks[i] });
+  await docRef.set({ name: file.name, mime: file.type || guessMime(file.name), size: file.size, chunks: chunks.length, time: Date.now() });
+}
+async function loadFileB64FromDoc(docRef, meta) {
+  const out = [];
+  for (let i = 0; i < meta.chunks; i++) {
+    const d = await docRef.collection("parts").doc(String(i)).get();
+    out.push(d.exists ? d.data().data : "");
+  }
+  return out.join("");
+}
+async function deleteFileDoc(docRef) {
+  const oldParts = await docRef.collection("parts").get();
+  for (const d of oldParts.docs) await d.ref.delete();
+  await docRef.delete();
+}
+const saveProgressFile = (cid, key, file) => saveFileToDoc(progressDoc(cid, key), file);
+const loadProgressFileB64 = (cid, key, meta) => loadFileB64FromDoc(progressDoc(cid, key), meta);
+const deleteProgressFile = (cid, key) => deleteFileDoc(progressDoc(cid, key));
+
+// ----- 강의노트 (단원별 파일 게시) -----
+const noteUnitsCol = (cid) => classDoc(cid).collection("noteUnits");
+const noteFilesCol = (cid, uid) => noteUnitsCol(cid).doc(uid).collection("files");
+async function addNoteUnit(cid, title) { await noteUnitsCol(cid).add({ title, time: Date.now() }); }
+async function renameNoteUnit(cid, uid, title) { await noteUnitsCol(cid).doc(uid).update({ title }); }
+async function addNoteFile(cid, uid, file) { await saveFileToDoc(noteFilesCol(cid, uid).doc(), file); }
+async function deleteNoteFile(cid, uid, fid) { await deleteFileDoc(noteFilesCol(cid, uid).doc(fid)); }
+async function deleteNoteUnit(cid, uid) {
+  const fs = await noteFilesCol(cid, uid).get();
+  for (const d of fs.docs) await deleteFileDoc(d.ref);
+  await noteUnitsCol(cid).doc(uid).delete();
+}
+function b64ToBlob(b64, mime) {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+async function saveClassBooks(cid, books) {
+  await classesCol().doc(cid).update({ books });
+  await loadClasses();
+}
+async function saveClassMeta(cid, name, classDays) {
+  await classesCol().doc(cid).update({ name, classDays });
+  await loadClasses();
+}
+// ----- AI 힌트 로그 -----
+const aiLogsCol = (cid) => classDoc(cid).collection("aiLogs");
+async function addAiLog(cid, log) { await aiLogsCol(cid).add(log); }
+
+// ----- 진도 기록 (classes/{cid}/plog) -----
+const plogCol = (cid) => classDoc(cid).collection("plog");
+async function addPlog(cid, rec) { await plogCol(cid).add({ ...rec, time: Date.now() }); }
+async function updatePlog(cid, id, patch) { await plogCol(cid).doc(id).update(patch); }
+async function deletePlog(cid, id) { await plogCol(cid).doc(id).delete(); }
+const sortPlog = (arr) => arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.time || 0) - (a.time || 0));
+function listenPlogByStudent(cid, sid, cb) {
+  return plogCol(cid).where("sid", "==", sid).onSnapshot((s) => {
+    const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() }));
+    cb(sortPlog(arr));
+  }, () => cb([]));
+}
+function listenPlogClass(cid, cb) {
+  // 반 전체 최근 기록만 (오래 쓰면 문서가 쌓이므로 상한)
+  return plogCol(cid).orderBy("time", "desc").limit(500).onSnapshot((s) => {
+    const by = {};
+    s.forEach((d) => { const v = { id: d.id, ...d.data() }; (by[v.sid] = by[v.sid] || []).push(v); });
+    Object.keys(by).forEach((k) => sortPlog(by[k]));
+    cb(by);
+  }, () => cb({}));
+}
+async function fetchPlogRange(cid, sid, from, to) {
+  const s = await plogCol(cid).where("sid", "==", sid).get();
+  const arr = [];
+  s.forEach((d) => { const v = { id: d.id, ...d.data() }; if (v.date >= from && v.date <= to) arr.push(v); });
+  return arr.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+}
+// "p.112 ~ p.130" 형태로. 시작=끝이면 하나만
+const plogRange = (p) => (p.to && p.to !== p.from) ? (p.from + " ~ " + p.to) : (p.from || "");
+const plogLine = (p) => ((p.book ? p.book + " " : "") + plogRange(p)).trim();
+// 기준일에서 n개월 이동 (음수 가능)
+function shiftMonth(dateStr, n) {
+  const d = new Date((dateStr || todayStr) + "T00:00:00");
+  const day = d.getDate();
+  d.setMonth(d.getMonth() + n);
+  if (d.getDate() < day) d.setDate(0);
+  return ymd(d);
+}
+const shortDate = (d) => d ? d.slice(5).replace("-", "/") : "";
+
+// ----- 상담 기록 (consultations 컬렉션) -----
+const CONSULT_CATS = [
+  { key: "learning", label: "학습·성적", color: "#2b5f8a", bg: "#e3edf5" },
+  { key: "attitude", label: "태도·생활", color: "#3f7d5e", bg: "#e7f0ea" },
+  { key: "career", label: "진로·입시", color: "#8a5a2b", bg: "#f6ecdf" },
+];
+const catInfo = (k) => CONSULT_CATS.find((c) => c.key === k) || { label: k, color: "#7c8294", bg: "#f0ece5" };
+const CONSULT_WITH = [{ key: "student", label: "학생" }, { key: "parent", label: "학부모" }];
+
+const consultCol = () => db.collection("consultations");
+async function addConsult(rec) { await consultCol().add({ ...rec, time: Date.now() }); }
+async function updateConsult(id, patch) { await consultCol().doc(id).update(patch); }
+async function deleteConsult(id) { await consultCol().doc(id).delete(); }
+
+// ----- 위험신호: 선생님이 상담에 표시한 위험도 기준 -----
+const RISK_LEVELS = [
+  { v: 0, label: "없음", color: "#7c8294", bg: "#f0ece5" },
+  { v: 1, label: "관심", color: "#2b5f8a", bg: "#e3edf5" },
+  { v: 2, label: "주의", color: "#c2703f", bg: "#f6e7df" },
+  { v: 3, label: "위험", color: "#d6453f", bg: "#fae3e2" },
+];
+const riskInfo = (v) => RISK_LEVELS.find((r) => r.v === (v || 0)) || RISK_LEVELS[0];
+
+// 날짜(YYYY-MM-DD) → 오늘까지 경과일
+function daysSince(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + "T00:00:00");
+  if (isNaN(d)) return null;
+  const t = new Date(todayStr + "T00:00:00");
+  return Math.round((t - d) / 86400000);
+}
+
+// 전 반 상담을 훑어 ① 표시된 위험신호 ② 상담 공백(오래됨) 집계
+async function computeRiskData() {
+  const s = await consultCol().get();
+  const all = [];
+  s.forEach((d) => all.push({ id: d.id, ...d.data() }));
+
+  const byStudent = {};
+  all.forEach((c) => {
+    const key = c.cid + ":" + c.sid;
+    (byStudent[key] = byStudent[key] || []).push(c);
+  });
+
+  const flagged = [];
+  const gaps = [];
+
+  CLASSES.forEach((cls) => {
+    (cls.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => {
+      const key = cls.id + ":" + st.id;
+      const arr = (byStudent[key] || []).sort(
+        (a, b) => (b.date || "").localeCompare(a.date || "") || (b.time || 0) - (a.time || 0)
+      );
+      const pendingFollow = arr.filter((c) => c.needFollow && !c.followDone);
+
+      // ① 위험 표시: 가장 최근 상담 기준 (최근 상담이 "없음"이면 해제된 것)
+      const latest = arr[0];
+      if (latest && (latest.risk || 0) > 0) {
+        flagged.push({
+          cid: cls.id, cname: cls.name, sid: st.id, sname: st.name,
+          risk: latest.risk, cat: latest.cat, withWho: latest.withWho,
+          date: latest.date, content: latest.content, teacher: latest.teacher,
+          ageDays: daysSince(latest.date),
+          pendingFollow: pendingFollow.length,
+          pendingNotes: pendingFollow.map((c) => c.followNote || c.content).slice(0, 3),
+          total: arr.length,
+        });
+      }
+
+      // ② 상담 공백: 마지막 상담일로부터 경과일 (기록 없으면 null)
+      gaps.push({
+        cid: cls.id, cname: cls.name, sid: st.id, sname: st.name,
+        lastDate: latest ? latest.date : null,
+        gapDays: latest ? daysSince(latest.date) : null,
+        total: arr.length,
+        hasRisk: latest ? (latest.risk || 0) > 0 : false,
+      });
+    });
+  });
+
+  flagged.sort((a, b) => b.risk - a.risk || (b.date || "").localeCompare(a.date || ""));
+  // 기록 없는 학생 먼저, 그다음 오래된 순
+  gaps.sort((a, b) => {
+    if (a.gapDays === null && b.gapDays === null) return 0;
+    if (a.gapDays === null) return -1;
+    if (b.gapDays === null) return 1;
+    return b.gapDays - a.gapDays;
+  });
+  return { flagged, gaps };
+}
+
+// ----- 합반(질문 공유) -----
+// 합반 요일이면 질문을 "대표 반"(두 id 중 사전순 첫째) 한 곳에 모은다.
+function questionCid(cls, date) {
+  const m = cls && cls.merge;
+  if (!m || !m.partnerId || !(m.days || []).includes(new Date(date + "T00:00:00").getDay())) return cls.id;
+  return [cls.id, m.partnerId].sort()[0];
+}
+const isMergedDay = (cls, date) => questionCid(cls, date) !== cls.id || (cls.merge && (cls.merge.days || []).includes(new Date(date + "T00:00:00").getDay()));
+async function setMerge(cidA, cidB, days) {
+  await classesCol().doc(cidA).update({ merge: { partnerId: cidB, days } });
+  await classesCol().doc(cidB).update({ merge: { partnerId: cidA, days } });
+  await loadClasses();
+}
+async function clearMerge(cidA, cidB) {
+  const del = firebase.firestore.FieldValue.delete();
+  await classesCol().doc(cidA).update({ merge: del });
+  if (cidB) await classesCol().doc(cidB).update({ merge: del });
+  await loadClasses();
+}
+async function deleteClass(cid) {
+  await classesCol().doc(cid).delete();
+  // 모든 선생님의 담당 목록에서 제거
+  const ts = await listTeachers();
+  for (const t of ts) {
+    if ((t.classIds || []).includes(cid)) {
+      await updateTeacher(t.tid, { classIds: t.classIds.filter((x) => x !== cid) });
+    }
+  }
+  await loadClasses();
+}
+
+// ===== 공용: 과제 번호표 =====
+function HwGrid({ total, set, qset, bookName, onCellDown, onCellClick }) {
+  const interactive = !!onCellClick;
+  const cells = [];
+  for (let n = 1; n <= total; n++) {
+    const isDone = set.has(n);
+    const cls = "cm-cell" + (isDone ? " done" : "") + (interactive ? " clickable" : "") + (qset && qset.has(n) ? " q" : "");
+    cells.push(
+      interactive ? (
+        <button key={n} className={cls} data-n={n} data-book={bookName}
+          onPointerDown={(e) => onCellDown(n, e)} onClick={() => onCellClick(n)}>{n}</button>
+      ) : (<span key={n} className={cls}>{n}</span>)
+    );
+  }
+  return <div className="cm-grid">{cells}</div>;
+}
+
+function BookHwCard({ book, initial, qNumbers, onClearQuestion, onChange }) {
+  const setRef = useRef(new Set(initial));
+  const [, setTick] = useState(0);
+  const rerender = () => setTick((t) => t + 1);
+  const paintVal = useRef(null);
+  const suppressClick = useRef(false);
+  const [painting, setPainting] = useState(false);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const set = setRef.current;
+  const qset = new Set(qNumbers || []);
+  const commit = () => onChange(Array.from(setRef.current).sort((a, b) => a - b));
+
+  function applyPaint(n) { if (paintVal.current) setRef.current.add(n); else setRef.current.delete(n); rerender(); }
+  function toggleSingle(n) { if (setRef.current.has(n)) setRef.current.delete(n); else setRef.current.add(n); rerender(); commit(); }
+  function startMousePaint(n) {
+    paintVal.current = !setRef.current.has(n);
+    applyPaint(n);
+    const move = (ev) => {
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      if (el && el.getAttribute && el.getAttribute("data-book") === book.name) { const dn = el.getAttribute("data-n"); if (dn) applyPaint(parseInt(dn, 10)); }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      paintVal.current = null; suppressClick.current = true;
+      setTimeout(() => { suppressClick.current = false; }, 50); commit();
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  }
+  function startTouchLongPress(n, x, y) {
+    const longTimer = setTimeout(() => {
+      window.removeEventListener("pointermove", cancelMove); window.removeEventListener("pointerup", earlyUp); enterTouchPaint(n);
+    }, 420);
+    const cancelMove = (ev) => {
+      if (Math.abs(ev.clientX - x) > 8 || Math.abs(ev.clientY - y) > 8) {
+        clearTimeout(longTimer); window.removeEventListener("pointermove", cancelMove); window.removeEventListener("pointerup", earlyUp);
+      }
+    };
+    const earlyUp = () => { clearTimeout(longTimer); window.removeEventListener("pointermove", cancelMove); };
+    window.addEventListener("pointermove", cancelMove); window.addEventListener("pointerup", earlyUp, { once: true });
+  }
+  function enterTouchPaint(n) {
+    setPainting(true); paintVal.current = !setRef.current.has(n); applyPaint(n); suppressClick.current = true;
+    if (navigator.vibrate) navigator.vibrate(15);
+    const touchMove = (ev) => {
+      ev.preventDefault(); const t = ev.touches[0]; if (!t) return;
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      if (el && el.getAttribute && el.getAttribute("data-book") === book.name) { const dn = el.getAttribute("data-n"); if (dn) applyPaint(parseInt(dn, 10)); }
+    };
+    const end = () => {
+      window.removeEventListener("touchmove", touchMove); window.removeEventListener("touchend", end);
+      paintVal.current = null; setPainting(false); commit(); setTimeout(() => { suppressClick.current = false; }, 80);
+    };
+    window.addEventListener("touchmove", touchMove, { passive: false }); window.addEventListener("touchend", end, { once: true });
+  }
+  function onCellDown(n, e) {
+    if (e.pointerType === "touch") { startTouchLongPress(n, e.clientX, e.clientY); }
+    else { e.preventDefault(); startMousePaint(n); }
+  }
+  function onCellClick(n) { if (suppressClick.current) { suppressClick.current = false; return; } toggleSingle(n); }
+  function addRange() {
+    const a = parseInt(from, 10), z = parseInt(to, 10);
+    if (isNaN(a) || isNaN(z)) return;
+    for (let n = Math.min(a, z); n <= Math.max(a, z); n++) setRef.current.add(n);
+    setFrom(""); setTo(""); rerender(); commit();
+  }
+
+  return (
+    <div className="cm-card">
+      <div className="cm-book-head">
+        <h3 className="cm-h3" style={{ margin: 0 }}>{book.name}{painting && <span className="cm-paintbadge">● 칠하기 모드</span>}</h3>
+        <span className="cm-book-count">{set.size} / {book.total}<span className="cm-book-pct"> ({book.total > 0 ? Math.round(set.size / book.total * 100) : 0}%)</span></span>
+      </div>
+      <div className="cm-rangebar">
+        <input className="cm-input" placeholder="시작" inputMode="numeric" value={from} onChange={(e) => setFrom(e.target.value.replace(/\D/g, ""))} />
+        <span className="cm-tilde">~</span>
+        <input className="cm-input" placeholder="끝" inputMode="numeric" value={to} onChange={(e) => setTo(e.target.value.replace(/\D/g, ""))} />
+        <button className="cm-btn cm-btn-ghost cm-rangebtn" onClick={addRange}>한번에 완료</button>
+      </div>
+      {qNumbers && qNumbers.length > 0 && onClearQuestion && (
+        <div className="cm-qchips">
+          <span className="cm-qchips-label">질문한 번호</span>
+          {qNumbers.slice().sort((a, b) => a - b).map((n) => (
+            <button key={n} className="cm-qchip" onClick={() => onClearQuestion(n)}>{n} ✕</button>
+          ))}
+        </div>
+      )}
+      <HwGrid total={book.total} set={set} qset={qset} bookName={book.name} onCellDown={onCellDown} onCellClick={onCellClick} />
+    </div>
+  );
+}
+
+// ===== 반 선택 (학생) =====
+function StudentGate({ onClsChange }) {
+  const [matches, setMatches] = useState(null); // null = 미로그인
+  const [cls, setCls] = useState(null);
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const norm = (s) => (s || "").replace(/\s+/g, "");
+  useEffect(() => { onClsChange && onClsChange(cls); }, [cls]);
+
+  async function login() {
+    if (busy) return;
+    const nm = norm(name);
+    if (!nm) { setErr("이름을 입력해주세요"); return; }
+    if (pin.length !== 4) { setErr("PIN 4자리를 입력해주세요"); return; }
+    setBusy(true); setErr("");
+    // 이름이 있는 모든 반 = 같은 사람의 반들
+    const candidates = CLASSES
+      .map((c) => ({ cls: c, member: (c.roster || []).find((r) => norm(r.name) === nm) }))
+      .filter((x) => x.member);
+    if (candidates.length === 0) {
+      setBusy(false);
+      setErr("명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해주세요.");
+      return;
+    }
+    const okPin = await verifyPersonPin(nm, pin, candidates);
+    setBusy(false);
+    if (!okPin) { setErr("PIN이 올바르지 않아요."); return; }
+    setMatches(candidates);
+    if (candidates.length === 1) setCls(candidates[0].cls);
+  }
+  function fullLogout() { setMatches(null); setCls(null); setPin(""); setErr(""); }
+
+  // ---- 로그인 전 ----
+  if (!matches) {
+    return (
+      <div className="cm-card">
+        <h2 className="cm-h2">로그인</h2>
+        <label className="cm-label">이름</label>
+        <input className="cm-input" placeholder="본인 이름을 입력" value={name}
+          onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && login()} />
+        <label className="cm-label">PIN</label>
+        <input className="cm-input" type="password" inputMode="numeric" maxLength={4} placeholder="4자리"
+          value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} onKeyDown={(e) => e.key === "Enter" && login()} />
+        {err && <div className="cm-err">{err}</div>}
+        <button className="cm-btn cm-btn-primary" disabled={busy} onClick={login}>{busy ? "확인 중..." : "입장"}</button>
+      </div>
+    );
+  }
+
+  // ---- 내 반 선택 (여러 반에 속한 경우만) ----
+  if (!cls) {
+    return (
+      <div className="cm-stack"><div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 12}}>
+          <h3 className="cm-h3" style={{margin: 0}}>{matches[0].member.name}님의 수업</h3>
+          <button className="cm-link" onClick={fullLogout}>로그아웃</button>
+        </div>
+        <div className="cm-daylist">
+          {matches.map((m) => (
+            <button key={m.cls.id} className="cm-day" onClick={() => setCls(m.cls)}>
+              <div className="cm-day-left"><span className="cm-day-date">{m.cls.name}</span>
+                {m.member.teacher && <span className="cm-day-sub">선생님</span>}</div>
+              <span className="cm-day-arrow">›</span>
+            </button>
+          ))}
+        </div>
+      </div></div>
+    );
+  }
+
+  const me = matches.find((m) => m.cls.id === cls.id).member;
+  return <StudentHome cls={cls} me={me}
+    onLogout={matches.length > 1 ? () => setCls(null) : fullLogout} />;
+}
+
+// ===== 학생 화면 =====
+function StudentView({ cls, onBack }) {
+  const [me, setMe] = useState(null);
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
+
+  const norm = (s) => (s || "").replace(/\s+/g, "");
+  async function login() {
+    const u = cls.roster.find((r) => norm(r.name) === norm(name));
+    if (!u) { setErr("명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해줘."); return; }
+    const okPin = await verifyPersonPin(norm(name), pin, [{ cls, member: u }]);
+    if (!okPin) { setErr("PIN이 올바르지 않습니다"); return; }
+    setErr(""); setPin(""); setName(""); setMe(u);
+  }
+
+  if (!me) {
+    return (
+      <div className="cm-card">
+        <h2 className="cm-h2">입장하기</h2>
+        <div style={{ color: "#7c8294", fontSize: 13, marginTop: -8, marginBottom: 6 }}>{cls.name}</div>
+        <label className="cm-label">이름</label>
+        <input className="cm-input" placeholder="본인 이름을 입력" value={name}
+          onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && login()} />
+        <label className="cm-label">PIN</label>
+        <input className="cm-input" type="password" inputMode="numeric" maxLength={4} placeholder="4자리"
+          value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} onKeyDown={(e) => e.key === "Enter" && login()} />
+        {err && <div className="cm-err">{err}</div>}
+        <button className="cm-btn cm-btn-primary" onClick={login}>입장</button>
+        {onBack && <button className="cm-link" style={{ marginTop: 12, display: "block", textAlign: "center", width: "100%" }} onClick={onBack}>← 다른 반 선택</button>}
+      </div>
+    );
+  }
+  return <StudentHome cls={cls} me={me} onLogout={() => setMe(null)} />;
+}
+
+function MathText({ text }) {
+  // $...$, $$...$$, \\(...\\), \\[...\\] 안의 LaTeX를 KaTeX로 렌더
+  const html = React.useMemo(() => {
+    if (!text) return "";
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    if (typeof katex === "undefined") return esc(text);
+    // 토큰 분리: 디스플레이($$, \[\]) 와 인라인($, \(\))
+    const re = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\$([^\$\n]+?)\$|\\\(([\s\S]+?)\\\)/g;
+    let out = ""; let last = 0; let m;
+    while ((m = re.exec(text)) !== null) {
+      out += esc(text.slice(last, m.index));
+      const display = m[1] !== undefined || m[2] !== undefined;
+      const expr = m[1] || m[2] || m[3] || m[4] || "";
+      try {
+        out += katex.renderToString(expr, { displayMode: display, throwOnError: false });
+      } catch (e) {
+        out += esc(m[0]);
+      }
+      last = m.index + m[0].length;
+    }
+    out += esc(text.slice(last));
+    return out;
+  }, [text]);
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+function ConsultForm({ cls, meName, editing, onDone, onCancel }) {
+  const students = cls.roster.filter((r) => !r.teacher);
+  const [sid, setSid] = useState(editing ? editing.sid : (students[0] ? students[0].id : ""));
+  const [withWho, setWithWho] = useState(editing ? editing.withWho : "student");
+  const [cat, setCat] = useState(editing ? editing.cat : "learning");
+  const [date, setDate] = useState(editing ? editing.date : todayStr);
+  const [content, setContent] = useState(editing ? editing.content : "");
+  const [needFollow, setNeedFollow] = useState(editing ? !!editing.needFollow : false);
+  const [followNote, setFollowNote] = useState(editing ? (editing.followNote || "") : "");
+  const [risk, setRisk] = useState(editing ? (editing.risk || 0) : 0);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (busy) return;
+    if (!sid) { setMsg("학생을 선택해주세요"); return; }
+    if (!content.trim()) { setMsg("상담 내용을 입력해주세요"); return; }
+    const st = students.find((s) => s.id === sid);
+    setBusy(true); setMsg("");
+    try {
+      const rec = {
+        cid: cls.id, cname: cls.name, sid, sname: st ? st.name : "",
+        withWho, cat, date, content: content.trim(), risk,
+        needFollow, followNote: needFollow ? followNote.trim() : "",
+        teacher: meName || "",
+      };
+      if (editing) {
+        await updateConsult(editing.id, { ...rec, followDone: needFollow ? !!editing.followDone : false });
+      } else {
+        await addConsult({ ...rec, followDone: false });
+      }
+      onDone();
+    } catch (e) { setMsg("저장 실패: " + e.message); setBusy(false); }
+  }
+
+  return (
+    <div style={{borderTop: "1px solid var(--line)", paddingTop: 14, marginTop: 6}}>
+      <h4 className="cm-h3" style={{fontSize: 15, margin: "0 0 10px"}}>{editing ? "상담 기록 수정" : "새 상담 기록"}</h4>
+      <label className="cm-label">학생</label>
+      <select className="cm-input" value={sid} onChange={(e) => setSid(e.target.value)}>
+        {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+      </select>
+      <label className="cm-label">상담 대상</label>
+      <div style={{display: "flex", gap: 6, marginBottom: 4}}>
+        {CONSULT_WITH.map((w) => (
+          <button key={w.key} className={"cm-ab-tab" + (withWho === w.key ? " on" : "")} onClick={() => setWithWho(w.key)}>{w.label}</button>
+        ))}
+      </div>
+      <label className="cm-label">분류</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4}}>
+        {CONSULT_CATS.map((c) => (
+          <button key={c.key} className={"cm-ab-tab" + (cat === c.key ? " on" : "")} onClick={() => setCat(c.key)}>{c.label}</button>
+        ))}
+      </div>
+      <label className="cm-label">상담 날짜</label>
+      <input className="cm-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      <label className="cm-label">상담 내용</label>
+      <textarea className="cm-input cm-notice-ta" rows={5} placeholder="상담 내용을 입력하세요"
+        value={content} onChange={(e) => setContent(e.target.value)} />
+      <label className="cm-label">위험 신호</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4}}>
+        {RISK_LEVELS.map((r) => (
+          <button key={r.v} className={"cm-ab-tab" + (risk === r.v ? " on" : "")} onClick={() => setRisk(r.v)}>{r.label}</button>
+        ))}
+      </div>
+      <div className="cm-hint" style={{marginBottom: 4}}>표시하면 <b>위험신호 대시보드</b>에 올라와요. 나아지면 다음 상담에서 "없음"으로 기록하면 내려가요.</div>
+      <div style={{display: "flex", alignItems: "center", gap: 8, margin: "10px 0 4px", cursor: "pointer"}} onClick={() => setNeedFollow(!needFollow)}>
+        <span style={{width: 20, height: 20, borderRadius: 6, border: "1px solid var(--line)", background: needFollow ? "var(--clay)" : "#fff", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flex: "none"}}>{needFollow ? "✓" : ""}</span>
+        <span style={{fontSize: 14, fontWeight: 600}}>후속 조치가 필요해요</span>
+      </div>
+      {needFollow && (
+        <textarea className="cm-input cm-notice-ta" rows={2} placeholder="어떤 조치가 필요한가요? (예: 다음 주 학부모 재통화, 보충 수업 배정)"
+          value={followNote} onChange={(e) => setFollowNote(e.target.value)} />
+      )}
+      {msg && <div className="cm-err">{msg}</div>}
+      <div style={{display: "flex", gap: 10}}>
+        <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy} onClick={submit}>{busy ? "저장 중..." : "저장"}</button>
+        <button className="cm-btn cm-btn-ghost" style={{margin: 0}} onClick={onCancel}>취소</button>
+      </div>
+    </div>
+  );
+}
+
+function ConsultView({ cls, canEdit, meName }) {
+  const [list, setList] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  const [filter, setFilter] = useState("all"); // all | follow | 학생id
+  const [catFilter, setCatFilter] = useState("");
+
+  useEffect(() => consultCol().where("cid", "==", cls.id).onSnapshot((s) => {
+    const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() }));
+    arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.time - a.time);
+    setList(arr);
+  }, (e) => { console.error("상담 로드 실패", e); setList([]); }), [cls.id]);
+
+  if (list === null) return <div className="cm-empty">불러오는 중…</div>;
+
+  const followPending = list.filter((c) => c.needFollow && !c.followDone);
+  let shown = list;
+  if (filter === "follow") shown = followPending;
+  else if (filter !== "all") shown = list.filter((c) => c.sid === filter);
+  if (catFilter) shown = shown.filter((c) => c.cat === catFilter);
+
+  const students = cls.roster.filter((r) => !r.teacher);
+
+  return (
+    <div>
+      {followPending.length > 0 && filter !== "follow" && (
+        <div style={{background: "#f6e7df", border: "1px solid #e8c9b5", borderRadius: 12, padding: "11px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8}}>
+          <span style={{fontSize: 14, color: "#c2703f", fontWeight: 700}}>후속 조치 대기 {followPending.length}건</span>
+          <button className="cm-link" style={{marginLeft: "auto"}} onClick={() => setFilter("follow")}>보기 →</button>
+        </div>
+      )}
+
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8}}>
+        <button className={"cm-ab-tab" + (filter === "all" ? " on" : "")} onClick={() => setFilter("all")}>전체 {list.length}</button>
+        <button className={"cm-ab-tab" + (filter === "follow" ? " on" : "")} onClick={() => setFilter("follow")}>후속조치 {followPending.length}</button>
+        {students.map((st) => {
+          const cnt = list.filter((c) => c.sid === st.id).length;
+          if (cnt === 0) return null;
+          return <button key={st.id} className={"cm-ab-tab" + (filter === st.id ? " on" : "")} onClick={() => setFilter(st.id)}>{st.name} {cnt}</button>;
+        })}
+      </div>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12}}>
+        <button className={"cm-ab-tab" + (catFilter === "" ? " on" : "")} onClick={() => setCatFilter("")}>전체 분류</button>
+        {CONSULT_CATS.map((c) => (
+          <button key={c.key} className={"cm-ab-tab" + (catFilter === c.key ? " on" : "")} onClick={() => setCatFilter(c.key)}>{c.label}</button>
+        ))}
+      </div>
+
+      {shown.length === 0 && <div className="cm-empty">{filter === "follow" ? "후속 조치가 필요한 상담이 없어요 👍" : "아직 상담 기록이 없어요"}</div>}
+
+      {shown.map((c) => {
+        const ci = catInfo(c.cat);
+        const pending = c.needFollow && !c.followDone;
+        return (
+          <div key={c.id} style={{borderBottom: "1px solid var(--line)", padding: "12px 0", borderLeft: pending ? "3px solid var(--clay)" : "3px solid transparent", paddingLeft: 10, marginLeft: -10}}>
+            <div style={{display: "flex", alignItems: "center", gap: 7, cursor: "pointer", flexWrap: "wrap"}} onClick={() => setOpenId(openId === c.id ? null : c.id)}>
+              <strong>{c.sname}</strong>
+              <span className="cm-chip" style={{background: ci.bg, color: ci.color}}>{ci.label}</span>
+              <span className="cm-day-sub">{c.withWho === "parent" ? "학부모" : "학생"}</span>
+              {(c.risk || 0) > 0 && <span className="cm-chip" style={{background: riskInfo(c.risk).bg, color: riskInfo(c.risk).color, fontWeight: 700}}>⚠ {riskInfo(c.risk).label}</span>}
+              {pending && <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f", fontWeight: 700}}>후속조치</span>}
+              {c.needFollow && c.followDone && <span className="cm-chip" style={{background: "#e7f0ea", color: "#3f7d5e"}}>조치완료</span>}
+              <span style={{marginLeft: "auto", fontSize: 11, color: "var(--muted)"}}>{c.date}</span>
+            </div>
+            {openId !== c.id && (
+              <div style={{fontSize: 13, color: "var(--muted)", marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{c.content}</div>
+            )}
+            {openId === c.id && (
+              <div style={{marginTop: 9}}>
+                <div style={{fontSize: 14, lineHeight: 1.65, whiteSpace: "pre-wrap"}}>{c.content}</div>
+                {c.needFollow && (
+                  <div style={{background: c.followDone ? "#e7f0ea" : "#f6e7df", borderRadius: 10, padding: "9px 12px", marginTop: 10}}>
+                    <div style={{fontSize: 12, fontWeight: 700, color: c.followDone ? "#3f7d5e" : "#c2703f", marginBottom: 3}}>{c.followDone ? "✓ 조치 완료" : "후속 조치 필요"}</div>
+                    <div style={{fontSize: 13, whiteSpace: "pre-wrap"}}>{c.followNote || "(내용 없음)"}</div>
+                  </div>
+                )}
+                <div style={{display: "flex", gap: 10, alignItems: "center", marginTop: 10, flexWrap: "wrap"}}>
+                  <span style={{fontSize: 11, color: "var(--muted)"}}>{c.teacher ? c.teacher + " 선생님 · " : ""}{fmtLogTime(c.time)} 기록</span>
+                  {canEdit && (
+                    <span style={{marginLeft: "auto", display: "flex", gap: 4}}>
+                      {c.needFollow && (
+                        <button className="cm-link" onClick={() => updateConsult(c.id, { followDone: !c.followDone })}>
+                          {c.followDone ? "조치 취소" : "조치 완료"}
+                        </button>
+                      )}
+                      <button className="cm-link" onClick={() => { setEditing(c); setAdding(false); }}>수정</button>
+                      <button className="cm-link" style={{color: "#d6453f"}} onClick={() => { if (confirm("이 상담 기록을 삭제할까요?")) deleteConsult(c.id); }}>삭제</button>
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {canEdit && !adding && !editing && (
+        <button className="cm-btn cm-btn-ghost" style={{marginTop: 14}} onClick={() => setAdding(true)}>+ 상담 기록 추가</button>
+      )}
+      {canEdit && (adding || editing) && (
+        <ConsultForm cls={cls} meName={meName} editing={editing}
+          onDone={() => { setAdding(false); setEditing(null); }}
+          onCancel={() => { setAdding(false); setEditing(null); }} />
+      )}
+    </div>
+  );
+}
+
+function AILogView({ cls }) {
+  const [logs, setLogs] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  const [filterSid, setFilterSid] = useState("");
+  useEffect(() => aiLogsCol(cls.id).orderBy("time", "desc").onSnapshot((s) => {
+    const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() })); setLogs(arr);
+  }), [cls.id]);
+  if (logs === null) return <div className="cm-empty">불러오는 중…</div>;
+  const students = cls.roster.filter((r) => !r.teacher);
+  const shown = filterSid ? logs.filter((l) => l.sid === filterSid) : logs;
+  return (
+    <div>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12}}>
+        <button className={"cm-ab-tab" + (filterSid === "" ? " on" : "")} onClick={() => setFilterSid("")}>전체</button>
+        {students.map((st) => {
+          const cnt = logs.filter((l) => l.sid === st.id).length;
+          if (cnt === 0) return null;
+          return <button key={st.id} className={"cm-ab-tab" + (filterSid === st.id ? " on" : "")} onClick={() => setFilterSid(st.id)}>{st.name} {cnt}</button>;
+        })}
+      </div>
+      {shown.length === 0 && <div className="cm-empty">아직 AI 힌트 질문 내역이 없어요</div>}
+      {shown.map((l) => (
+        <div key={l.id} style={{borderBottom: "1px solid var(--line)", padding: "11px 0"}}>
+          <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpenId(openId === l.id ? null : l.id)}>
+            <strong>{l.name}</strong>
+            {l.img && <span title="사진 첨부">📷</span>}
+            <span style={{flex: 1, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14}}>{l.q || "(사진만)"}</span>
+            <span style={{fontSize: 11, color: "var(--muted)", flex: "none"}}>{fmtLogTime(l.time)}</span>
+          </div>
+          {openId === l.id && (
+            <div style={{marginTop: 8}}>
+              <div className="cm-ai-msg me" style={{maxWidth: "100%", alignSelf: "stretch", alignItems: "flex-end"}}>
+                <div className="cm-ai-bubble">{l.img ? "📷 사진 첨부 · " : ""}{l.q || "(사진만)"}</div>
+              </div>
+              <div className="cm-ai-msg ai" style={{maxWidth: "100%", alignSelf: "stretch", marginTop: 8}}>
+                <div className="cm-ai-bubble"><MathText text={l.a} /></div>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function fmtLogTime(t) {
+  const d = new Date(t);
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (sameDay) return hh + ":" + mm;
+  return (d.getMonth() + 1) + "/" + d.getDate() + " " + hh + ":" + mm;
+}
+
+function AIChat({ cls, me }) {
+  const [messages, setMessages] = useState([]); // {role, text, img?:{data,mime}}
+  const [input, setInput] = useState("");
+  const [img, setImg] = useState(null); // {data(b64), mime, preview}
+  const [busy, setBusy] = useState(false);
+  const fileRef = React.useRef(null);
+  const scrollRef = React.useRef(null);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, busy]);
+
+  async function pickImg(e) {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    if (f.size > 4 * 1024 * 1024) { alert("이미지가 너무 커요 (최대 4MB)"); return; }
+    const b64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(f); });
+    setImg({ data: b64, mime: f.type || "image/jpeg", preview: "data:" + (f.type || "image/jpeg") + ";base64," + b64 });
+  }
+
+  async function send() {
+    if (busy || (!input.trim() && !img)) return;
+    const myMsg = { role: "user", text: input.trim(), img };
+    const next = [...messages, myMsg];
+    setMessages(next); setInput(""); setImg(null); setBusy(true);
+    try {
+      const apiMsgs = next.map((m) => {
+        if (m.img) {
+          const parts = [{ type: "image", source: { type: "base64", media_type: m.img.mime, data: m.img.data } }];
+          parts.push({ type: "text", text: m.text || "이 문제 푸는 거 도와줘" });
+          return { role: m.role, content: parts };
+        }
+        return { role: m.role, content: m.text };
+      });
+      const res = await fetch("/api/hint", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: apiMsgs }) });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "오류");
+      setMessages([...next, { role: "assistant", text: data.text }]);
+      if (!me.teacher) {
+        addAiLog(cls.id, { sid: me.id, name: me.name, q: myMsg.text || "", a: data.text || "", img: !!myMsg.img, time: Date.now() }).catch(() => {});
+      }
+    } catch (e) {
+      setMessages([...next, { role: "assistant", text: "⚠ " + e.message }]);
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">AI 힌트 <span className="cm-h-hint">(답은 안 알려주고 힌트만 줘요)</span></h3>
+      {!me.teacher && <div className="cm-hint" style={{marginBottom: 8}}>질문 내역은 선생님이 볼 수 있어요.</div>}
+      <div ref={scrollRef} className="cm-ai-scroll">
+        {messages.length === 0 && <div className="cm-empty">막히는 문제를 물어보거나, 문제 사진을 올려보세요.<br/>답을 바로 알려주진 않고 힌트로 도와줄게요.</div>}
+        {messages.map((m, i) => (
+          <div key={i} className={"cm-ai-msg " + (m.role === "user" ? "me" : "ai")}>
+            {m.img && <img src={m.img.preview} className="cm-ai-img" />}
+            {m.text && <div className="cm-ai-bubble">{m.role === "assistant" ? <MathText text={m.text} /> : m.text}</div>}
+          </div>
+        ))}
+        {busy && <div className="cm-ai-msg ai"><div className="cm-ai-bubble cm-ai-typing">생각 중…</div></div>}
+      </div>
+      {img && <div className="cm-ai-preview"><img src={img.preview} /><button className="cm-link" onClick={() => setImg(null)}>✕ 사진 빼기</button></div>}
+      <div className="cm-ai-input">
+        <input ref={fileRef} type="file" accept="image/*" style={{display: "none"}} onChange={pickImg} />
+        <button className="cm-ai-imgbtn" disabled={busy} onClick={() => fileRef.current.click()}>📷</button>
+        <input className="cm-input" style={{margin: 0}} placeholder="질문을 입력하세요" value={input}
+          onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
+        <button className="cm-ai-send" disabled={busy} onClick={send}>전송</button>
+      </div>
+    </div>
+  );
+}
+
+function StudentHome({ cls, me, onLogout }) {
+  const [tab, setTab] = useState(me.teacher ? "q" : "att");
+  const [att, setAtt] = useState(null);
+  const [showPin, setShowPin] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
+  const [dmNotice, setDmNotice] = useState(null);
+  const [dmDismissed, setDmDismissed] = useState(false);
+
+  useEffect(() => {
+    if (me.teacher) return;
+    const unsub = attCol(cls.id, todayStr).doc(me.id).onSnapshot((d) => setAtt(d.exists ? d.data() : null));
+    return () => unsub();
+  }, [cls.id, me.id]);
+
+  useEffect(() => {
+    const unsub = listenNotice(cls.id, (n) => setNotice(n));
+    return () => unsub();
+  }, [cls.id]);
+
+  useEffect(() => {
+    const unsub = listenDm(cls.id, me.id, (n) => setDmNotice(n));
+    return () => unsub();
+  }, [cls.id, me.id]);
+
+  useEffect(() => {
+    if (!notice || !notice.active || !notice.time) { setNoticeDismissed(false); return; }
+    try { setNoticeDismissed(!!localStorage.getItem("climath_n_" + cls.id + "_" + notice.time)); } catch (e) {}
+  }, [notice, cls.id]);
+
+  useEffect(() => {
+    if (!dmNotice || !dmNotice.active || !dmNotice.time) { setDmDismissed(false); return; }
+    try { setDmDismissed(!!localStorage.getItem("climath_dm_" + cls.id + "_" + me.id + "_" + dmNotice.time)); } catch (e) {}
+  }, [dmNotice, cls.id, me.id]);
+
+  function dismissNotice() {
+    if (!notice) return;
+    try { localStorage.setItem("climath_n_" + cls.id + "_" + notice.time, "1"); } catch (e) {}
+    setNoticeDismissed(true);
+  }
+  function dismissDm() {
+    if (!dmNotice) return;
+    try { localStorage.setItem("climath_dm_" + cls.id + "_" + me.id + "_" + dmNotice.time, "1"); } catch (e) {}
+    setDmDismissed(true);
+  }
+
+  const noGateTabs = ["prog", "notes", "ai"]; // 출석 없이도 볼 수 있는 탭
+  const activeTab = me.teacher ? tab : (att || noGateTabs.includes(tab) ? tab : "att");
+  const showDmBanner = !!(dmNotice && dmNotice.active && dmNotice.text && !dmDismissed);
+  const showClassBanner = !!(notice && notice.active && notice.text && !noticeDismissed) && !showDmBanner;
+  const showBanner = showDmBanner || showClassBanner;
+  const bannerLabel = showDmBanner ? "✉ 선생님 메시지" : "📢 공지사항";
+  const bannerText = showDmBanner ? dmNotice.text : (notice ? notice.text : "");
+  const dismissBanner = showDmBanner ? dismissDm : dismissNotice;
+
+  return (
+    <div className="cm-stack">
+      {showBanner && (
+        <div className="cm-notice-overlay" onClick={dismissBanner}>
+          <div className={"cm-notice-box" + (showDmBanner ? " dm" : "")} onClick={(e) => e.stopPropagation()}>
+            <div className="cm-notice-label">{bannerLabel}</div>
+            <div className="cm-notice-text">{bannerText}</div>
+            <button className="cm-btn cm-btn-primary" style={{ marginTop: 0 }} onClick={dismissBanner}>확인</button>
+          </div>
+        </div>
+      )}
+      <div className="cm-card cm-welcome">
+        <div>
+          <div className="cm-welcome-name">{me.name} 님</div>
+          <div className="cm-welcome-sub">{me.teacher ? "선생님 모드" : att ? "출석 완료 · " + hhmm(att.time) : "아직 출석 전이에요"}</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+          <button className="cm-link" onClick={() => setShowPin((v) => !v)}>비밀번호 변경</button>
+          <button className="cm-link" onClick={onLogout}>나가기</button>
+        </div>
+      </div>
+      {showPin && <ChangePin cls={cls} me={me} onDone={() => setShowPin(false)} />}
+
+      <div className="cm-tabs">
+        {!me.teacher && <button className={activeTab === "att" ? "on" : ""} onClick={() => setTab("att")}>출석</button>}
+        <button className={activeTab === "q" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("q")}>질문</button>
+        <button className={activeTab === "hw" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("hw")}>과제</button>
+        <button className={activeTab === "score" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("score")}>점수</button>
+        <button className={activeTab === "prog" ? "on" : ""} onClick={() => setTab("prog")}>진도</button>
+        <button className={activeTab === "notes" ? "on" : ""} onClick={() => setTab("notes")}>노트</button>
+        <button className={activeTab === "ai" ? "on" : ""} onClick={() => setTab("ai")}>AI힌트</button>
+      </div>
+
+      {activeTab === "att" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">출석체크</h3>
+          {att ? (
+            <div className="cm-done">✓ {hhmm(att.time)}에 출석했어요</div>
+          ) : (
+            <>
+              <button className="cm-btn cm-btn-primary cm-big" onClick={() => checkIn(cls.id, todayStr, me)}>출석하기</button>
+              <div className="cm-hint" style={{ marginTop: 14, textAlign: "center" }}>출석체크를 해야 질문 · 과제를 쓸 수 있어요.</div>
+            </>
+          )}
+        </div>
+      )}
+      {activeTab === "q" && <QuestionForm cls={cls} me={me} />}
+      {activeTab === "hw" && <StudentHomework cls={cls} me={me} />}
+      {activeTab === "score" && <ScoreForm cls={cls} me={me} />}
+      {activeTab === "prog" && <StudentProgressView cls={cls} me={me} />}
+      {activeTab === "notes" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">강의노트</h3>
+          <NotesManager cls={cls} canEdit={false} />
+        </div>
+      )}
+      {activeTab === "ai" && <AIChat cls={cls} me={me} />}
+    </div>
+  );
+}
+
+function ChangePin({ cls, me, onDone }) {
+  const [p1, setP1] = useState("");
+  const [p2, setP2] = useState("");
+  const [msg, setMsg] = useState("");
+  async function save() {
+    if (p1.length !== 4) { setMsg("PIN은 4자리로 입력해줘"); return; }
+    if (p1 !== p2) { setMsg("두 번 입력한 PIN이 달라"); return; }
+    try { await savePersonPin(me.name, p1); setMsg("비밀번호가 변경됐어요"); setTimeout(onDone, 800); }
+    catch (e) { setMsg("저장에 실패했어요. 잠시 후 다시 시도해줘"); }
+  }
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">비밀번호 변경</h3>
+      <label className="cm-label">새 PIN (숫자 4자리)</label>
+      <input className="cm-input" type="password" inputMode="numeric" maxLength={4} value={p1} onChange={(e) => setP1(e.target.value.replace(/\D/g, ""))} />
+      <label className="cm-label">새 PIN 다시 입력</label>
+      <input className="cm-input" type="password" inputMode="numeric" maxLength={4} value={p2} onChange={(e) => setP2(e.target.value.replace(/\D/g, ""))} />
+      {msg && <div className="cm-err">{msg}</div>}
+      <button className="cm-btn cm-btn-primary" onClick={save}>저장</button>
+      <button className="cm-link" style={{ marginTop: 12, display: "block", textAlign: "center", width: "100%" }} onClick={onDone}>취소</button>
+    </div>
+  );
+}
+
+function QuestionForm({ cls, me }) {
+  const books = getStudentBooks(cls, me);
+  const [book, setBook] = useState(books.length ? books[0].name : "");
+  const [num, setNum] = useState("");
+  const [memo, setMemo] = useState("");
+  const [sent, setSent] = useState([]);
+  useEffect(() => {
+    const qcid = questionCid(cls, todayStr);
+    const unsub = qCol(qcid, todayStr).where("sid", "==", me.id).onSnapshot((s) => {
+      const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); arr.sort((a, b) => a.time - b.time); setSent(arr);
+    });
+    return () => unsub();
+  }, [cls.id, me.id]);
+  async function submit() {
+    if (!num.trim()) return;
+    const nums = num.trim().split(/[^0-9\-()]+/).map((s) => s.trim()).filter((s) => s.length > 0);
+    const now = Date.now();
+    const qcid = questionCid(cls, todayStr);
+    await Promise.all(nums.map((n, i) =>
+      addQuestion(qcid, todayStr, { sid: me.id, name: me.name, book, num: n, memo: memo.trim(), time: now + i, resolved: false, fromCid: cls.id, fromClass: cls.name })
+    ));
+    const parsedNums = nums.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
+    if (parsedNums.length > 0) {
+      await Promise.all(parsedNums.map((n) => addQuestioned(cls.id, me.id, me.name, book, n)));
+    }
+    setNum(""); setMemo("");
+  }
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">질문하기</h3>
+      <label className="cm-label">교재</label>
+      <select className="cm-input" value={book} onChange={(e) => setBook(e.target.value)}>{books.map((b) => <option key={b.name}>{b.name}</option>)}</select>
+      <label className="cm-label">문항 번호</label>
+      <input className="cm-input" placeholder="예: 124  또는  124-(2)" value={num} onChange={(e) => setNum(e.target.value)} />
+      <label className="cm-label">메모 (선택)</label>
+      <input className="cm-input" placeholder="예: 적분 구간을 모르겠어요" value={memo} onChange={(e) => setMemo(e.target.value)} />
+      <button className="cm-btn cm-btn-primary" onClick={submit}>선생님께 보내기</button>
+      {sent.length > 0 && (
+        <div className="cm-sentlist">
+          <div className="cm-mini-h">내가 보낸 질문</div>
+          {sent.slice().reverse().map((q) => (
+            <div key={q.qid} className="cm-sent-item">
+              <span>{q.book} <b>{q.num}</b>번</span>
+              <span className={q.resolved ? "cm-tag-ok" : "cm-tag-wait"}>{q.resolved ? "해결됨" : "대기중"}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StudentHomework({ cls, me }) {
+  const [done, setDone] = useState(null);
+  const [qbooks, setQbooks] = useState({});
+  useEffect(() => { getMyHw(cls.id, me.id).then((d) => setDone(d)); }, [cls.id, me.id]);
+  useEffect(() => {
+    const unsub = listenQuestioned(cls.id, me.id, (books) => setQbooks(books));
+    return () => unsub();
+  }, [cls.id, me.id]);
+
+  function persistBook(bookName, arr) {
+    setDone((prev) => ({ ...(prev || {}), [bookName]: arr }));
+    saveHwBook(cls.id, me, bookName, arr);
+  }
+  if (!done) return <div className="cm-card cm-empty">불러오는 중…</div>;
+  return (
+    <>
+      <div className="cm-card cm-hint">
+        완료한 번호를 <b>누르거나, 마우스로 드래그</b>해서 칠하세요. 터치 화면에서는 칸을 <b>꾹 눌러 칠하기 모드</b>로 들어간 뒤 손가락을 끌면 됩니다. 표시한 번호는 <b>날마다 지워지지 않고 계속 누적</b>돼요. <b style={{ color: "#d6453f" }}>질문한 번호는 빨간 글씨</b>로 누적 표시되고, 빨간 번호 칩을 눌러 지울 수 있어요.
+      </div>
+      {getStudentBooks(cls, me).map((b) => (
+        <BookHwCard key={b.name} book={b} initial={done[b.name] || []}
+          qNumbers={qbooks[b.name]} onClearQuestion={(n) => removeQuestioned(cls.id, me.id, b.name, n)}
+          onChange={(arr) => persistBook(b.name, arr)} />
+      ))}
+    </>
+  );
+}
+
+function ScoreForm({ cls, me }) {
+  const [correct, setCorrect] = useState("");
+  const [total, setTotal] = useState("");
+  const [label, setLabel] = useState("");
+  const [mine, setMine] = useState([]);
+
+  useEffect(() => {
+    const unsub = scoresCol(cls.id, todayStr).where("sid", "==", me.id).onSnapshot((s) => {
+      const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() })); arr.sort((a, b) => a.time - b.time); setMine(arr);
+    });
+    return () => unsub();
+  }, [cls.id, me.id]);
+
+  const c = parseInt(correct, 10), t = parseInt(total, 10);
+  const valid = !isNaN(c) && !isNaN(t) && t > 0 && c >= 0 && c <= t;
+  const score = valid ? Math.round((c / t) * 100) : null;
+  const over = correct !== "" && total !== "" && !isNaN(c) && !isNaN(t) && (c > t || t === 0);
+
+  async function submit() {
+    if (!valid) return;
+    await addScore(cls.id, todayStr, { sid: me.id, name: me.name, correct: c, total: t, score, label: label.trim(), time: Date.now() });
+    setCorrect(""); setTotal(""); setLabel("");
+  }
+
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">테스트 점수</h3>
+      <label className="cm-label">시험 이름 (선택)</label>
+      <input className="cm-input" placeholder="예: 6월 단원평가" value={label} onChange={(e) => setLabel(e.target.value)} />
+      <label className="cm-label">맞은 개수 / 전체 문항 수</label>
+      <div className="cm-rangebar">
+        <input className="cm-input" inputMode="numeric" placeholder="맞은 개수" value={correct} onChange={(e) => setCorrect(e.target.value.replace(/\D/g, ""))} />
+        <span className="cm-tilde">/</span>
+        <input className="cm-input" inputMode="numeric" placeholder="전체" value={total} onChange={(e) => setTotal(e.target.value.replace(/\D/g, ""))} />
+      </div>
+      {score !== null && <div className="cm-scorebig">환산 점수 <b>{score}점</b><span>/ 100점</span></div>}
+      {over && <div className="cm-err">맞은 개수는 전체 문항 수보다 클 수 없어요.</div>}
+      <button className="cm-btn cm-btn-primary" onClick={submit}>제출하기</button>
+      {mine.length > 0 && (
+        <div className="cm-sentlist">
+          <div className="cm-mini-h">내가 제출한 점수</div>
+          {mine.slice().reverse().map((s) => (
+            <div key={s.id} className="cm-sent-item">
+              <span>{s.label ? s.label + " · " : ""}{s.correct}/{s.total}</span>
+              <span className="cm-tag-ok">{s.score}점</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== 선생님 화면 =====
+function RiskDashboard({ onBack }) {
+  const [data, setData] = useState(null);
+  const [tab, setTab] = useState("flag"); // flag | gap
+  const [gapDays, setGapDays] = useState(60);
+  function reload() {
+    setData(null);
+    computeRiskData().then(setData).catch((e) => { console.error(e); setData({ flagged: [], gaps: [] }); });
+  }
+  useEffect(() => { reload(); }, []);
+
+  const flagged = data ? data.flagged : [];
+  const overdue = data ? data.gaps.filter((g) => g.gapDays === null || g.gapDays >= gapDays) : [];
+  const counts = { 3: flagged.filter((x) => x.risk === 3).length, 2: flagged.filter((x) => x.risk === 2).length, 1: flagged.filter((x) => x.risk === 1).length };
+  const gapText = (g) => g.gapDays === null ? "상담 기록 없음" : g.gapDays + "일째";
+
+  return (
+    <div className="cm-stack">
+      <div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 12}}>
+          <h2 className="cm-h2" style={{margin: 0}}>위험신호</h2>
+          <button className="cm-link" onClick={onBack}>← 돌아가기</button>
+        </div>
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
+          <button className={"cm-ab-tab" + (tab === "flag" ? " on" : "")} onClick={() => setTab("flag")}>표시된 신호 {flagged.length}</button>
+          <button className={"cm-ab-tab" + (tab === "gap" ? " on" : "")} onClick={() => setTab("gap")}>상담 공백 {overdue.length}</button>
+          <button className="cm-link" style={{marginLeft: "auto"}} onClick={reload}>새로고침</button>
+        </div>
+      </div>
+
+      {data === null && <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>}
+
+      {/* ---- 표시된 신호 ---- */}
+      {data !== null && tab === "flag" && (<>
+        <div className="cm-card">
+          <div style={{display: "flex", gap: 10}}>
+            {[3, 2, 1].map((v) => {
+              const ri = riskInfo(v);
+              return (
+                <div key={v} style={{flex: 1, background: ri.bg, borderRadius: 12, padding: "11px 8px", textAlign: "center"}}>
+                  <div style={{fontSize: 22, fontWeight: 700, color: ri.color, fontFamily: "'Fraunces',serif"}}>{counts[v] || 0}</div>
+                  <div style={{fontSize: 12, color: ri.color}}>{ri.label}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="cm-hint" style={{marginTop: 10}}>상담에 표시한 신호예요. 학생마다 <b>가장 최근 상담</b> 기준이고, 나아지면 다음 상담에서 "없음"으로 기록하면 내려가요.</div>
+        </div>
+
+        {flagged.length === 0 && <div className="cm-card"><div className="cm-empty">표시된 위험 신호가 없어요 👍</div></div>}
+
+        {flagged.map((x) => {
+          const ri = riskInfo(x.risk);
+          const ci = catInfo(x.cat);
+          const stale = x.ageDays !== null && x.ageDays >= 45;
+          return (
+            <div key={x.cid + ":" + x.sid} className="cm-card" style={{borderLeft: "4px solid " + ri.color, padding: "14px 16px"}}>
+              <div style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap"}}>
+                <strong style={{fontSize: 16}}>{x.sname}</strong>
+                <span className="cm-day-sub">{x.cname}</span>
+                <span className="cm-chip" style={{background: ci.bg, color: ci.color}}>{ci.label}</span>
+                <span style={{marginLeft: "auto", fontSize: 12, fontWeight: 700, color: ri.color}}>⚠ {ri.label}</span>
+              </div>
+              <div style={{fontSize: 14, lineHeight: 1.6, marginTop: 8, whiteSpace: "pre-wrap"}}>{x.content}</div>
+              {x.pendingFollow > 0 && (
+                <div style={{background: "#f6e7df", borderRadius: 10, padding: "9px 12px", marginTop: 10}}>
+                  <div style={{fontSize: 12, fontWeight: 700, color: "#c2703f", marginBottom: 3}}>후속 조치 대기 {x.pendingFollow}건</div>
+                  {x.pendingNotes.map((n, i) => <div key={i} style={{fontSize: 13, marginTop: 2}}>· {n}</div>)}
+                </div>
+              )}
+              {stale && (
+                <div style={{background: "#f0ece5", borderRadius: 10, padding: "8px 12px", marginTop: 10, fontSize: 12, color: "#7c6f5f"}}>
+                  이 신호가 표시된 지 {x.ageDays}일 됐어요. 지금도 유효한지 확인이 필요해요.
+                </div>
+              )}
+              <div style={{fontSize: 11, color: "var(--muted)", marginTop: 9}}>
+                {x.date}{x.ageDays !== null && " (" + (x.ageDays === 0 ? "오늘" : x.ageDays + "일 전") + ")"} · {x.withWho === "parent" ? "학부모 상담" : "학생 상담"}{x.teacher ? " · " + x.teacher + " 선생님" : ""} · 누적 {x.total}회
+              </div>
+            </div>
+          );
+        })}
+      </>)}
+
+      {/* ---- 상담 공백 ---- */}
+      {data !== null && tab === "gap" && (<>
+        <div className="cm-card">
+          <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
+            <span style={{fontSize: 13, color: "var(--muted)"}}>기준</span>
+            {[30, 60, 90].map((v) => (
+              <button key={v} className={"cm-ab-tab" + (gapDays === v ? " on" : "")} onClick={() => setGapDays(v)}>{v}일 이상</button>
+            ))}
+          </div>
+          <div className="cm-hint" style={{marginTop: 10}}>마지막 상담으로부터 오래된 순이에요. 위험 여부를 판단한 게 아니라, <b>한동안 이야기 나눈 적 없는 학생</b>을 알려주는 목록이에요.</div>
+        </div>
+
+        {overdue.length === 0 && <div className="cm-card"><div className="cm-empty">모든 학생을 최근에 만났어요 👍</div></div>}
+
+        {overdue.map((g) => {
+          const never = g.gapDays === null;
+          const hot = never || g.gapDays >= 90;
+          return (
+            <div key={g.cid + ":" + g.sid} className="cm-card" style={{borderLeft: "4px solid " + (hot ? "#c2703f" : "#c9bfae"), padding: "13px 16px"}}>
+              <div style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap"}}>
+                <strong style={{fontSize: 15}}>{g.sname}</strong>
+                <span className="cm-day-sub">{g.cname}</span>
+                {g.hasRisk && <span className="cm-chip" style={{background: "#fae3e2", color: "#d6453f"}}>위험 표시됨</span>}
+                <span style={{marginLeft: "auto", fontSize: 13, fontWeight: 700, color: hot ? "#c2703f" : "var(--muted)"}}>{gapText(g)}</span>
+              </div>
+              <div style={{fontSize: 11, color: "var(--muted)", marginTop: 6}}>
+                {never ? "아직 상담 기록이 없어요" : "마지막 상담 " + g.lastDate + " · 누적 " + g.total + "회"}
+              </div>
+            </div>
+          );
+        })}
+      </>)}
+    </div>
+  );
+}
+
+function AdminView() {
+  const [teachers, setTeachers] = useState(null); // null=로딩중
+  const [me, setMe] = useState(null);
+  const [picked, setPicked] = useState(null); // 로그인 시도 중인 선생님
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
+  const [mode, setMode] = useState("login"); // login | register | manage
+  const [cls, setCls] = useState(null);
+
+  async function refreshTeachers() {
+    let arr = await listTeachers();
+    if (arr.length === 0) {
+      await addTeacher("한민수", ADMIN_PIN, CLASSES.map((c) => c.id), "owner");
+      arr = await listTeachers();
+    }
+    setTeachers(arr);
+    return arr;
+  }
+  useEffect(() => {
+    refreshTeachers().then((arr) => {
+      try {
+        const tid = sessionStorage.getItem("climath_teacher");
+        const t = arr.find((x) => x.tid === tid);
+        if (t && !isPending(t)) setMe(t);
+      } catch (e) {}
+    });
+  }, []);
+
+  function tryLogin() {
+    if (isPending(picked)) { setErr("관리자 승인 대기 중입니다. 승인 후 로그인할 수 있어요."); return; }
+    if (pin !== picked.pin) { setErr("PIN이 올바르지 않습니다"); return; }
+    try { sessionStorage.setItem("climath_teacher", picked.tid); } catch (e) {}
+    setMe(picked); setPicked(null); setPin(""); setErr("");
+  }
+  function logout() {
+    try { sessionStorage.removeItem("climath_teacher"); } catch (e) {}
+    setMe(null); setCls(null); setMode("login");
+  }
+  const canEdit = (c) => me && (me.role === "owner" || (me.classIds || []).includes(c.id));
+
+  if (teachers === null) return <div className="cm-card"><div className="cm-empty">불러오는 중...</div></div>;
+
+  // ---- 로그인 전 ----
+  if (!me) {
+    if (mode === "register") return <TeacherRegister onDone={async () => { await refreshTeachers(); setMode("login"); alert("등록 요청이 접수됐어요. 관리자 승인 후 로그인할 수 있습니다."); }} onCancel={() => setMode("login")} />;
+    if (picked) {
+      return (
+        <div className="cm-card">
+          <h2 className="cm-h2">{picked.name} 선생님</h2>
+          <label className="cm-label">PIN</label>
+          <input className="cm-input" type="password" inputMode="numeric" autoFocus value={pin}
+            onChange={(e) => setPin(e.target.value)} onKeyDown={(e) => e.key === "Enter" && tryLogin()} />
+          {err && <div className="cm-err">{err}</div>}
+          <button className="cm-btn cm-btn-primary" onClick={tryLogin}>들어가기</button>
+          <button className="cm-link" onClick={() => { setPicked(null); setPin(""); setErr(""); }}>← 다른 선생님</button>
+        </div>
+      );
+    }
+    return (
+      <div className="cm-stack"><div className="cm-card">
+        <h2 className="cm-h2">선생님 로그인</h2>
+        <div className="cm-daylist">
+          {teachers.map((t) => (
+            <button key={t.tid} className="cm-day" onClick={() => setPicked(t)}>
+              <div className="cm-day-left"><span className="cm-day-date">{t.name}</span>
+                {t.role === "owner" && <span className="cm-day-sub">관리자</span>}
+                {isPending(t) && <span className="cm-day-sub" style={{color: "#d6453f"}}>승인 대기</span>}</div>
+              <span className="cm-day-arrow">›</span>
+            </button>
+          ))}
+        </div>
+        <button className="cm-link" onClick={() => setMode("register")}>+ 새 선생님 등록</button>
+      </div></div>
+    );
+  }
+
+  // ---- 새 반 만들기 ----
+  if (mode === "newclass") return <ClassCreate me={me} onDone={async (newId) => {
+    const next = [...(me.classIds || []), newId];
+    await updateTeacher(me.tid, { classIds: next });
+    setMe({ ...me, classIds: next });
+    await refreshTeachers();
+    setMode("login");
+  }} onCancel={() => setMode("login")} />;
+
+  // ---- 선생님 관리 (관리자 전용) ----
+  if (mode === "manage") return <TeacherManage me={me} teachers={teachers} onRefresh={refreshTeachers} onBack={() => setMode("login")} />;
+
+  // ---- 위험신호 대시보드 ----
+  if (mode === "risk") return <RiskDashboard onBack={() => setMode("login")} />;
+
+  // ---- 반 선택 ----
+  if (!cls) {
+    return (
+      <div className="cm-stack"><div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 12}}>
+          <h3 className="cm-h3" style={{margin: 0}}>{me.name} 선생님</h3>
+          <button className="cm-link" onClick={logout}>로그아웃</button>
+        </div>
+        <div className="cm-daylist">
+          {CLASSES.map((c) => (
+            <button key={c.id} className="cm-day" onClick={() => setCls(c)}>
+              <div className="cm-day-left"><span className="cm-day-date">{c.name}</span>
+                <span className="cm-day-sub">{canEdit(c) ? "담당" : "열람 전용"}</span></div>
+              <span className="cm-day-arrow">›</span>
+            </button>
+          ))}
+        </div>
+        <button className="cm-link" onClick={() => setMode("risk")}>⚠ 위험신호</button>
+        <button className="cm-link" onClick={() => setMode("newclass")}>+ 새 반 만들기</button>
+        {me.role === "owner" && <button className="cm-link" onClick={() => setMode("manage")}>⚙ 선생님 관리</button>}
+      </div></div>
+    );
+  }
+  return <AdminDays cls={cls} canEdit={canEdit(cls)} isOwner={me.role === "owner"} meName={me.name} onBack={() => setCls(null)} />;
+}
+
+const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
+
+function BookEditor({ books, onChange }) {
+  function setRow(i, patch) { onChange(books.map((b, j) => j === i ? { ...b, ...patch } : b)); }
+  function removeRow(i) { onChange(books.filter((_, j) => j !== i)); }
+  return (
+    <div>
+      {books.map((b, i) => (
+        <div key={i} style={{display: "flex", gap: 8, marginBottom: 8, alignItems: "center"}}>
+          <input className="cm-input" style={{margin: 0, flex: 1}} placeholder="교재 이름"
+            value={b.name} onChange={(e) => setRow(i, { name: e.target.value })} />
+          <input className="cm-input" style={{margin: 0, width: 80}} inputMode="numeric" placeholder="문항수"
+            value={b.total || ""} onChange={(e) => setRow(i, { total: parseInt(e.target.value.replace(/\D/g, "")) || 0 })} />
+          <button className="cm-link" style={{flex: "none"}} onClick={() => removeRow(i)}>삭제</button>
+        </div>
+      ))}
+      <button className="cm-link" onClick={() => onChange([...books, { name: "", total: 0 }])}>+ 교재 추가</button>
+    </div>
+  );
+}
+
+function validateBooks(books) {
+  const cleaned = books.map((b) => ({ name: b.name.trim(), total: b.total }));
+  if (cleaned.some((b) => !b.name)) return { err: "교재 이름이 비어있어요" };
+  if (cleaned.some((b) => !b.total || b.total <= 0)) return { err: "문항수는 1 이상이어야 해요" };
+  const names = cleaned.map((b) => b.name);
+  if (new Set(names).size !== names.length) return { err: "교재 이름이 중복돼요" };
+  return { books: cleaned };
+}
+
+function BookManager({ cls, canEdit }) {
+  const [books, setBooks] = useState(getBooks(cls).map((b) => ({ ...b })));
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    if (busy) return;
+    const v = validateBooks(books);
+    if (v.err) { setMsg(v.err); return; }
+    setBusy(true); setMsg("");
+    try {
+      await saveClassBooks(cls.id, v.books);
+      cls.books = v.books;
+      setBooks(v.books.map((b) => ({ ...b })));
+      setMsg("저장됐어요 ✓");
+    } catch (e) { setMsg("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+  if (!canEdit) {
+    const list = getBooks(cls);
+    return list.length === 0 ? <div className="cm-empty">등록된 교재가 없어요</div> : (
+      <div>{list.map((b) => (
+        <div key={b.name} style={{display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--line)"}}>
+          <span>{b.name}</span><span style={{color: "var(--muted)"}}>{b.total}문항</span>
+        </div>
+      ))}</div>
+    );
+  }
+  return (
+    <div>
+      <div className="cm-hint" style={{marginBottom: 12}}>교재 <b>이름을 바꾸면</b> 그 교재로 쌓인 기존 과제·질문 기록과 <b>연결이 끊겨요</b>. 문항수만 바꾸는 건 안전해요.</div>
+      <BookEditor books={books} onChange={setBooks} />
+      {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
+      <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중..." : "저장"}</button>
+    </div>
+  );
+}
+
+function FileContentViewer({ meta, loader, height }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let revoke = null; let alive = true;
+    setSrc(null);
+    if (meta.html) { setSrc({ kind: "srcdoc", value: meta.html }); return; } // 구버전 호환
+    loader().then((b64) => {
+      if (!alive) return;
+      if (meta.mime === "text/html") {
+        const text = new TextDecoder("utf-8").decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+        setSrc({ kind: "srcdoc", value: text });
+      } else {
+        const url = URL.createObjectURL(b64ToBlob(b64, meta.mime));
+        revoke = url;
+        setSrc({ kind: meta.mime.startsWith("image/") ? "img" : "iframe", value: url });
+      }
+    }).catch(() => alive && setSrc({ kind: "err" }));
+    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
+  }, [meta]);
+  const h = height || 420;
+  if (!src) return <div className="cm-empty">불러오는 중…</div>;
+  if (src.kind === "err") return <div className="cm-err">파일을 불러오지 못했어요</div>;
+  if (src.kind === "img") return <img src={src.value} style={{width: "100%", borderRadius: 10, border: "1px solid var(--line)"}} />;
+  if (src.kind === "srcdoc") return <iframe srcDoc={src.value} sandbox="allow-scripts" style={{width: "100%", height: h, border: "1px solid var(--line)", borderRadius: 10, background: "#fff"}} />;
+  return (<>
+    <iframe src={src.value} style={{width: "100%", height: h, border: "1px solid var(--line)", borderRadius: 10, background: "#fff"}} />
+    <button className="cm-link" onClick={() => window.open(src.value, "_blank")}>새 창에서 크게 보기</button>
+  </>);
+}
+
+function ProgressFileViewer({ cid, pkey, meta, height }) {
+  return <FileContentViewer meta={meta} loader={() => loadProgressFileB64(cid, pkey, meta)} height={height} />;
+}
+
+function ProgressEditor({ cid, pkey, canEdit, title }) {
+  const [meta, setMeta] = useState(undefined);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fileRef = React.useRef(null);
+  useEffect(() => progressDoc(cid, pkey).onSnapshot((d) => setMeta(d.exists ? d.data() : null)), [cid, pkey]);
+  async function onFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true); setMsg("올리는 중... (파일 크기에 따라 잠시 걸려요)");
+    try { await saveProgressFile(cid, pkey, file); setMsg(""); }
+    catch (err) { setMsg(err.message); }
+    setBusy(false);
+  }
+  async function remove() {
+    if (!confirm((title || "이") + " 진도계획표를 삭제할까요?")) return;
+    setBusy(true);
+    try { await deleteProgressFile(cid, pkey); } catch (e) { setMsg("삭제 실패: " + e.message); }
+    setBusy(false);
+  }
+  if (meta === undefined) return <div className="cm-empty">불러오는 중…</div>;
+  return (
+    <div>
+      <input ref={fileRef} type="file" accept=".html,.htm,.pdf,image/*" style={{display: "none"}} onChange={onFile} />
+      {meta && (<>
+        <ProgressFileViewer cid={cid} pkey={pkey} meta={meta} />
+        <div style={{display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap"}}>
+          <span style={{fontSize: 12, color: "var(--muted)"}}>{meta.name ? meta.name + " · " : ""}{fmtDate(ymd(new Date(meta.time)))} 게시</span>
+          {canEdit && (<span style={{marginLeft: "auto"}}>
+            <button className="cm-link" disabled={busy} onClick={() => fileRef.current.click()}>교체</button>
+            <button className="cm-link" style={{color: "#d6453f"}} disabled={busy} onClick={remove}>삭제</button>
+          </span>)}
+        </div>
+      </>)}
+      {!meta && (
+        canEdit
+          ? <button className="cm-btn cm-btn-ghost" disabled={busy} onClick={() => fileRef.current.click()}>+ 파일 올려서 게시하기 (HTML · PDF · 이미지)</button>
+          : <div className="cm-empty">아직 게시된 진도계획표가 없어요</div>
+      )}
+      {msg && <div className={busy ? "cm-hint" : "cm-err"} style={{marginTop: 8}}>{msg}</div>}
+    </div>
+  );
+}
+
+function NoteFileRow({ cls, unit, file, canEdit }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{borderTop: "1px solid var(--line)", padding: "8px 0"}}>
+      <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpen(!open)}>
+        <span style={{fontSize: 14}}>{file.mime && file.mime.startsWith("image/") ? "🖼" : file.mime === "application/pdf" ? "📄" : "📝"} {file.name}</span>
+        <span style={{fontSize: 11, color: "var(--muted)"}}>{fmtDate(ymd(new Date(file.time)))}</span>
+        <span style={{marginLeft: "auto"}}>
+          {canEdit && <button className="cm-link" style={{color: "#d6453f"}} onClick={(e) => {
+            e.stopPropagation();
+            if (confirm('"' + file.name + '" 파일을 삭제할까요?')) deleteNoteFile(cls.id, unit.uid, file.fid);
+          }}>삭제</button>}
+          {open ? "▾" : "▸"}
+        </span>
+      </div>
+      {open && <div style={{marginTop: 8}}>
+        <FileContentViewer meta={file} loader={() => loadFileB64FromDoc(noteFilesCol(cls.id, unit.uid).doc(file.fid), file)} height={Math.round(window.innerHeight * 0.55)} />
+      </div>}
+    </div>
+  );
+}
+
+function NoteUnit({ cls, unit, canEdit }) {
+  const [open, setOpen] = useState(false);
+  const [files, setFiles] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const fileRef = React.useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    return noteFilesCol(cls.id, unit.uid).orderBy("time").onSnapshot((s) => {
+      const arr = []; s.forEach((d) => arr.push({ fid: d.id, ...d.data() }));
+      setFiles(arr);
+    });
+  }, [open, cls.id, unit.uid]);
+  async function onFile(e) {
+    const list = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!list.length) return;
+    setBusy(true);
+    for (const f of list) {
+      setMsg('"' + f.name + '" 올리는 중...');
+      try { await addNoteFile(cls.id, unit.uid, f); }
+      catch (err) { alert(f.name + ": " + err.message); }
+    }
+    setMsg(""); setBusy(false);
+  }
+  return (
+    <div style={{borderBottom: "1px solid var(--line)", padding: "10px 0"}}>
+      <input ref={fileRef} type="file" accept=".html,.htm,.pdf,image/*" multiple style={{display: "none"}} onChange={onFile} />
+      <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpen(!open)}>
+        <strong>{unit.title}</strong>
+        <span style={{marginLeft: "auto"}}>
+          {canEdit && open && (<>
+            <button className="cm-link" onClick={(e) => {
+              e.stopPropagation();
+              const t = prompt("단원 이름 수정", unit.title);
+              if (t && t.trim()) renameNoteUnit(cls.id, unit.uid, t.trim());
+            }}>이름 수정</button>
+            <button className="cm-link" style={{color: "#d6453f"}} onClick={(e) => {
+              e.stopPropagation();
+              if (confirm('"' + unit.title + '" 단원과 안의 노트를 전부 삭제할까요?')) deleteNoteUnit(cls.id, unit.uid);
+            }}>삭제</button>
+          </>)}
+          {open ? "▾" : "▸"}
+        </span>
+      </div>
+      {open && (
+        <div style={{marginTop: 6}}>
+          {files === null && <div className="cm-empty">불러오는 중…</div>}
+          {files && files.length === 0 && <div className="cm-empty">아직 올라온 노트가 없어요</div>}
+          {files && files.map((f) => <NoteFileRow key={f.fid} cls={cls} unit={unit} file={f} canEdit={canEdit} />)}
+          {canEdit && <button className="cm-btn cm-btn-ghost" disabled={busy} style={{marginTop: 10}} onClick={() => fileRef.current.click()}>+ 노트 올리기 (이미지 · PDF · HTML, 여러 장 가능)</button>}
+          {msg && <div className="cm-hint" style={{marginTop: 6}}>{msg}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NotesManager({ cls, canEdit }) {
+  const [units, setUnits] = useState(null);
+  useEffect(() => noteUnitsCol(cls.id).orderBy("time").onSnapshot((s) => {
+    const arr = []; s.forEach((d) => arr.push({ uid: d.id, ...d.data() }));
+    setUnits(arr);
+  }), [cls.id]);
+  if (units === null) return <div className="cm-empty">불러오는 중…</div>;
+  return (
+    <div>
+      {units.length === 0 && <div className="cm-empty">{canEdit ? "단원을 만들어 손필기 노트를 올려보세요" : "아직 게시된 강의노트가 없어요"}</div>}
+      {units.map((u) => <NoteUnit key={u.uid} cls={cls} unit={u} canEdit={canEdit} />)}
+      {canEdit && <button className="cm-link" style={{marginTop: 10}} onClick={() => {
+        const t = prompt("새 단원 이름 (예: 1. 다항식의 연산)");
+        if (t && t.trim()) addNoteUnit(cls.id, t.trim());
+      }}>+ 단원 만들기</button>}
+    </div>
+  );
+}
+
+function ProgressManager({ cls, canEdit }) {
+  const [open, setOpen] = useState(null);
+  if (!isIndividual(cls)) {
+    return <ProgressEditor cid={cls.id} pkey="class" canEdit={canEdit} title={cls.name} />;
+  }
+  const students = cls.roster.filter((r) => !r.teacher);
+  return (
+    <div>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12}}>
+        <button className={"cm-ab-tab" + (statusFilter === "active" ? " on" : "")} onClick={() => setStatusFilter("active")}>수강 중 {allStudents.length - endedCount}</button>
+        <button className={"cm-ab-tab" + (statusFilter === "ended" ? " on" : "")} onClick={() => setStatusFilter("ended")}>종료 {endedCount}</button>
+        <button className={"cm-ab-tab" + (statusFilter === "all" ? " on" : "")} onClick={() => setStatusFilter("all")}>전체 {allStudents.length}</button>
+      </div>
+      {students.length === 0 && <div className="cm-empty">{statusFilter === "ended" ? "수강이 종료된 학생이 없어요" : "학생이 없어요"}</div>}
+      {students.map((st) => (
+        <div key={st.id} style={{borderBottom: "1px solid var(--line)", padding: "10px 0"}}>
+          <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpen(open === st.id ? null : st.id)}>
+            <strong style={isEnded(st) ? {color: "var(--muted)"} : undefined}>{st.name}</strong>
+            <span style={{marginLeft: "auto"}}>{open === st.id ? "▾" : "▸"}</span>
+          </div>
+          {open === st.id && <div style={{marginTop: 10}}><ProgressEditor cid={cls.id} pkey={st.id} canEdit={canEdit} title={st.name + " 학생"} /></div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StudentProgressView({ cls, me }) {
+  const [meta, setMeta] = useState(undefined);
+  const pkey = isIndividual(cls) ? me.id : "class";
+  useEffect(() => progressDoc(cls.id, pkey).onSnapshot((d) => setMeta(d.exists ? d.data() : null)), [cls.id, pkey]);
+  if (me.teacher && isIndividual(cls)) return <div className="cm-card"><div className="cm-empty">개별진도반 진도표는 선생님 화면(관리자 모드)에서 학생별로 관리해요.</div></div>;
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">진도계획표</h3>
+      {meta === undefined && <div className="cm-empty">불러오는 중…</div>}
+      {meta === null && <div className="cm-empty">아직 게시된 진도계획표가 없어요</div>}
+      {meta && (<>
+        <ProgressFileViewer cid={cls.id} pkey={pkey} meta={meta} height={Math.round(window.innerHeight * 0.62)} />
+        <div style={{fontSize: 12, color: "var(--muted)", marginTop: 8}}>{fmtDate(ymd(new Date(meta.time)))} 게시</div>
+      </>)}
+    </div>
+  );
+}
+
+function RosterManager({ cls, canEdit, onChanged }) {
+  const [roster, setRoster] = useState(cls.roster);
+  const [busy, setBusy] = useState(false);
+  const students = roster.filter((r) => !r.teacher);
+  const teachers = roster.filter((r) => r.teacher);
+  async function commit(newRoster) {
+    setBusy(true);
+    try { await saveClassRoster(cls.id, newRoster); cls.roster = newRoster; setRoster(newRoster); if (onChanged) onChanged(); }
+    catch (e) { alert("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+  async function addStudent() {
+    const name = prompt("새 학생 이름");
+    if (!name || !name.trim()) return;
+    const id = "s" + Date.now().toString(36); // 시간 기반 고유 id (번호 재사용 방지)
+    await commit([...students, { id, name: name.trim() }, ...teachers]);
+  }
+  async function renameStudent(st) {
+    const name = prompt("이름 수정", st.name);
+    if (!name || !name.trim() || name.trim() === st.name) return;
+    await commit(roster.map((r) => (r.id === st.id ? { ...r, name: name.trim() } : r)));
+  }
+  async function removeStudent(st) {
+    if (!confirm(st.name + " 학생을 명단에서 뺄까요?\n\n출석·과제·질문 기록은 삭제되지 않고 남지만, 명단·출석부에서 사라져요.")) return;
+    await commit(roster.filter((r) => r.id !== st.id));
+  }
+  function move(idx, dir) {
+    const ni = idx + dir;
+    if (ni < 0 || ni >= students.length) return;
+    const arr = [...students];
+    const tmp = arr[idx]; arr[idx] = arr[ni]; arr[ni] = tmp;
+    commit([...arr, ...teachers]);
+  }
+  return (
+    <div>
+      {students.length === 0 && <div className="cm-empty">학생이 없어요</div>}
+      {students.map((st, i) => (
+        <div key={st.id} style={{display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid var(--line)"}}>
+          <span style={{color: "var(--muted)", fontSize: 13, width: 22}}>{i + 1}</span>
+          <strong style={isEnded(st) ? {color: "var(--muted)"} : undefined}>{st.name}</strong>
+          {isEnded(st) && <span className="cm-chip" style={{background: "#f0ece5", color: "#7c6f5f"}}>수강 종료 {st.endDate}</span>}
+          {canEdit && (<span style={{marginLeft: "auto", display: "flex", gap: 2, alignItems: "center"}}>
+            <button className="cm-link" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{padding: "0 4px"}}>▲</button>
+            <button className="cm-link" disabled={busy || i === students.length - 1} onClick={() => move(i, 1)} style={{padding: "0 4px"}}>▼</button>
+            <button className="cm-link" disabled={busy} onClick={() => renameStudent(st)}>이름</button>
+            <button className="cm-link" disabled={busy} style={{color: "#d6453f"}} onClick={() => removeStudent(st)}>삭제</button>
+          </span>)}
+        </div>
+      ))}
+      {canEdit && <button className="cm-link" style={{marginTop: 10}} disabled={busy} onClick={addStudent}>+ 학생 추가</button>}
+    </div>
+  );
+}
+
+function StudentConfig({ cls, canEdit }) {
+  const init = () => cls.roster.map((r) => ({ ...r, days: [...(r.days || [])], books: (r.books || []).map((b) => ({ ...b })) }));
+  const [roster, setRoster] = useState(init);
+  const [open, setOpen] = useState(null);
+  const [msg, setMsg] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("active"); // active | ended | all
+  const allStudents = roster.filter((r) => !r.teacher);
+  const students = allStudents.filter((r) =>
+    statusFilter === "all" ? true : statusFilter === "ended" ? isEnded(r) : !isEnded(r)
+  );
+  const endedCount = allStudents.filter(isEnded).length;
+  function patch(sid, p) { setRoster((rs) => rs.map((r) => (r.id === sid ? { ...r, ...p } : r))); }
+  function toggleDay(st, d) {
+    const days = (st.days || []).includes(d) ? st.days.filter((x) => x !== d) : [...(st.days || []), d].sort();
+    patch(st.id, { days });
+  }
+  async function saveOne(st) {
+    if (busy) return;
+    if ((st.days || []).length === 0) { setMsg({ [st.id]: "등원 요일을 1개 이상 선택해주세요" }); return; }
+    const v = validateBooks(st.books || []);
+    if (v.err) { setMsg({ [st.id]: v.err }); return; }
+    setBusy(true); setMsg({});
+    try {
+      const newRoster = roster.map((r) => (r.id === st.id ? { ...r, days: st.days, books: v.books, startDate: st.startDate || "", endDate: st.endDate || "" } : r));
+      await saveClassRoster(cls.id, newRoster);
+      cls.roster = newRoster;
+      setRoster(newRoster.map((r) => ({ ...r, days: [...(r.days || [])], books: (r.books || []).map((b) => ({ ...b })) })));
+      setMsg({ [st.id]: "저장됐어요 ✓" });
+    } catch (e) { setMsg({ [st.id]: "저장 실패: " + e.message }); }
+    setBusy(false);
+  }
+  return (
+    <div>
+      {students.map((st) => (
+        <div key={st.id} style={{borderBottom: "1px solid var(--line)", padding: "10px 0"}}>
+          <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpen(open === st.id ? null : st.id)}>
+            <strong>{st.name}</strong>
+            <span style={{color: "var(--muted)", fontSize: 13}}>
+              {(st.days || []).length ? st.days.map((d) => DAY_NAMES[d]).join("·") : "요일 미설정"}
+              {" · 교재 " + ((st.books || []).length) + "권"}
+            </span>
+            {isEnded(st) && <span className="cm-chip" style={{background: "#f0ece5", color: "#7c6f5f"}}>수강 종료</span>}
+            {!isEnded(st) && st.endDate && <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f"}}>~{st.endDate}</span>}
+            <span style={{marginLeft: "auto"}}>{open === st.id ? "▾" : "▸"}</span>
+          </div>
+          {open === st.id && (
+            <div style={{marginTop: 10}}>
+              <label className="cm-label">등원 요일</label>
+              <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
+                {DAY_NAMES.map((d, i) => (
+                  <button key={i} disabled={!canEdit} className={"cm-ab-tab" + ((st.days || []).includes(i) ? " on" : "")} onClick={() => canEdit && toggleDay(st, i)}>{d}</button>
+                ))}
+              </div>
+              <label className="cm-label">수강 기간 <span className="cm-h-hint">(마지막 등원일이 지나면 명단에서 자동으로 빠져요)</span></label>
+              <div style={{display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap"}}>
+                <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" disabled={!canEdit}
+                  value={st.startDate || ""} onChange={(e) => patch(st.id, { startDate: e.target.value })} />
+                <span style={{color: "var(--muted)"}}>~</span>
+                <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" disabled={!canEdit}
+                  value={st.endDate || ""} onChange={(e) => patch(st.id, { endDate: e.target.value })} />
+                {canEdit && (st.startDate || st.endDate) && (
+                  <button className="cm-link" onClick={() => patch(st.id, { startDate: "", endDate: "" })}>지우기</button>
+                )}
+              </div>
+              {canEdit && (
+                <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4, alignItems: "center"}}>
+                  <span style={{fontSize: 12, color: "var(--muted)"}}>빠른 연장</span>
+                  {[1, 2, 3, 6].map((n) => (
+                    <button key={n} className="cm-ab-tab" onClick={() => patch(st.id, { endDate: addMonths(st.endDate, n) })}>+{n}개월</button>
+                  ))}
+                  <button className="cm-ab-tab" onClick={() => patch(st.id, { endDate: "" })}>기한 없음</button>
+                </div>
+              )}
+              <div className="cm-hint" style={{marginBottom: 10}}>비워두면 기간 제한 없이 계속 다녀요.{isEnded(st) && " 이 학생은 수강이 끝나 현재 명단에서 빠져 있어요."}</div>
+              <label className="cm-label">교재</label>
+              {canEdit
+                ? <BookEditor books={st.books || []} onChange={(b) => patch(st.id, { books: b })} />
+                : ((st.books || []).length === 0 ? <div className="cm-empty">교재 없음</div> : (st.books || []).map((b) => <div key={b.name} style={{padding: "4px 0"}}>{b.name} <span style={{color: "var(--muted)"}}>({b.total}문항)</span></div>))}
+              {msg[st.id] && <div className={msg[st.id].includes("✓") ? "cm-done" : "cm-err"}>{msg[st.id]}</div>}
+              {canEdit && <button className="cm-btn cm-btn-primary" disabled={busy} onClick={() => saveOne(roster.find((r) => r.id === st.id))}>{busy ? "저장 중..." : "저장"}</button>}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MergeManager({ cls, onSaved }) {
+  const others = CLASSES.filter((c) => c.id !== cls.id);
+  const cur = cls.merge || null;
+  const [partnerId, setPartnerId] = useState(cur ? cur.partnerId : (others[0] ? others[0].id : ""));
+  const [days, setDays] = useState(cur ? [...(cur.days || [])] : []);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  function toggleDay(d) { setDays((s) => s.includes(d) ? s.filter((x) => x !== d) : [...s, d].sort()); }
+  const partnerName = (id) => { const c = CLASSES.find((x) => x.id === id); return c ? c.name : id; };
+  async function save() {
+    if (busy) return;
+    if (!partnerId) { setMsg("합반할 반을 선택해주세요"); return; }
+    if (days.length === 0) { setMsg("합반 요일을 1개 이상 선택해주세요"); return; }
+    setBusy(true); setMsg("");
+    try { await setMerge(cls.id, partnerId, days); setMsg("저장됐어요 ✓"); onSaved && onSaved(); }
+    catch (e) { setMsg("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+  async function clear() {
+    if (!confirm("합반 설정을 해제할까요?")) return;
+    setBusy(true);
+    try { await clearMerge(cls.id, cur.partnerId); setDays([]); setMsg("해제됐어요"); onSaved && onSaved(); }
+    catch (e) { setMsg("해제 실패: " + e.message); }
+    setBusy(false);
+  }
+  if (others.length === 0) return <div className="cm-empty">합반할 다른 반이 없어요</div>;
+  return (
+    <div>
+      <div className="cm-hint" style={{marginBottom: 12}}>선택한 요일에는 두 반이 <b>한 화면에서 함께 관리</b>돼요. 질문 대기열이 합쳐지고, 출석·과제·점수도 두 반 학생이 같이 표시돼요. (각 학생 기록은 자기 반에 저장돼서 월간 출석부는 그대로예요)</div>
+      {cur && <div className="cm-done" style={{marginBottom: 10}}>현재 <b>{partnerName(cur.partnerId)}</b>와 {(cur.days || []).map((d) => DAY_NAMES[d]).join("·")}요일 합반 중</div>}
+      <label className="cm-label">합반할 반</label>
+      <select className="cm-input" value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
+        {others.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <label className="cm-label">합반 요일</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4}}>
+        {DAY_NAMES.map((d, i) => (
+          <button key={i} className={"cm-ab-tab" + (days.includes(i) ? " on" : "")} onClick={() => toggleDay(i)}>{d}</button>
+        ))}
+      </div>
+      {msg && <div className={msg.includes("✓") || msg.includes("해제됐") ? "cm-done" : "cm-err"}>{msg}</div>}
+      <div style={{display: "flex", gap: 10}}>
+        <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy} onClick={save}>{busy ? "저장 중..." : "합반 저장"}</button>
+        {cur && <button className="cm-btn cm-btn-ghost" style={{margin: 0}} disabled={busy} onClick={clear}>해제</button>}
+      </div>
+    </div>
+  );
+}
+
+function ClassMetaEditor({ cls, onSaved, onDeleted }) {
+  const [name, setName] = useState(cls.name);
+  const [days, setDays] = useState([...(cls.classDays || [])]);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  function toggleDay(d) { setDays((s) => s.includes(d) ? s.filter((x) => x !== d) : [...s, d].sort()); }
+  async function save() {
+    if (busy) return;
+    const nm = name.trim();
+    if (!nm) { setMsg("반 이름을 입력해주세요"); return; }
+    if (CLASSES.some((c) => c.id !== cls.id && c.name === nm)) { setMsg("이미 있는 반 이름입니다"); return; }
+    if (!isIndividual(cls) && days.length === 0) { setMsg("수업 요일을 1개 이상 선택해주세요"); return; }
+    setBusy(true); setMsg("");
+    try {
+      await saveClassMeta(cls.id, nm, days);
+      cls.name = nm; cls.classDays = days;
+      setMsg("저장됐어요 ✓");
+      onSaved();
+    } catch (e) { setMsg("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+  return (
+    <div>
+      <label className="cm-label">반 이름</label>
+      <input className="cm-input" value={name} onChange={(e) => setName(e.target.value)} />
+      {!isIndividual(cls) && (<>
+      <label className="cm-label">수업 요일</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4}}>
+        {DAY_NAMES.map((d, i) => (
+          <button key={i} className={"cm-ab-tab" + (days.includes(i) ? " on" : "")} onClick={() => toggleDay(i)}>{d}</button>
+        ))}
+      </div>
+      <div className="cm-hint" style={{margin: "8px 0"}}>요일을 바꾸면 <b>월간 출석부의 날짜 칸</b>이 새 요일 기준으로 표시돼요. 지난 기록은 그대로 남아요.</div>
+      </>)}
+      {isIndividual(cls) && <div className="cm-hint" style={{margin: "8px 0"}}>개별진도반의 등원요일·교재는 아래 <b>학생별 설정</b>에서 관리해요.</div>}
+      {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
+      <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중..." : "저장"}</button>
+      <div style={{borderTop: "1px solid var(--line)", marginTop: 18, paddingTop: 14}}>
+        <button className="cm-link" style={{color: "#d6453f"}} disabled={busy} onClick={async () => {
+          const typed = prompt('정말 삭제하려면 반 이름("' + cls.name + '")을 똑같이 입력하세요.\n출석·과제·질문 기록이 화면에서 사라지며 되돌리기 어렵습니다.');
+          if (typed === null) return;
+          if (typed.trim() !== cls.name) { alert("이름이 일치하지 않아 취소했어요."); return; }
+          setBusy(true);
+          try { await deleteClass(cls.id); onDeleted(); }
+          catch (e) { alert("삭제 실패: " + e.message); setBusy(false); }
+        }}>반 삭제</button>
+      </div>
+    </div>
+  );
+}
+
+function ClassCreate({ me, onDone, onCancel }) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState("regular");
+  const [days, setDays] = useState([]);
+  const [studentText, setStudentText] = useState("");
+  const [books, setBooks] = useState([]);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  function toggleDay(d) { setDays((s) => s.includes(d) ? s.filter((x) => x !== d) : [...s, d].sort()); }
+  async function submit() {
+    if (busy) return;
+    const nm = name.trim();
+    if (!nm) { setMsg("반 이름을 입력해주세요"); return; }
+    if (CLASSES.some((c) => c.name === nm)) { setMsg("이미 있는 반 이름입니다"); return; }
+    if (type === "regular" && days.length === 0) { setMsg("수업 요일을 1개 이상 선택해주세요"); return; }
+    const names = studentText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+    if (names.length === 0) { setMsg("학생을 1명 이상 입력해주세요"); return; }
+    let cleanBooks = [];
+    if (books.length > 0) {
+      const v = validateBooks(books);
+      if (v.err) { setMsg(v.err); return; }
+      cleanBooks = v.books;
+    }
+    const roster = names.map((n, i) => ({ id: "s" + (i + 1), name: n }));
+    roster.push({ id: "t1", name: me.name, defaultPin: me.pin, teacher: true });
+    setBusy(true);
+    try {
+      const newId = await createClass(nm, type === "individual" ? [] : days, roster, type === "individual" ? [] : cleanBooks, type);
+      onDone(newId);
+    } catch (e) { setMsg("생성 실패: " + e.message); setBusy(false); }
+  }
+  return (
+    <div className="cm-card">
+      <h2 className="cm-h2">새 반 만들기</h2>
+      <label className="cm-label">반 이름</label>
+      <input className="cm-input" placeholder="예: 고2 정규반" value={name} onChange={(e) => setName(e.target.value)} />
+      <label className="cm-label">반 유형</label>
+      <div style={{display: "flex", gap: 6, marginBottom: 4}}>
+        <button className={"cm-ab-tab" + (type === "regular" ? " on" : "")} onClick={() => setType("regular")}>일반반</button>
+        <button className={"cm-ab-tab" + (type === "individual" ? " on" : "")} onClick={() => setType("individual")}>개별진도반</button>
+      </div>
+      {type === "individual" && <div className="cm-hint" style={{margin: "6px 0"}}>개별진도반은 학생마다 등원요일·교재가 달라요. 반을 만든 뒤 <b>설정 탭 → 학생별 설정</b>에서 채워주세요.</div>}
+      {type === "regular" && (<>
+      <label className="cm-label">수업 요일</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4}}>
+        {DAY_NAMES.map((d, i) => (
+          <button key={i} className={"cm-ab-tab" + (days.includes(i) ? " on" : "")} onClick={() => toggleDay(i)}>{d}</button>
+        ))}
+      </div>
+      </>)}
+      <label className="cm-label">학생 명단 (한 줄에 한 명, 또는 쉼표로 구분)</label>
+      <textarea className="cm-input cm-notice-ta" rows={5} placeholder={"김서진\n임서윤\n김태윤"}
+        value={studentText} onChange={(e) => setStudentText(e.target.value)} />
+      {type === "regular" && (<>
+      <label className="cm-label">교재 (나중에 설정 탭에서 추가/수정할 수도 있어요)</label>
+      <BookEditor books={books} onChange={setBooks} />
+      </>)}
+      {msg && <div className="cm-err">{msg}</div>}
+      <button className="cm-btn cm-btn-primary" disabled={busy} onClick={submit}>{busy ? "만드는 중..." : "반 만들기"}</button>
+      <button className="cm-link" onClick={onCancel}>← 돌아가기</button>
+    </div>
+  );
+}
+
+function TeacherRegister({ onDone, onCancel }) {
+  const [name, setName] = useState("");
+  const [p1, setP1] = useState("");
+  const [p2, setP2] = useState("");
+  const [sel, setSel] = useState([]);
+  const [msg, setMsg] = useState("");
+  function toggleCls(id) { setSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]); }
+  async function submit() {
+    if (!name.trim()) { setMsg("이름을 입력해주세요"); return; }
+    if (p1.length !== 4) { setMsg("PIN은 숫자 4자리입니다"); return; }
+    if (p1 !== p2) { setMsg("두 번 입력한 PIN이 다릅니다"); return; }
+    const existing = await listTeachers();
+    if (existing.some((t) => t.name === name.trim())) { setMsg("이미 등록된 이름입니다"); return; }
+    await addTeacher(name.trim(), p1, sel, "teacher", "pending");
+    onDone();
+  }
+  return (
+    <div className="cm-card">
+      <h2 className="cm-h2">새 선생님 등록</h2>
+      <label className="cm-label">이름</label>
+      <input className="cm-input" value={name} onChange={(e) => setName(e.target.value)} />
+      <label className="cm-label">PIN (숫자 4자리)</label>
+      <input className="cm-input" type="password" inputMode="numeric" maxLength={4} value={p1} onChange={(e) => setP1(e.target.value.replace(/\D/g, ""))} />
+      <label className="cm-label">PIN 다시 입력</label>
+      <input className="cm-input" type="password" inputMode="numeric" maxLength={4} value={p2} onChange={(e) => setP2(e.target.value.replace(/\D/g, ""))} />
+      <label className="cm-label">담당 반 선택</label>
+      <div className="cm-daylist">
+        {CLASSES.map((c) => (
+          <button key={c.id} className="cm-day" onClick={() => toggleCls(c.id)}>
+            <div className="cm-day-left"><span className="cm-day-date">{c.name}</span></div>
+            <span className="cm-day-arrow">{sel.includes(c.id) ? "✓" : ""}</span>
+          </button>
+        ))}
+      </div>
+      {msg && <div className="cm-err">{msg}</div>}
+      <button className="cm-btn cm-btn-primary" onClick={submit}>등록하기</button>
+      <button className="cm-link" onClick={onCancel}>← 돌아가기</button>
+    </div>
+  );
+}
+
+function TeacherManage({ me, teachers, onRefresh, onBack }) {
+  const [resetTid, setResetTid] = useState(null);
+  const [newPin, setNewPin] = useState("");
+  async function toggleCls(t, cid) {
+    const has = (t.classIds || []).includes(cid);
+    const next = has ? t.classIds.filter((x) => x !== cid) : [...(t.classIds || []), cid];
+    await updateTeacher(t.tid, { classIds: next });
+    onRefresh();
+  }
+  async function doResetPin(t) {
+    if (newPin.length !== 4) return;
+    await updateTeacher(t.tid, { pin: newPin });
+    setResetTid(null); setNewPin("");
+    onRefresh();
+  }
+  async function doDelete(t) {
+    if (!confirm(t.name + " 선생님 계정을 삭제할까요?")) return;
+    await deleteTeacher(t.tid);
+    onRefresh();
+  }
+  return (
+    <div className="cm-stack">
+      <div className="cm-card">
+        <h2 className="cm-h2">선생님 관리</h2>
+        {teachers.map((t) => (
+          <div key={t.tid} style={{borderBottom: "1px solid #e8e0d4", padding: "12px 0"}}>
+            <div style={{display: "flex", alignItems: "center", gap: 8}}>
+              <strong>{t.name}</strong>
+              {t.role === "owner" && <span className="cm-day-sub">관리자</span>}
+              {isPending(t) && <span className="cm-day-sub" style={{color: "#d6453f"}}>승인 대기</span>}
+              <span style={{marginLeft: "auto"}}>
+                {isPending(t) ? (<>
+                  <button className="cm-link" style={{color: "var(--green)", fontWeight: 700}}
+                    onClick={async () => { await updateTeacher(t.tid, { status: "active" }); onRefresh(); }}>승인</button>
+                  <button className="cm-link" style={{color: "#d6453f"}}
+                    onClick={async () => { if (confirm(t.name + " 선생님의 등록 요청을 거절(삭제)할까요?")) { await deleteTeacher(t.tid); onRefresh(); } }}>거절</button>
+                </>) : (<>
+                  {t.tid !== me.tid && t.role !== "owner" && <button className="cm-link" onClick={() => doDelete(t)}>삭제</button>}
+                  <button className="cm-link" onClick={() => { setResetTid(resetTid === t.tid ? null : t.tid); setNewPin(""); }}>PIN 변경</button>
+                </>)}
+              </span>
+            </div>
+            {resetTid === t.tid && (
+              <div style={{display: "flex", gap: 8, marginTop: 8}}>
+                <input className="cm-input" style={{margin: 0}} type="password" inputMode="numeric" maxLength={4} placeholder="새 PIN 4자리"
+                  value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))} />
+                <button className="cm-btn cm-btn-ghost" onClick={() => doResetPin(t)}>저장</button>
+              </div>
+            )}
+            {t.role !== "owner" && (
+              <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8}}>
+                {CLASSES.map((c) => {
+                  const on = (t.classIds || []).includes(c.id);
+                  return <button key={c.id} className={"cm-ab-tab" + (on ? " on" : "")} onClick={() => toggleCls(t, c.id)}>{c.name}</button>;
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <button className="cm-link" onClick={onBack}>← 돌아가기</button>
+    </div>
+  );
+}
+
+function useSwipeBack(onBack) {
+  const onBackRef = React.useRef(onBack);
+  onBackRef.current = onBack;
+  const cleanupRef = React.useRef(null);
+  return React.useCallback((el) => {
+    if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
+    if (!el) return;
+    let start = null;
+    let active = false;
+    function onStart(e) {
+      if (e.target.closest && e.target.closest("[data-no-swipe]")) { start = null; return; }
+      start = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      active = false;
+      el.style.animation = "none";
+      el.style.transition = "none";
+    }
+    function onMove(e) {
+      if (!start) return;
+      const dx = e.touches[0].clientX - start.x;
+      const dy = e.touches[0].clientY - start.y;
+      if (!active) {
+        if (dx > 10 && Math.abs(dx) > Math.abs(dy)) { active = true; }
+        else if (Math.abs(dy) > 10 || dx < -10) { start = null; return; }
+        else return;
+      }
+      e.preventDefault();
+      el.style.transform = "translateX(" + Math.max(0, dx) + "px)";
+    }
+    function onEnd(e) {
+      if (!start) return;
+      const dx = e.changedTouches[0].clientX - start.x;
+      start = null;
+      el.style.transition = "transform 0.22s cubic-bezier(.25,.8,.25,1)";
+      if (active && dx > 80) {
+        el.style.transform = "translateX(" + window.innerWidth + "px)";
+        setTimeout(() => { onBackRef.current(); }, 230);
+      } else {
+        el.style.transform = "";
+        active = false;
+      }
+    }
+    el.style.touchAction = "pan-y";
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", onEnd, { passive: true });
+    el.addEventListener("touchcancel", onEnd, { passive: true });
+    cleanupRef.current = () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+      el.removeEventListener("touchcancel", onEnd);
+    };
+  }, []);
+}
+
+function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
+  const [rosterVer, bumpVer] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [days, setDays] = useState(null);
+  const [activeView, setActiveView] = useState("days"); // "days" | "book"
+  const [notice, setNotice] = useState(null);
+  const [noticeText, setNoticeText] = useState("");
+  const [dmStudent, setDmStudent] = useState("");
+  const [dmText, setDmText] = useState("");
+  const [activeDms, setActiveDms] = useState({});
+  const refresh = () => listDays(cls.id).then(setDays);
+  useEffect(() => { refresh(); }, [cls.id]);
+  useEffect(() => {
+    const unsub = listenNotice(cls.id, (n) => {
+      setNotice(n);
+      if (n && n.active && n.text) setNoticeText(n.text);
+    });
+    return () => unsub();
+  }, [cls.id]);
+  useEffect(() => {
+    const unsub = dmCol(cls.id).onSnapshot((s) => {
+      const m = {}; s.forEach((d) => (m[d.id] = d.data())); setActiveDms(m);
+    });
+    return () => unsub();
+  }, [cls.id]);
+
+  const daysRef = useSwipeBack(onBack);
+
+  const hasActive = !!(notice && notice.active && notice.text);
+  const students = cls.roster.filter((r) => !r.teacher);
+
+  if (selected) return <AdminDay cls={cls} date={selected} canEdit={canEdit} meName={meName} onBack={() => { setSelected(null); refresh(); }} />;
+
+  return (
+    <div ref={daysRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <div className="cm-daybar">
+        <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
+        <div className="cm-daybar-date">{cls.name}{!canEdit && <span className="cm-day-sub">열람 전용</span>}</div>
+      </div>
+
+      {/* 전체 공지 */}
+      <div className="cm-card">
+        <h3 className="cm-h3">전체 공지</h3>
+        {hasActive && (
+          <div className="cm-notice-preview"><span className="cm-notice-dot">●</span> 현재 공지: {notice.text}</div>
+        )}
+        {!canEdit && !hasActive && <div className="cm-empty">공지가 없어요</div>}
+        {canEdit && (<>
+        <textarea className="cm-input cm-notice-ta" rows={3}
+          placeholder="학생들이 앱을 열면 보이는 공지를 입력하세요"
+          value={noticeText} onChange={(e) => setNoticeText(e.target.value)} />
+        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+          <button className="cm-btn cm-btn-primary" style={{ margin: 0 }}
+            onClick={() => noticeText.trim() && postNotice(cls.id, noticeText.trim())}>공지 올리기</button>
+          {hasActive && (
+            <button className="cm-btn cm-btn-ghost" style={{ margin: 0 }}
+              onClick={() => { clearNotice(cls.id); setNoticeText(""); }}>공지 지우기</button>
+          )}
+        </div>
+        </>)}
+      </div>
+
+      {/* 개인 공지 */}
+      {canEdit && (
+      <div className="cm-card">
+        <h3 className="cm-h3">개인 공지</h3>
+        <label className="cm-label">학생 선택</label>
+        <select className="cm-input" value={dmStudent} onChange={(e) => {
+          const sid = e.target.value;
+          setDmStudent(sid);
+          const existing = activeDms[sid];
+          setDmText((existing && existing.active && existing.text) ? existing.text : "");
+        }}>
+          <option value="">-- 학생을 선택하세요 --</option>
+          {students.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name}{activeDms[r.id]?.active && activeDms[r.id]?.text ? " 📩" : ""}
+            </option>
+          ))}
+        </select>
+        {dmStudent && (
+          <>
+            <label className="cm-label">메시지</label>
+            <textarea className="cm-input cm-notice-ta" rows={3}
+              placeholder="해당 학생에게만 보이는 메시지를 입력하세요"
+              value={dmText} onChange={(e) => setDmText(e.target.value)} />
+            <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+              <button className="cm-btn cm-btn-primary" style={{ margin: 0 }}
+                onClick={() => dmText.trim() && postDm(cls.id, dmStudent, dmText.trim())}>보내기</button>
+              {activeDms[dmStudent]?.active && activeDms[dmStudent]?.text && (
+                <button className="cm-btn cm-btn-ghost" style={{ margin: 0 }}
+                  onClick={() => { clearDm(cls.id, dmStudent); setDmText(""); }}>지우기</button>
+              )}
+            </div>
+          </>
+        )}
+        {Object.entries(activeDms).filter(([, v]) => v.active && v.text).length > 0 && (
+          <div style={{ marginTop: 16, borderTop: "1px dashed var(--line)", paddingTop: 12 }}>
+            <div className="cm-mini-h">현재 보내진 개인 공지</div>
+            {Object.entries(activeDms).filter(([, v]) => v.active && v.text).map(([sid, v]) => {
+              const st = students.find((r) => r.id === sid);
+              return st ? (
+                <div key={sid} className="cm-sent-item">
+                  <span><b>{st.name}</b> · {v.text.length > 24 ? v.text.slice(0, 24) + "…" : v.text}</span>
+                  <button className="cm-link" onClick={() => { clearDm(cls.id, sid); if (dmStudent === sid) setDmText(""); }}>지우기</button>
+                </div>
+              ) : null;
+            })}
+          </div>
+        )}
+      </div>
+      )}
+
+      {/* 탭 */}
+      <div className="cm-ab-tabs">
+        <button className={"cm-ab-tab" + (activeView === "days" ? " on" : "")} onClick={() => setActiveView("days")}>날짜별</button>
+        <button className={"cm-ab-tab" + (activeView === "book" ? " on" : "")} onClick={() => setActiveView("book")}>월간 출석부</button>
+        <button className={"cm-ab-tab" + (activeView === "progress" ? " on" : "")} onClick={() => setActiveView("progress")}>진도표</button>
+        <button className={"cm-ab-tab" + (activeView === "notes" ? " on" : "")} onClick={() => setActiveView("notes")}>강의노트</button>
+        <button className={"cm-ab-tab" + (activeView === "ailog" ? " on" : "")} onClick={() => setActiveView("ailog")}>AI질문</button>
+        <button className={"cm-ab-tab" + (activeView === "consult" ? " on" : "")} onClick={() => setActiveView("consult")}>상담</button>
+        <button className={"cm-ab-tab" + (activeView === "report" ? " on" : "")} onClick={() => setActiveView("report")}>학습관리표</button>
+        <button className={"cm-ab-tab" + (activeView === "textbooks" ? " on" : "")} onClick={() => setActiveView("textbooks")}>설정</button>
+      </div>
+
+      {activeView === "days" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">날짜 선택</h3>
+          {!days ? (<div className="cm-empty">불러오는 중…</div>) : (
+            <div className="cm-daylist">
+              {days.map((d) => (
+                <button key={d} className={"cm-day" + (d === todayStr ? " today" : "")} onClick={() => setSelected(d)}>
+                  <div className="cm-day-left"><span className="cm-day-date">{fmtDate(d)}</span>{d === todayStr && <span className="cm-day-badge">오늘</span>}</div>
+                  <span className="cm-day-arrow">›</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeView === "book" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">월간 출석부</h3>
+          <AttendanceBook cls={cls} canEdit={canEdit} />
+        </div>
+      )}
+
+      {activeView === "progress" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">진도계획표 {isIndividual(cls) && <span className="cm-h-hint">(학생별 게시)</span>}</h3>
+          <ProgressManager cls={cls} canEdit={canEdit} />
+        </div>
+      )}
+
+      {activeView === "notes" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">강의노트 <span className="cm-h-hint">(단원별 손필기)</span></h3>
+          <NotesManager cls={cls} canEdit={canEdit} />
+        </div>
+      )}
+
+      {activeView === "ailog" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">AI 힌트 질문 내역 <span className="cm-h-hint">(학생이 AI에게 물어본 것)</span></h3>
+          <AILogView cls={cls} />
+        </div>
+      )}
+
+      {activeView === "consult" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">상담 기록 <span className="cm-h-hint">(학생 · 학부모)</span></h3>
+          <ConsultView cls={cls} canEdit={canEdit} meName={meName} />
+        </div>
+      )}
+
+      {activeView === "report" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">학습관리표 <span className="cm-h-hint">(기간별 리포트 · 인쇄/PDF)</span></h3>
+          <StudyReport cls={cls} />
+        </div>
+      )}
+
+      {activeView === "textbooks" && (<>
+        {isOwner && (
+          <div className="cm-card">
+            <h3 className="cm-h3">반 정보 <span className="cm-h-hint">(관리자 전용)</span></h3>
+            <ClassMetaEditor cls={cls} onSaved={() => bumpVer((v) => v + 1)} onDeleted={onBack} />
+          </div>
+        )}
+        {isOwner && !isIndividual(cls) && (
+          <div className="cm-card">
+            <h3 className="cm-h3">합반 설정 <span className="cm-h-hint">(질문 공유 · 관리자 전용)</span></h3>
+            <MergeManager cls={cls} onSaved={() => bumpVer((v) => v + 1)} />
+          </div>
+        )}
+        <div className="cm-card">
+          <h3 className="cm-h3">학생 명단</h3>
+          <RosterManager cls={cls} canEdit={canEdit} onChanged={() => bumpVer((v) => v + 1)} />
+        </div>
+        {isIndividual(cls) ? (
+          <div className="cm-card">
+            <h3 className="cm-h3">학생별 설정 <span className="cm-h-hint">(등원요일 · 교재)</span></h3>
+            <StudentConfig key={"sc" + rosterVer} cls={cls} canEdit={canEdit} />
+          </div>
+        ) : (
+          <div className="cm-card">
+            <h3 className="cm-h3">교재 설정</h3>
+            <BookManager cls={cls} canEdit={canEdit} />
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
+
+// ===== 월간 출석부 =====
+function AttendanceBook({ cls, canEdit }) {
+  const students = cls.roster.filter((r) => !r.teacher);
+  const [days, setDays] = React.useState([]);
+  const [attData, setAttData] = React.useState({});   // { date: { sid: true } }
+  const [scoreData, setScoreData] = React.useState({}); // { date: { sid: score } }
+  const [hwData, setHwData] = React.useState({});     // { sid: { bookName: count } }
+  const [loading, setLoading] = React.useState(true);
+
+  // 현재 월 (YYYY-MM)
+  const nowYM = todayStr.slice(0, 7);
+  const [month, setMonth] = React.useState(nowYM);
+
+  // 최근 6개월 옵션
+  const monthOptions = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    const ym = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    monthOptions.push(ym);
+  }
+
+  useEffect(() => {
+    setLoading(true);
+    // 해당 월의 days 목록 불러오기
+    listDays(cls.id).then((allDays) => {
+      const classDays = isIndividual(cls) ? [] : (cls.classDays || []);
+      const filtered = allDays.filter((d) => {
+        if (!d.startsWith(month)) return false;
+        if (classDays.length === 0) return true;
+        const dow = new Date(d + "T00:00:00").getDay(); // 0=일~6=토
+        return classDays.includes(dow);
+      }).sort();
+      setDays(filtered);
+
+      if (filtered.length === 0) { setLoading(false); return; }
+
+      const attMap = {};
+      const scoreMap = {};
+      let pending = filtered.length * 2;
+      const done = () => { if (--pending === 0) setLoading(false); };
+
+      filtered.forEach((date) => {
+        attMap[date] = {};
+        scoreMap[date] = {};
+        // 출석
+        attCol(cls.id, date).get().then((s) => {
+          s.forEach((d) => { attMap[date][d.id] = true; });
+          setAttData({ ...attMap });
+          done();
+        }).catch(done);
+        // 점수 (가장 최근 제출)
+        scoresCol(cls.id, date).orderBy("time").get().then((s) => {
+          s.forEach((d) => {
+            const data = d.data();
+            scoreMap[date][data.sid] = data.score;
+          });
+          setScoreData({ ...scoreMap });
+          done();
+        }).catch(done);
+      });
+
+      // 과제 (전체, 날짜 무관)
+      hwCol(cls.id).get().then((s) => {
+        const hw = {};
+        s.forEach((d) => {
+          const books = d.data().books || {};
+          hw[d.id] = {};
+          getBooks(cls).forEach((b) => {
+            hw[d.id][b.name] = (books[b.name] || []).length;
+          });
+        });
+        setHwData(hw);
+      });
+    });
+  }, [cls.id, month]);
+
+  // 출결 토글
+  async function toggleAttendance(date, student) {
+    const present = attData[date] && attData[date][student.id];
+    if (present) {
+      await attCol(cls.id, date).doc(student.id).delete();
+    } else {
+      await attCol(cls.id, date).doc(student.id).set({ name: student.name, time: Date.now() });
+      touchDay(cls.id, date);
+    }
+    setAttData((prev) => {
+      const next = { ...prev, [date]: { ...(prev[date] || {}) } };
+      if (present) delete next[date][student.id];
+      else next[date][student.id] = true;
+      return next;
+    });
+  }
+
+  // 날짜 포맷 M/D
+  const shortDate = (d) => { const p = d.split("-"); return parseInt(p[1]) + "/" + parseInt(p[2]); };
+
+  if (loading) return <div className="cm-empty">불러오는 중…</div>;
+  if (days.length === 0) return <div className="cm-empty">이 달에 수업 기록이 없어요</div>;
+
+  // ---- 개별진도반: 학생별 자기 요일만 표시 ----
+  if (isIndividual(cls)) {
+    const dowOf = (d) => new Date(d + "T00:00:00").getDay();
+    return (
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <select className="cm-ab-month-sel" value={month} onChange={(e) => setMonth(e.target.value)}>
+            {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div className="cm-ab-wrap" data-no-swipe>
+          <table className="cm-ab-table">
+            <thead>
+              <tr>
+                <th className="cm-ab-name">이름</th>
+                <th style={{textAlign: "left"}}>등원일 (출결 탭하여 변경)</th>
+                <th style={{ minWidth: 60 }}>과제</th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.map((st) => {
+                const myDays = days.filter((d) => (st.days || []).includes(dowOf(d)) && isActiveOn(st, d));
+                const hw = hwData[st.id] || {};
+                const myBooks = getStudentBooks(cls, st);
+                const myTotal = myBooks.reduce((s, b) => s + b.total, 0);
+                const myDone = myBooks.reduce((s, b) => s + (hw[b.name] || 0), 0);
+                const hwPct = myTotal > 0 ? Math.round(myDone / myTotal * 100) : 0;
+                const attCount = myDays.filter((d) => attData[d] && attData[d][st.id]).length;
+                return (
+                  <tr key={st.id}>
+                    <td className="cm-ab-name" style={isEnded(st) ? {opacity: .55} : undefined}>{st.name}<br/><span style={{fontSize:10,color:"#8a7f72"}}>{isEnded(st) ? "수강 종료" : ((st.days || []).map((d) => DAY_NAMES[d]).join("·") || "요일 미설정")}</span></td>
+                    <td style={{textAlign: "left"}}>
+                      {myDays.length === 0 ? <span style={{color: "#bbb", fontSize: 12}}>이 달 기록 없음</span> : (
+                        <div style={{display: "flex", gap: 5, flexWrap: "wrap"}}>
+                          {myDays.map((d) => {
+                            const present = attData[d] && attData[d][st.id];
+                            const score = scoreData[d] && scoreData[d][st.id];
+                            return (
+                              <span key={d} onClick={() => canEdit && toggleAttendance(d, st)}
+                                className={present ? "cm-ab-att-o" : "cm-ab-att-x"}
+                                style={{display: "inline-flex", flexDirection: "column", alignItems: "center", padding: "3px 7px", borderRadius: 7, cursor: canEdit ? "pointer" : "default", border: "1px solid var(--line)"}}>
+                                <span style={{fontSize: 10, color: "#8a7f72"}}>{shortDate(d)}</span>
+                                <span>{present ? "O" : "/"}</span>
+                                {score != null && <span style={{fontSize: 9, color: "#8a7f72"}}>{score}점</span>}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </td>
+                    <td className="cm-ab-hw">{hwPct}%<br/><span style={{fontSize:9,color:"#bbb"}}>{attCount}/{myDays.length}</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  // 교재별 과제 완성률 (전체 합산)
+  const totalHwPages = getBooks(cls).reduce((s, b) => s + b.total, 0);
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <select className="cm-ab-month-sel" value={month} onChange={(e) => setMonth(e.target.value)}>
+          {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <span style={{ fontSize: 12, color: "#8a7f72" }}>총 {days.length}회차</span>
+      </div>
+      <div className="cm-ab-wrap" data-no-swipe>
+        <table className="cm-ab-table">
+          <thead>
+            <tr>
+              <th className="cm-ab-name">이름</th>
+              {days.map((d) => (
+                <th key={d} colSpan={3} style={{ minWidth: 72 }}>{shortDate(d)}</th>
+              ))}
+              <th style={{ minWidth: 60 }}>과제</th>
+            </tr>
+            <tr>
+              <th className="cm-ab-name"></th>
+              {days.map((d) => (
+                <React.Fragment key={d}>
+                  <th style={{ fontSize: 10, color: "#8a7f72" }}>출결</th>
+                  <th style={{ fontSize: 10, color: "#8a7f72" }}>과제</th>
+                  <th style={{ fontSize: 10, color: "#8a7f72" }}>점수</th>
+                </React.Fragment>
+              ))}
+              <th style={{ fontSize: 10, color: "#8a7f72" }}>완성률</th>
+            </tr>
+          </thead>
+          <tbody>
+            {students.map((st) => {
+              const hw = hwData[st.id] || {};
+              const totalDone = getBooks(cls).reduce((s, b) => s + (hw[b.name] || 0), 0);
+              const hwPct = totalHwPages > 0 ? Math.round(totalDone / totalHwPages * 100) : 0;
+              const attCount = days.filter((d) => attData[d] && attData[d][st.id]).length;
+              return (
+                <tr key={st.id}>
+                  <td className="cm-ab-name">{st.name}</td>
+                  {days.map((d) => {
+                    const present = attData[d] && attData[d][st.id];
+                    const score = scoreData[d] && scoreData[d][st.id];
+                    return (
+                      <React.Fragment key={d}>
+                        <td className={present ? "cm-ab-att-o" : "cm-ab-att-x"} onClick={() => canEdit && toggleAttendance(d, st)} style={canEdit ? undefined : {cursor: "default"}}>{present ? "O" : "/"}</td>
+                        <td></td>
+                        <td className="cm-ab-score">{score != null ? score : ""}</td>
+                      </React.Fragment>
+                    );
+                  })}
+                  <td className="cm-ab-hw">{hwPct}%<br/><span style={{fontSize:9,color:"#bbb"}}>{attCount}/{days.length}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+const RESOLVED_PAGE_SIZE = 5;
+
+function QuestionQueue({ questions, clsId, date, canEdit, books, merged }) {
+  const BOOK_TABS = ["전체", ...(books || []).map((b) => b.name)];
+  const [activeBook, setActiveBook] = React.useState("전체");
+  const [resolvedPage, setResolvedPage] = React.useState(0);
+
+  const sortByNum = (arr) => arr.slice().sort((a, b) => {
+    const na = parseFloat(a.num) || 0, nb = parseFloat(b.num) || 0;
+    return na !== nb ? na - nb : a.time - b.time;
+  });
+
+  const filtered = activeBook === "전체" ? questions : questions.filter((q) => q.book === activeBook);
+  const pending = sortByNum(filtered.filter((q) => !q.resolved));
+  // 해결완료: 최신순 (time 내림차순)
+  const resolved = filtered.filter((q) => q.resolved).slice().sort((a, b) => b.time - a.time);
+  const resolvedTotal = resolved.length;
+  const resolvedPages = Math.ceil(resolvedTotal / RESOLVED_PAGE_SIZE);
+  const resolvedShown = resolved.slice(resolvedPage * RESOLVED_PAGE_SIZE, (resolvedPage + 1) * RESOLVED_PAGE_SIZE);
+
+  const renderQ = (q) => (
+    <div key={q.qid} className={"cm-q" + (q.resolved ? " done" : "")}>
+      <div className="cm-q-main">
+        <div className="cm-q-top"><span className="cm-q-name">{q.name}{merged && q.fromClass && <span className="cm-day-sub" style={{marginLeft: 6, fontSize: 10}}>{q.fromClass}</span>}</span><span className="cm-q-time">{hhmm(q.time)}</span></div>
+        <div className="cm-q-body">{q.book} <b>{q.num}</b>번{q.memo && <span className="cm-q-memo"> · {q.memo}</span>}</div>
+      </div>
+      {q.resolved
+        ? <span className="cm-q-resolved">✓ 해결완료</span>
+        : canEdit ? <button className="cm-btn cm-btn-ghost" onClick={() => resolveQuestion(clsId, date, q.qid)}>해결</button> : null}
+    </div>
+  );
+
+  if (questions.length === 0) return <div className="cm-empty">들어온 질문이 없어요</div>;
+
+  return (
+    <div>
+      <div className="cm-q-tabs">
+        {BOOK_TABS.map((t) => (
+          <button key={t} className={"cm-q-tab" + (activeBook === t ? " on" : "")}
+            onClick={() => { setActiveBook(t); setResolvedPage(0); }}>{t}</button>
+        ))}
+      </div>
+      {pending.length === 0 && <div className="cm-empty">대기 중인 질문이 없어요</div>}
+      {pending.map(renderQ)}
+      {resolvedTotal > 0 && (
+        <details className="cm-resolved-box" style={{marginTop: 12}}>
+          <summary className="cm-resolved-summary">해결완료 {resolvedTotal}건</summary>
+          {resolvedShown.map(renderQ)}
+          {resolvedPages > 1 && (
+            <div className="cm-q-pages">
+              <button className="cm-q-page-btn" disabled={resolvedPage === 0} onClick={() => setResolvedPage((p) => p - 1)}>◀</button>
+              <span>{resolvedPage + 1} / {resolvedPages}</span>
+              <button className="cm-q-page-btn" disabled={resolvedPage >= resolvedPages - 1} onClick={() => setResolvedPage((p) => p + 1)}>▶</button>
+            </div>
+          )}
+        </details>
+      )}
+    </div>
+  );
+}
+
+function AdminDay({ cls, date, canEdit, onBack, meName }) {
+  const [attendance, setAttendance] = useState({});
+  const [questions, setQuestions] = useState([]);
+  const [hwDone, setHwDone] = useState({});
+  const [scores, setScores] = useState([]);
+  const [questioned, setQuestioned] = useState({});
+  const [plogs, setPlogs] = useState({});
+  const [detail, setDetail] = useState(null);
+
+  const dow = new Date(date + "T00:00:00").getDay();
+  // 합반: 해당 요일이면 짝 반의 출석·과제·점수도 함께 (저장은 각 반, 화면만 병합)
+  const mergePartner = (cls.merge && cls.merge.partnerId && (cls.merge.days || []).includes(dow)) ? findClass(cls.merge.partnerId) : null;
+  const mergeKey = mergePartner ? mergePartner.id : "";
+
+  useEffect(() => {
+    const cids = mergePartner ? [cls.id, mergePartner.id] : [cls.id];
+    const attStore = {}, hwStore = {}, qdStore = {}, scStore = {}, plStore = {};
+    const flat = (store) => { const o = {}; cids.forEach((c) => Object.entries(store[c] || {}).forEach(([sid, v]) => (o[c + ":" + sid] = v))); return o; };
+    const unsubs = [];
+    cids.forEach((cid) => {
+      unsubs.push(attCol(cid, date).onSnapshot((s) => { attStore[cid] = {}; s.forEach((d) => (attStore[cid][d.id] = d.data())); setAttendance(flat(attStore)); }));
+      unsubs.push(hwCol(cid).onSnapshot((s) => { hwStore[cid] = {}; s.forEach((d) => (hwStore[cid][d.id] = d.data().books || {})); setHwDone(flat(hwStore)); }));
+      unsubs.push(listenPlogClass(cid, (by) => { plStore[cid] = by; setPlogs(flat(plStore)); }));
+      unsubs.push(questionedCol(cid).onSnapshot((s) => { qdStore[cid] = {}; s.forEach((d) => (qdStore[cid][d.id] = d.data().books || {})); setQuestioned(flat(qdStore)); }));
+      unsubs.push(scoresCol(cid, date).orderBy("time").onSnapshot((s) => {
+        scStore[cid] = []; s.forEach((d) => scStore[cid].push({ id: cid + ":" + d.id, _cid: cid, ...d.data() }));
+        const all = []; cids.forEach((c) => all.push(...(scStore[c] || []))); all.sort((a, b) => a.time - b.time); setScores(all);
+      }));
+    });
+    // 질문은 합반 대표 반 한 곳
+    unsubs.push(qCol(questionCid(cls, date), date).orderBy("time").onSnapshot((s) => { const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); setQuestions(arr); }));
+    return () => unsubs.forEach((u) => u && u());
+  }, [cls.id, date, mergeKey]);
+
+  const withKey = (r, cid) => ({ ...r, _cid: cid, _key: cid + ":" + r.id });
+  let roster = cls.roster.filter((r) => !r.teacher && attendsOn(cls, r, date)).map((r) => withKey(r, cls.id));
+  if (mergePartner) roster = roster.concat(mergePartner.roster.filter((r) => !r.teacher && attendsOn(mergePartner, r, date)).map((r) => withKey(r, mergePartner.id)));
+  const presentIds = Object.keys(attendance);
+  const waiting = questions.filter((q) => !q.resolved);
+  const hwStudents = roster.filter((r) => hwDone[r._key] && getStudentBooks(findClass(r._cid) || cls, r).some((b) => (hwDone[r._key][b.name] || []).length > 0));
+
+  const dayRef = useSwipeBack(onBack);
+
+  if (detail) return <StudentDetail cls={findClass(detail._cid) || cls} student={detail} hwDone={{ [detail.id]: hwDone[detail._key] || {} }} questioned={{ [detail.id]: questioned[detail._key] || {} }} onBack={() => setDetail(null)} date={date} canEdit={canEdit} teacherName={meName} />;
+
+  return (
+    <div ref={dayRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <div className="cm-daybar">
+        <button className="cm-back" onClick={onBack}>‹ 날짜 선택</button>
+        <div className="cm-daybar-date">{cls.name} · {fmtDate(date)}{date === todayStr && <span className="cm-live">● LIVE</span>}{!canEdit && <span className="cm-day-sub">열람 전용</span>}</div>
+      </div>
+
+      <div className="cm-card cm-admin-top">
+        <div className="cm-stat"><div className="cm-stat-num">{presentIds.length}<span>/{roster.length}</span></div><div className="cm-stat-lab">출석</div></div>
+        <div className="cm-stat"><div className="cm-stat-num cm-clay">{waiting.length}</div><div className="cm-stat-lab">대기 질문</div></div>
+      </div>
+
+      <div className="cm-card">
+        <h3 className="cm-h3">질문 대기열</h3>
+        <QuestionQueue questions={questions} clsId={questionCid(cls, date)} date={date} canEdit={canEdit} books={getClassAllBooks(cls)} merged={questionCid(cls, date) !== cls.id} />
+      </div>
+
+      <div className="cm-card">
+        <h3 className="cm-h3">출석 현황 <span className="cm-h-hint">(이름을 누르면 과제 표)</span></h3>
+        <div className="cm-roster">
+          {roster.map((r) => {
+            const a = attendance[r._key];
+            return (
+              <button key={r._key} className={"cm-rost " + (a ? "in" : "")} onClick={() => setDetail(r)}>
+                <span className="cm-rost-name">{r.name}{mergePartner && r._cid !== cls.id && <span className="cm-day-sub" style={{marginLeft: 5, fontSize: 10}}>{mergePartner.name}</span>}</span>
+                <span className="cm-rost-t">{a ? hhmm(a.time) : "미출석"} ›</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="cm-card">
+        <h3 className="cm-h3">과제 현황 <span className="cm-h-hint">(누적)</span></h3>
+        {hwStudents.length === 0 ? (<div className="cm-empty">등록된 과제가 없어요</div>) : (
+          hwStudents.map((r) => (
+            <div key={r._key} className="cm-hw-row">
+              <button className="cm-hw-name cm-hw-name-btn" onClick={() => setDetail(r)}>{r.name}</button>
+              <div className="cm-hw-items">
+                {getStudentBooks(findClass(r._cid) || cls, r).filter((b) => (hwDone[r._key][b.name] || []).length > 0).map((b) => (<span key={b.name} className="cm-chip">{b.name} {hwDone[r._key][b.name].length}문제</span>))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="cm-card">
+        <h3 className="cm-h3">진도 기록 <span className="cm-h-hint">(이름을 누르면 작성)</span></h3>
+        {roster.length === 0 ? (<div className="cm-empty">오늘 수업 대상 학생이 없어요</div>) : (
+          roster.map((r) => {
+            const list = plogs[r._key] || [];
+            const today = list.filter((p) => p.date === date);
+            const prev = list.filter((p) => p.date < date)[0];
+            return (
+              <div key={r._key} className="cm-plog-row">
+                <button className="cm-hw-name cm-hw-name-btn" onClick={() => setDetail(r)}>{r.name}</button>
+                <div className="cm-plog-info">
+                  {today.length > 0
+                    ? <div><span className="cm-chip cm-chip-ok">오늘 기록됨</span> <span style={{ fontSize: 13 }}>{today.map((p) => plogLine(p)).filter(Boolean).join(" / ") || "(범위 없음)"}</span></div>
+                    : <div className="cm-plog-none">오늘 기록 없음</div>}
+                  {prev
+                    ? <div className="cm-plog-prev">지난 {shortDate(prev.date)} · {plogLine(prev) || "(범위 없음)"}{(prev.stuck || []).length > 0 && <><br />막힘: {prev.stuck.join(", ")}</>}</div>
+                    : <div className="cm-plog-prev">지난 기록 없음</div>}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      <div className="cm-card">
+        <h3 className="cm-h3">테스트 점수</h3>
+        {scores.length === 0 ? (<div className="cm-empty">제출된 점수가 없어요</div>) : (
+          scores.slice().reverse().map((s) => (
+            <div key={s.id} className="cm-score-row">
+              <span className="cm-score-name">{s.name}{mergePartner && s._cid && s._cid !== cls.id && <span className="cm-day-sub" style={{marginLeft: 5, fontSize: 10}}>{mergePartner.name}</span>}</span>
+              <span className="cm-score-detail">{s.label ? s.label + " · " : ""}{s.correct}/{s.total}</span>
+              <span className="cm-score-num">{s.score}점</span>
+            </div>
+          ))
+        )}
+      </div>
+
+    </div>
+  );
+}
+
+function StudentDetail({ cls, student, hwDone, questioned, onBack, date, canEdit, teacherName }) {
+  const mine = hwDone[student.id] || {};
+  const qmine = (questioned && questioned[student.id]) || {};
+  const detailDivRef = useSwipeBack(onBack);
+  return (
+    <div ref={detailDivRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <div className="cm-daybar">
+        <button className="cm-back" onClick={onBack}>‹ 현황으로</button>
+        <div className="cm-daybar-date">{student.name} · 진도 / 과제</div>
+      </div>
+      {date && <PlogCard cls={cls} student={student} date={date} canEdit={canEdit} teacherName={teacherName} />}
+      {getStudentBooks(cls, student).map((b) => {
+        const qnums = qmine[b.name] || [];
+        return (
+          <div className="cm-card" key={b.name}>
+            <div className="cm-book-head">
+              <h3 className="cm-h3" style={{ margin: 0 }}>{b.name}</h3>
+              <span className="cm-book-count">{(mine[b.name] || []).length} / {b.total}<span className="cm-book-pct"> ({b.total > 0 ? Math.round((mine[b.name] || []).length / b.total * 100) : 0}%)</span></span>
+            </div>
+            {qnums.length > 0 && (
+              <div className="cm-qchips">
+                <span className="cm-qchips-label">질문한 번호</span>
+                {qnums.slice().sort((x, y) => x - y).map((n) => (
+                  <button key={n} className="cm-qchip" onClick={() => removeQuestioned(cls.id, student.id, b.name, n)}>{n} ✕</button>
+                ))}
+              </div>
+            )}
+            <HwGrid total={b.total} set={new Set(mine[b.name] || [])} qset={new Set(qnums)} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ===== 진도 기록 (학생 상세 안에서 작성) =====
+function PlogCard({ cls, student, date, canEdit, teacherName }) {
+  const books = getStudentBooks(cls, student).map((b) => b.name);
+  const [logs, setLogs] = useState(null);
+  const [book, setBook] = useState(books[0] || "");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [stuck, setStuck] = useState([""]);
+  const [memo, setMemo] = useState("");
+  const [err, setErr] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => listenPlogByStudent(cls.id, student.id, setLogs), [cls.id, student.id]);
+
+  const reset = () => {
+    setBook(books[0] || ""); setFrom(""); setTo(""); setStuck([""]); setMemo(""); setErr(""); setEditId(null);
+  };
+  const startEdit = (p) => {
+    setEditId(p.id); setBook(p.book || ""); setFrom(p.from || ""); setTo(p.to || "");
+    setStuck((p.stuck && p.stuck.length) ? p.stuck.slice() : [""]); setMemo(p.memo || ""); setErr("");
+    if (window.scrollTo) window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const save = async () => {
+    const st = stuck.map((s) => s.trim()).filter(Boolean);
+    if (!from.trim()) { setErr("어디서부터 나갔는지 적어주세요"); return; }
+    if (st.length === 0) { setErr("오늘 막혔던 부분을 최소 1개는 적어주세요"); return; }
+    setBusy(true);
+    const rec = {
+      sid: student.id, name: student.name, date,
+      book: book || "", from: from.trim(), to: (to.trim() || from.trim()),
+      stuck: st, memo: memo.trim(), teacher: teacherName || "",
+    };
+    try {
+      if (editId) await updatePlog(cls.id, editId, rec);
+      else await addPlog(cls.id, rec);
+      reset();
+    } catch (e) { setErr("저장 실패: " + e.message); }
+    setBusy(false);
+  };
+
+  const todayLog = (logs || []).filter((p) => p.date === date);
+  const past = (logs || []).filter((p) => p.date !== date);
+  const shown = showAll ? past : past.slice(0, 3);
+
+  const Item = ({ p }) => (
+    <div className="cm-plog-item">
+      <div className="cm-plog-head">
+        <span className="cm-plog-date">{fmtDate(p.date)}</span>
+        {p.teacher && <span className="cm-day-sub" style={{ margin: 0 }}>{p.teacher}</span>}
+      </div>
+      <div className="cm-plog-range">{plogLine(p) || "(범위 없음)"}</div>
+      {(p.stuck || []).length > 0 && (<>
+        <div className="cm-stuck-label">막혔던 부분</div>
+        <ul className="cm-stuck-list">{p.stuck.map((s, i) => <li key={i}>{s}</li>)}</ul>
+      </>)}
+      {p.memo && <div className="cm-plog-memo">{p.memo}</div>}
+      {canEdit && (
+        <div className="cm-plog-actions">
+          <button className="cm-link" onClick={() => startEdit(p)}>수정</button>
+          <button className="cm-link" onClick={() => { if (window.confirm("이 기록을 지울까요?")) deletePlog(cls.id, p.id); }}>삭제</button>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">진도 기록 <span className="cm-h-hint">({fmtDate(date)})</span></h3>
+
+      {canEdit && (<>
+        {books.length > 0 && (<>
+          <label className="cm-label">교재</label>
+          <select className="cm-input" value={book} onChange={(e) => setBook(e.target.value)}>
+            {books.map((b) => <option key={b} value={b}>{b}</option>)}
+            <option value="">(교재 없음 · 직접 적기)</option>
+          </select>
+        </>)}
+        <label className="cm-label">오늘 나간 범위</label>
+        <div className="cm-range2">
+          <input className="cm-input" placeholder="어디서부터 (예: p.112)" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <span className="cm-tilde">~</span>
+          <input className="cm-input" placeholder="어디까지 (예: p.130)" value={to} onChange={(e) => setTo(e.target.value)} />
+        </div>
+
+        <label className="cm-label">오늘 막혔던 / 어려웠던 부분 <span style={{ color: "var(--clay)" }}>* 1개 이상</span></label>
+        {stuck.map((s, i) => (
+          <div className="cm-stuck-row" key={i}>
+            <input className="cm-input" value={s}
+              placeholder={i === 0 ? "예) 치환적분에서 변수 바꾸는 타이밍" : "추가로 막혔던 부분"}
+              onChange={(e) => setStuck(stuck.map((v, j) => (j === i ? e.target.value : v)))} />
+            {stuck.length > 1 && <button className="cm-x" onClick={() => setStuck(stuck.filter((v, j) => j !== i))}>✕</button>}
+          </div>
+        ))}
+        <button className="cm-link" onClick={() => setStuck(stuck.concat(""))}>+ 항목 추가</button>
+
+        <label className="cm-label">메모 (선택)</label>
+        <textarea className="cm-input cm-notice-ta" rows={2} placeholder="다음 시간에 할 것, 특이사항 등"
+          value={memo} onChange={(e) => setMemo(e.target.value)} />
+
+        {err && <div className="cm-err">{err}</div>}
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button className="cm-btn cm-btn-primary" style={{ flex: 1 }} disabled={busy} onClick={save}>
+            {busy ? "저장 중…" : editId ? "수정 저장" : "진도 기록 저장"}
+          </button>
+          {editId && <button className="cm-btn cm-btn-ghost" style={{ marginTop: 16 }} onClick={reset}>취소</button>}
+        </div>
+      </>)}
+
+      {logs === null ? (
+        <div className="cm-empty">불러오는 중…</div>
+      ) : (<>
+        {todayLog.length > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <div className="cm-mini-h">오늘 기록</div>
+            {todayLog.map((p) => <Item key={p.id} p={p} />)}
+          </div>
+        )}
+        <div style={{ marginTop: 18 }}>
+          <div className="cm-mini-h">지난 기록 {past.length > 0 && "(" + past.length + "회)"}</div>
+          {past.length === 0 ? (
+            <div className="cm-empty">아직 지난 기록이 없어요</div>
+          ) : (<>
+            {shown.map((p) => <Item key={p.id} p={p} />)}
+            {past.length > 3 && (
+              <button className="cm-link" onClick={() => setShowAll(!showAll)}>
+                {showAll ? "접기" : "지난 기록 " + past.length + "개 모두 보기"}
+              </button>
+            )}
+          </>)}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+// ===== 학습관리표 (월간 결과지 · 기간 지정 · 인쇄/PDF) =====
+// 최근 n개월 목록 ["2026-07", "2026-06", ...]
+function monthOptions(n) {
+  const out = [];
+  const d = new Date(todayStr + "T00:00:00");
+  d.setDate(1);
+  for (let i = 0; i < n; i++) {
+    out.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
+    d.setMonth(d.getMonth() - 1);
+  }
+  return out;
+}
+function monthRange(ym) {
+  const y = Number(ym.split("-")[0]), m = Number(ym.split("-")[1]);
+  const last = new Date(y, m, 0).getDate();
+  return [ym + "-01", ym + "-" + String(last).padStart(2, "0")];
+}
+const monthLabel = (ym) => ym.split("-")[0] + "년 " + Number(ym.split("-")[1]) + "월";
+
+// 여러 학생을 한 번에 뽑아도 읽기 횟수가 늘지 않도록 날짜 단위로 한 번씩만 조회
+async function buildReportAgg(cls, sids, from, to, onProgress) {
+  const days = (await listDays(cls.id)).filter((d) => d >= from && d <= to).sort();
+  const att = {}, scores = {}, logs = {}, hw = {};
+  sids.forEach((s) => { att[s] = 0; scores[s] = []; logs[s] = []; });
+  for (let i = 0; i < days.length; i++) {
+    const d = days[i];
+    const a = await attCol(cls.id, d).get();
+    a.forEach((x) => { if (att[x.id] !== undefined) att[x.id]++; });
+    const sc = await scoresCol(cls.id, d).get();
+    sc.forEach((x) => { const v = x.data(); if (scores[v.sid]) scores[v.sid].push({ date: d, ...v }); });
+    if (onProgress) onProgress(i + 1, days.length);
+  }
+  const pl = await plogCol(cls.id).get();
+  pl.forEach((x) => {
+    const v = { id: x.id, ...x.data() };
+    if (logs[v.sid] && v.date >= from && v.date <= to) logs[v.sid].push(v);
+  });
+  Object.keys(logs).forEach((k) => logs[k].sort((a, b) => (a.date || "").localeCompare(b.date || "")));
+  const hwSnap = await hwCol(cls.id).get();
+  hwSnap.forEach((x) => { hw[x.id] = x.data().books || {}; });
+  return { days, att, scores, logs, hw };
+}
+
+// 결과지 한 장 (A4 1장 기준)
+function ReportSheet({ cls, st, from, to, agg, comment, periodLabel }) {
+  const logs = agg.logs[st.id] || [];
+  const scores = agg.scores[st.id] || [];
+  const hw = agg.hw[st.id] || {};
+  const attended = agg.att[st.id] || 0;
+  const expected = agg.days.filter((d) => attendsOn(cls, st, d)).length;
+  const avg = scores.length ? Math.round(scores.reduce((s, x) => s + (x.score || 0), 0) / scores.length) : null;
+  const allStuck = logs.reduce((acc, p) => acc.concat((p.stuck || []).map((s) => ({ s, date: p.date }))), []);
+  const books = getStudentBooks(cls, st);
+
+  return (
+    <div className="cm-rep">
+      <h2 className="cm-rep-title">{st.name} 학습관리표</h2>
+      <div className="cm-rep-sub">
+        CLIMATH · {cls.name} · {periodLabel || (from.split("-").join(".") + " ~ " + to.split("-").join("."))}
+      </div>
+
+      <div className="cm-rep-stats">
+        <div className="cm-rep-stat"><b>{attended}{expected > 0 && <span style={{ fontSize: 14 }}> / {expected}</span>}</b><span>출석</span></div>
+        <div className="cm-rep-stat"><b>{logs.length}</b><span>진도 기록</span></div>
+        <div className="cm-rep-stat"><b>{allStuck.length}</b><span>막힌 부분</span></div>
+        <div className="cm-rep-stat"><b>{avg === null ? "-" : avg}</b><span>평균 점수</span></div>
+      </div>
+
+      <div className="cm-rep-sec">
+        <div className="cm-rep-h">수업별 진도</div>
+        {logs.length === 0 ? (
+          <div className="cm-empty">이 기간에 기록된 진도가 없어요</div>
+        ) : (
+          <table className="cm-rep-table">
+            <thead><tr><th style={{ width: 62 }}>날짜</th><th>교재 · 범위</th><th>막혔던 부분</th></tr></thead>
+            <tbody>
+              {logs.map((p) => (
+                <tr key={p.id}>
+                  <td>{shortDate(p.date)}</td>
+                  <td>{plogLine(p) || "-"}{p.memo && <div style={{ color: "#7c8294", fontSize: 11.5, marginTop: 4 }}>{p.memo}</div>}</td>
+                  <td>{(p.stuck || []).length === 0 ? "-" : <ul className="cm-rep-ul" style={{ fontSize: 12.5, paddingLeft: 15 }}>{p.stuck.map((s, i) => <li key={i}>{s}</li>)}</ul>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {allStuck.length > 0 && (
+        <div className="cm-rep-sec">
+          <div className="cm-rep-h">보완이 필요한 부분 모아보기</div>
+          <ul className="cm-rep-ul">
+            {allStuck.map((x, i) => <li key={i}>{x.s} <span style={{ color: "#7c8294", fontSize: 11.5 }}>({shortDate(x.date)})</span></li>)}
+          </ul>
+        </div>
+      )}
+
+      {scores.length > 0 && (
+        <div className="cm-rep-sec">
+          <div className="cm-rep-h">테스트 점수</div>
+          <table className="cm-rep-table">
+            <thead><tr><th style={{ width: 62 }}>날짜</th><th>구분</th><th style={{ width: 68 }}>맞은 개수</th><th style={{ width: 52 }}>점수</th></tr></thead>
+            <tbody>
+              {scores.map((s, i) => (
+                <tr key={i}><td>{shortDate(s.date)}</td><td>{s.label || "-"}</td><td>{s.correct}/{s.total}</td><td><b>{s.score}</b></td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {books.length > 0 && (
+        <div className="cm-rep-sec">
+          <div className="cm-rep-h">교재 진행률 (누적)</div>
+          <table className="cm-rep-table">
+            <thead><tr><th>교재</th><th style={{ width: 88 }}>푼 문항</th><th style={{ width: 58 }}>진행률</th></tr></thead>
+            <tbody>
+              {books.map((b) => {
+                const n = (hw[b.name] || []).length;
+                return <tr key={b.name}><td>{b.name}</td><td>{n} / {b.total}</td><td>{b.total > 0 ? Math.round(n / b.total * 100) : 0}%</td></tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(comment || "").trim() && (
+        <div className="cm-rep-sec">
+          <div className="cm-rep-h">선생님 총평</div>
+          <div className="cm-rep-note">{comment.trim()}</div>
+        </div>
+      )}
+
+      <div className="cm-rep-foot">출력일 {fmtDate(todayStr)} · CLIMATH</div>
+    </div>
+  );
+}
+
+function StudyReport({ cls }) {
+  const students = cls.roster.filter((r) => !r.teacher);
+  const months = monthOptions(12);
+  const [mode, setMode] = useState("month");          // "month" | "range"
+  const [month, setMonth] = useState(months[0]);
+  const [picks, setPicks] = useState(() => students.filter((r) => !isEnded(r)).map((r) => r.id));
+  const [sid, setSid] = useState("");
+  const [from, setFrom] = useState(shiftMonth(todayStr, -1));
+  const [to, setTo] = useState(todayStr);
+  const [comments, setComments] = useState({});
+  const [out, setOut] = useState(null);               // { list, agg, from, to, label }
+  const [prog, setProg] = useState("");
+  const [err, setErr] = useState("");
+
+  const toggle = (id) => setPicks(picks.includes(id) ? picks.filter((x) => x !== id) : picks.concat(id));
+
+  const build = async () => {
+    let f, t, list, label;
+    if (mode === "month") {
+      if (picks.length === 0) { setErr("학생을 1명 이상 선택해주세요"); return; }
+      const r = monthRange(month); f = r[0]; t = r[1];
+      list = students.filter((s) => picks.includes(s.id));
+      label = monthLabel(month);
+    } else {
+      if (!sid) { setErr("학생을 선택해주세요"); return; }
+      if (from > to) { setErr("기간이 거꾸로예요"); return; }
+      f = from; t = to;
+      list = students.filter((s) => s.id === sid);
+      label = "";
+    }
+    setErr(""); setOut(null); setProg("불러오는 중…");
+    try {
+      const agg = await buildReportAgg(cls, list.map((s) => s.id), f, t,
+        (i, n) => setProg("수업 기록 읽는 중… " + i + "/" + n));
+      setOut({ list, agg, from: f, to: t, label });
+    } catch (e) {
+      setErr("불러오지 못했어요: " + e.message);
+    }
+    setProg("");
+  };
+
+  return (
+    <div>
+      <div className="cm-noprint">
+        <div className="cm-ab-tabs">
+          <button className={"cm-ab-tab" + (mode === "month" ? " on" : "")} onClick={() => { setMode("month"); setOut(null); }}>월간 결과지</button>
+          <button className={"cm-ab-tab" + (mode === "range" ? " on" : "")} onClick={() => { setMode("range"); setOut(null); }}>기간 지정</button>
+        </div>
+
+        {mode === "month" ? (<>
+          <label className="cm-label">월</label>
+          <select className="cm-input" value={month} onChange={(e) => { setMonth(e.target.value); setOut(null); }}>
+            {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
+
+          <label className="cm-label">대상 학생 <span className="cm-h-hint">({picks.length}명 선택됨)</span></label>
+          <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+            <button className="cm-ab-tab" onClick={() => setPicks(students.map((r) => r.id))}>전체 선택</button>
+            <button className="cm-ab-tab" onClick={() => setPicks(students.filter((r) => !isEnded(r)).map((r) => r.id))}>수강중만</button>
+            <button className="cm-ab-tab" onClick={() => setPicks([])}>전체 해제</button>
+          </div>
+          <div className="cm-rep-pick">
+            {students.map((r) => (
+              <label key={r.id}>
+                <input type="checkbox" checked={picks.includes(r.id)} onChange={() => toggle(r.id)} />
+                <span>{r.name}{isEnded(r) ? " (종료)" : ""}</span>
+              </label>
+            ))}
+          </div>
+        </>) : (<>
+          <label className="cm-label">학생</label>
+          <select className="cm-input" value={sid} onChange={(e) => { setSid(e.target.value); setOut(null); }}>
+            <option value="">-- 학생을 선택하세요 --</option>
+            {students.map((r) => <option key={r.id} value={r.id}>{r.name}{isEnded(r) ? " (수강 종료)" : ""}</option>)}
+          </select>
+          <label className="cm-label">기간</label>
+          <div className="cm-range2">
+            <input className="cm-input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <span className="cm-tilde">~</span>
+            <input className="cm-input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+            {[1, 2, 3, 6].map((n) => (
+              <button key={n} className="cm-ab-tab" onClick={() => { setFrom(shiftMonth(todayStr, -n)); setTo(todayStr); }}>최근 {n}개월</button>
+            ))}
+          </div>
+        </>)}
+
+        {err && <div className="cm-err">{err}</div>}
+        <button className="cm-btn cm-btn-primary" disabled={!!prog} onClick={build}>
+          {prog ? "만드는 중…" : mode === "month" ? "월간 결과지 만들기" : "학습관리표 만들기"}
+        </button>
+        {prog && <div className="cm-rep-prog">{prog}</div>}
+        {out && (<>
+          <button className="cm-btn cm-btn-ghost" style={{ width: "100%", marginTop: 10, padding: 12 }}
+            onClick={() => window.print()}>인쇄 / PDF로 저장 ({out.list.length}장)</button>
+          <div className="cm-hint" style={{ marginTop: 8 }}>
+            학생 1명당 A4 한 장으로 나뉘어 나가요. 인쇄 창에서 <b>대상을 "PDF로 저장"</b>으로 바꾸면 파일로 받을 수 있어요.
+          </div>
+        </>)}
+      </div>
+
+      {out && (
+        <div className="cm-reps">
+          {out.list.map((st) => (
+            <div key={st.id}>
+              <ReportSheet cls={cls} st={st} from={out.from} to={out.to} agg={out.agg}
+                comment={comments[st.id] || ""} periodLabel={out.label} />
+              <textarea className="cm-input cm-notice-ta cm-noprint cm-rep-cmt" rows={2}
+                placeholder={st.name + " 총평 (선택 · 위 결과지에 실려요)"}
+                value={comments[st.id] || ""}
+                onChange={(e) => setComments({ ...comments, [st.id]: e.target.value })} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== 앱 루트 =====
+function App() {
+  const params = new URLSearchParams(window.location.search);
+  const isAdmin = params.get("admin") === "1";
+  const urlClass = findClass(params.get("class"));
+  const [gateCls, setGateCls] = useState(null);
+
+  let sub, main;
+  if (isAdmin) { sub = "수업 관리"; main = <AdminView />; }
+  else if (urlClass) { sub = urlClass.name + " · " + todayStr; main = <StudentView cls={urlClass} onBack={null} />; }
+  else { sub = gateCls ? gateCls.name + " · " + todayStr : "로그인"; main = <StudentGate onClsChange={setGateCls} />; }
+
+  return (
+    <div>
+      <header className="cm-header">
+        <div className="cm-brand"><span className="cm-logo">CLIMATH</span><span className="cm-sub">{sub}</span></div>
+      </header>
+      <main className="cm-main">{main}</main>
+    </div>
+  );
+}
+
+// ===== 익명 로그인 후 앱 시작 =====
+const rootEl = document.getElementById("root");
+let rendered = false;
+function renderApp() { if (rendered) return; rendered = true; ReactDOM.createRoot(rootEl).render(<App />); }
+function loadAndRender() { loadClasses().then(renderApp).catch((e) => { console.error("반 목록 로드 실패", e); renderApp(); }); }
+try {
+  firebase.auth().signInAnonymously().catch(() => {});
+  firebase.auth().onAuthStateChanged((u) => { if (u) loadAndRender(); });
+} catch (e) { /* auth 미설정 */ }
+setTimeout(loadAndRender, 4000);
+
+</script>
+
+<script>
+  // 우리 앱 코드를 직접 Babel로 변환해서 전역 실행 (자동 변환/외부 스크립트 간섭 회피)
+  (function () {
+    function runApp() {
+      try {
+        var src = document.getElementById("__appSource").textContent;
+        var out = Babel.transform(src, { presets: ["react"], sourceType: "script" }).code;
+        var s = document.createElement("script");
+        s.textContent = out;
+        document.body.appendChild(s);
+      } catch (e) {
+        document.getElementById("root").innerHTML =
+          '<div style="padding:40px;text-align:center;color:#c2703f;font-family:sans-serif">앱 로딩 오류<br><br>' + (e && e.message ? e.message : e) + '</div>';
+        console.error("앱 변환/실행 오류:", e);
+      }
+    }
+    if (typeof Babel !== "undefined") runApp();
+    else {
+      var wait = setInterval(function () {
+        if (typeof Babel !== "undefined") { clearInterval(wait); runApp(); }
+      }, 50);
+      setTimeout(function () { clearInterval(wait); }, 10000);
+    }
+  })();
+</script>
+</body>
+</html>
