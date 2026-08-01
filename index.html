@@ -31,6 +31,46 @@ html,body{margin:0; padding:0;}
 .cm-toggle button.on{background:#fff; color:var(--navy);}
 
 .cm-main{max-width:560px; margin:0 auto; padding:22px 16px 40px;}
+
+/* ===== 사이드바 ===== */
+.cm-hamb{display:none; border:0; background:rgba(255,255,255,.10); color:#fff; width:38px; height:38px; border-radius:10px; font-size:19px; cursor:pointer; align-items:center; justify-content:center; flex:none; margin-right:12px;}
+.cm-shell{display:block;}
+.cm-shell > .cm-main{display:flex; align-items:flex-start; gap:0; max-width:900px; margin:0 auto; padding:0 16px 40px;}
+.cm-shell > .cm-main > .cm-side ~ *{flex:1; min-width:0; max-width:560px; padding-top:22px;}
+.cm-shell > .cm-main > .cm-stack{flex:1; min-width:0; max-width:560px; padding-top:22px;}
+.cm-shell > .cm-main > *:not(.cm-side):not(.cm-backdrop){flex:1; min-width:0; padding-top:22px;}
+.cm-side{
+  flex:none; width:190px; padding:22px 12px 40px; margin-right:6px;
+  position:sticky; top:69px; align-self:flex-start; max-height:calc(100vh - 69px); overflow-y:auto;
+}
+.cm-side-title{font-size:11px; color:var(--muted); font-weight:600; letter-spacing:.04em; padding:0 12px 8px;}
+.cm-side-btn{
+  display:flex; align-items:center; gap:9px; width:100%; border:0; background:transparent;
+  padding:11px 12px; border-radius:10px; font-size:14px; font-weight:500; color:var(--ink);
+  cursor:pointer; font-family:inherit; text-align:left; margin-bottom:2px; line-height:1.3;
+}
+.cm-side-btn:hover{background:rgba(21,35,63,.05);}
+.cm-side-btn.on{background:var(--navy); color:#fff; font-weight:600;}
+.cm-side-btn:disabled{opacity:.38; cursor:not-allowed;}
+.cm-side-btn:disabled:hover{background:transparent;}
+.cm-side-ico{font-size:15px; width:19px; text-align:center; flex:none;}
+.cm-side-sep{height:1px; background:var(--line); margin:9px 12px;}
+.cm-backdrop{display:none;}
+
+@media (max-width: 860px){
+  .cm-hamb{display:flex;}
+  .cm-shell > .cm-main{display:block; max-width:560px; padding:22px 16px 40px;}
+  .cm-shell > .cm-main > *{padding-top:0 !important; max-width:none !important;}
+  .cm-side{
+    position:fixed; top:0; left:0; bottom:0; width:250px; max-height:none; z-index:40;
+    background:var(--paper); box-shadow:2px 0 22px rgba(21,35,63,.18);
+    padding:20px 12px 40px; transform:translateX(-102%); transition:transform .22s cubic-bezier(.25,.8,.25,1);
+  }
+  .cm-side.open{transform:translateX(0);}
+  .cm-backdrop.show{display:block; position:fixed; inset:0; background:rgba(21,35,63,.42); z-index:39;}
+  .cm-side-close{display:flex !important;}
+}
+.cm-side-close{display:none; align-items:center; gap:8px; width:100%; border:0; background:transparent; color:var(--muted); font-size:13px; padding:6px 12px 14px; cursor:pointer; font-family:inherit;}
 .cm-stack{display:flex; flex-direction:column; gap:14px;}
 
 .cm-card{background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:20px; box-shadow:0 1px 0 rgba(21,35,63,.03), 0 8px 24px -16px rgba(21,35,63,.25);}
@@ -213,63 +253,6 @@ details[open] .cm-resolved-summary::before { content: "▼ "; }
 .cm-notice-preview{background:#f0f4ff; border-left:3px solid var(--navy2); border-radius:0 9px 9px 0; padding:10px 14px; font-size:13px; color:var(--navy); margin-bottom:14px; line-height:1.5;}
 .cm-notice-dot{color:var(--clay); margin-right:4px;}
 .cm-notice-ta{resize:vertical; min-height:80px; line-height:1.55;}
-/* ===== 진도 기록 ===== */
-.cm-ab-tabs{flex-wrap:wrap;}
-.cm-plog-row{display:flex; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); align-items:flex-start;}
-.cm-plog-info{flex:1; display:flex; flex-direction:column; gap:4px; min-width:0;}
-.cm-plog-none{font-size:12px; color:var(--clay); font-weight:700;}
-.cm-plog-prev{font-size:12px; color:var(--muted); line-height:1.5;}
-.cm-chip-ok{background:#e7f0ea; color:var(--green); font-weight:700;}
-.cm-stuck-row{display:flex; gap:6px; align-items:center; margin-bottom:6px;}
-.cm-x{flex:0 0 38px; height:44px; border:1px solid var(--line); background:#fff; border-radius:9px; color:var(--muted); cursor:pointer; font-family:inherit; font-size:14px;}
-.cm-range2{display:flex; gap:8px; align-items:center;}
-.cm-range2 .cm-input{flex:1; min-width:0;}
-.cm-plog-item{border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:#fff;}
-.cm-plog-head{display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px;}
-.cm-plog-date{font-weight:700; color:var(--navy); font-size:14px;}
-.cm-plog-range{font-size:14px; color:var(--ink); margin-bottom:6px;}
-.cm-stuck-list{margin:0; padding-left:18px; font-size:13px; color:#4a5165; line-height:1.65;}
-.cm-stuck-label{font-size:11px; color:var(--clay); font-weight:700; margin-bottom:3px;}
-.cm-plog-memo{font-size:13px; color:var(--muted); margin-top:7px; white-space:pre-wrap; line-height:1.55;}
-.cm-plog-actions{display:flex; gap:12px; margin-top:9px;}
-/* ===== 학습관리표 ===== */
-.cm-rep{background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px; margin-top:16px;}
-.cm-rep-title{font-family:'Fraunces',serif; font-size:22px; color:var(--navy); margin:0 0 4px;}
-.cm-rep-sub{font-size:13px; color:var(--muted); margin-bottom:18px;}
-.cm-rep-sec{margin-top:22px;}
-.cm-rep-h{font-size:14px; font-weight:700; color:var(--navy); border-bottom:2px solid var(--navy); padding-bottom:5px; margin-bottom:10px;}
-.cm-rep-table{width:100%; border-collapse:collapse; font-size:12.5px;}
-.cm-rep-table th{background:#f3ede0; color:var(--navy); font-weight:700; padding:7px 8px; border:1px solid var(--line); text-align:left; white-space:nowrap;}
-.cm-rep-table td{padding:7px 8px; border:1px solid var(--line); vertical-align:top; line-height:1.6;}
-.cm-rep-stats{display:flex; gap:10px; flex-wrap:wrap;}
-.cm-rep-stat{background:#f7f4f0; border:1px solid var(--line); border-radius:10px; padding:10px 14px; min-width:88px;}
-.cm-rep-stat b{display:block; font-family:'Fraunces',serif; font-size:22px; color:var(--navy); line-height:1.2;}
-.cm-rep-stat span{font-size:11px; color:var(--muted);}
-.cm-rep-note{font-size:13px; line-height:1.7; white-space:pre-wrap; color:var(--ink);}
-.cm-rep-foot{margin-top:24px; font-size:11px; color:var(--muted); text-align:right;}
-.cm-rep-ul{margin:0; padding-left:18px; font-size:13px; line-height:1.7; color:var(--ink);}
-.cm-rep-pick{display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px;}
-.cm-rep-pick label{display:flex; align-items:center; gap:6px; font-size:13px; padding:7px 9px; border:1px solid var(--line); border-radius:9px; background:#fff; cursor:pointer;}
-.cm-rep-pick input{margin:0;}
-.cm-rep-cmt{margin-top:10px;}
-.cm-rep-prog{font-size:13px; color:var(--muted); text-align:center; padding:10px;}
-.cm-rep-none{font-size:12px; color:var(--clay); margin-top:6px;}
-@media print{
-  body *{visibility:hidden;}
-  .cm-reps, .cm-reps *{visibility:visible;}
-  .cm-reps{position:absolute; left:0; top:0; width:100%;}
-  .cm-rep{border:0; padding:0; margin:0 0 0 0; border-radius:0; page-break-after:always; break-after:page;}
-  .cm-rep:last-of-type{page-break-after:auto; break-after:auto;}
-  .cm-rep-table{font-size:10.5px;}
-  .cm-rep-table th, .cm-rep-table td{padding:4px 6px;}
-  .cm-rep-title{font-size:19px;}
-  .cm-rep-stat{padding:7px 11px; min-width:76px;}
-  .cm-rep-stat b{font-size:18px;}
-  .cm-rep-sec{margin-top:14px;}
-  .cm-rep-ul, .cm-rep-note{font-size:11px;}
-  .cm-noprint{display:none!important;}
-  @page{size:A4; margin:13mm;}
-}
 </style>
 </head>
 <body>
@@ -604,46 +587,6 @@ async function saveClassMeta(cid, name, classDays) {
 const aiLogsCol = (cid) => classDoc(cid).collection("aiLogs");
 async function addAiLog(cid, log) { await aiLogsCol(cid).add(log); }
 
-// ----- 진도 기록 (classes/{cid}/plog) -----
-const plogCol = (cid) => classDoc(cid).collection("plog");
-async function addPlog(cid, rec) { await plogCol(cid).add({ ...rec, time: Date.now() }); }
-async function updatePlog(cid, id, patch) { await plogCol(cid).doc(id).update(patch); }
-async function deletePlog(cid, id) { await plogCol(cid).doc(id).delete(); }
-const sortPlog = (arr) => arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.time || 0) - (a.time || 0));
-function listenPlogByStudent(cid, sid, cb) {
-  return plogCol(cid).where("sid", "==", sid).onSnapshot((s) => {
-    const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() }));
-    cb(sortPlog(arr));
-  }, () => cb([]));
-}
-function listenPlogClass(cid, cb) {
-  // 반 전체 최근 기록만 (오래 쓰면 문서가 쌓이므로 상한)
-  return plogCol(cid).orderBy("time", "desc").limit(500).onSnapshot((s) => {
-    const by = {};
-    s.forEach((d) => { const v = { id: d.id, ...d.data() }; (by[v.sid] = by[v.sid] || []).push(v); });
-    Object.keys(by).forEach((k) => sortPlog(by[k]));
-    cb(by);
-  }, () => cb({}));
-}
-async function fetchPlogRange(cid, sid, from, to) {
-  const s = await plogCol(cid).where("sid", "==", sid).get();
-  const arr = [];
-  s.forEach((d) => { const v = { id: d.id, ...d.data() }; if (v.date >= from && v.date <= to) arr.push(v); });
-  return arr.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-}
-// "p.112 ~ p.130" 형태로. 시작=끝이면 하나만
-const plogRange = (p) => (p.to && p.to !== p.from) ? (p.from + " ~ " + p.to) : (p.from || "");
-const plogLine = (p) => ((p.book ? p.book + " " : "") + plogRange(p)).trim();
-// 기준일에서 n개월 이동 (음수 가능)
-function shiftMonth(dateStr, n) {
-  const d = new Date((dateStr || todayStr) + "T00:00:00");
-  const day = d.getDate();
-  d.setMonth(d.getMonth() + n);
-  if (d.getDate() < day) d.setDate(0);
-  return ymd(d);
-}
-const shortDate = (d) => d ? d.slice(5).replace("-", "/") : "";
-
 // ----- 상담 기록 (consultations 컬렉션) -----
 const CONSULT_CATS = [
   { key: "learning", label: "학습·성적", color: "#2b5f8a", bg: "#e3edf5" },
@@ -876,6 +819,33 @@ function BookHwCard({ book, initial, qNumbers, onClearQuestion, onChange }) {
 }
 
 // ===== 반 선택 (학생) =====
+// ===== 사이드바 =====
+const SideCtx = React.createContext({ open: false, setOpen: () => {}, setHasSide: () => {} });
+
+function Sidebar({ items, active, onSelect, title }) {
+  const { open, setOpen, setHasSide } = React.useContext(SideCtx);
+  useEffect(() => { setHasSide(true); return () => setHasSide(false); }, []);
+  function pick(key) { onSelect(key); setOpen(false); }
+  return (<>
+    <div className={"cm-backdrop" + (open ? " show" : "")} onClick={() => setOpen(false)} />
+    <nav className={"cm-side" + (open ? " open" : "")}>
+      <button className="cm-side-close" onClick={() => setOpen(false)}>✕ 닫기</button>
+      {title && <div className="cm-side-title">{title}</div>}
+      {items.map((it, i) => it.sep
+        ? <div key={"s" + i} className="cm-side-sep" />
+        : (
+          <button key={it.key} disabled={it.disabled}
+            className={"cm-side-btn" + (active === it.key ? " on" : "")}
+            onClick={() => !it.disabled && pick(it.key)}>
+            <span className="cm-side-ico">{it.ico}</span>
+            <span style={{flex: 1}}>{it.label}</span>
+            {it.badge > 0 && <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f", fontSize: 11}}>{it.badge}</span>}
+          </button>
+        ))}
+    </nav>
+  </>);
+}
+
 function StudentGate({ onClsChange }) {
   const [matches, setMatches] = useState(null); // null = 미로그인
   const [cls, setCls] = useState(null);
@@ -1387,7 +1357,18 @@ function StudentHome({ cls, me, onLogout }) {
   const bannerText = showDmBanner ? dmNotice.text : (notice ? notice.text : "");
   const dismissBanner = showDmBanner ? dismissDm : dismissNotice;
 
-  return (
+  return (<>
+    <Sidebar title={me.name + "님"} active={activeTab} onSelect={setTab}
+      items={[
+        ...(!me.teacher ? [{ key: "att", ico: "✓", label: "출석" }] : []),
+        { key: "q", ico: "?", label: "질문", disabled: !me.teacher && !att },
+        { key: "hw", ico: "▤", label: "과제", disabled: !me.teacher && !att },
+        { key: "score", ico: "◈", label: "점수", disabled: !me.teacher && !att },
+        { sep: true },
+        { key: "prog", ico: "▦", label: "진도계획표" },
+        { key: "notes", ico: "✎", label: "강의노트" },
+        { key: "ai", ico: "✦", label: "AI 힌트" },
+      ]} />
     <div className="cm-stack">
       {showBanner && (
         <div className="cm-notice-overlay" onClick={dismissBanner}>
@@ -1410,15 +1391,6 @@ function StudentHome({ cls, me, onLogout }) {
       </div>
       {showPin && <ChangePin cls={cls} me={me} onDone={() => setShowPin(false)} />}
 
-      <div className="cm-tabs">
-        {!me.teacher && <button className={activeTab === "att" ? "on" : ""} onClick={() => setTab("att")}>출석</button>}
-        <button className={activeTab === "q" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("q")}>질문</button>
-        <button className={activeTab === "hw" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("hw")}>과제</button>
-        <button className={activeTab === "score" ? "on" : ""} disabled={!me.teacher && !att} onClick={() => (me.teacher || att) && setTab("score")}>점수</button>
-        <button className={activeTab === "prog" ? "on" : ""} onClick={() => setTab("prog")}>진도</button>
-        <button className={activeTab === "notes" ? "on" : ""} onClick={() => setTab("notes")}>노트</button>
-        <button className={activeTab === "ai" ? "on" : ""} onClick={() => setTab("ai")}>AI힌트</button>
-      </div>
 
       {activeTab === "att" && (
         <div className="cm-card">
@@ -1445,7 +1417,7 @@ function StudentHome({ cls, me, onLogout }) {
       )}
       {activeTab === "ai" && <AIChat cls={cls} me={me} />}
     </div>
-  );
+  </>);
 }
 
 function ChangePin({ cls, me, onDone }) {
@@ -2630,9 +2602,22 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
   const hasActive = !!(notice && notice.active && notice.text);
   const students = cls.roster.filter((r) => !r.teacher);
 
-  if (selected) return <AdminDay cls={cls} date={selected} canEdit={canEdit} meName={meName} onBack={() => { setSelected(null); refresh(); }} />;
+  if (selected) return <AdminDay cls={cls} date={selected} canEdit={canEdit} onBack={() => { setSelected(null); refresh(); }} />;
 
   return (
+    <>
+    <Sidebar title={cls.name} active={activeView} onSelect={setActiveView}
+      items={[
+        { key: "days", ico: "▤", label: "날짜별" },
+        { key: "book", ico: "▦", label: "월간 출석부" },
+        { sep: true },
+        { key: "progress", ico: "◈", label: "진도표" },
+        { key: "notes", ico: "✎", label: "강의노트" },
+        { key: "ailog", ico: "✦", label: "AI 질문" },
+        { key: "consult", ico: "◉", label: "상담" },
+        { sep: true },
+        { key: "textbooks", ico: "⚙", label: "설정" },
+      ]} />
     <div ref={daysRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
@@ -2712,17 +2697,6 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
       </div>
       )}
 
-      {/* 탭 */}
-      <div className="cm-ab-tabs">
-        <button className={"cm-ab-tab" + (activeView === "days" ? " on" : "")} onClick={() => setActiveView("days")}>날짜별</button>
-        <button className={"cm-ab-tab" + (activeView === "book" ? " on" : "")} onClick={() => setActiveView("book")}>월간 출석부</button>
-        <button className={"cm-ab-tab" + (activeView === "progress" ? " on" : "")} onClick={() => setActiveView("progress")}>진도표</button>
-        <button className={"cm-ab-tab" + (activeView === "notes" ? " on" : "")} onClick={() => setActiveView("notes")}>강의노트</button>
-        <button className={"cm-ab-tab" + (activeView === "ailog" ? " on" : "")} onClick={() => setActiveView("ailog")}>AI질문</button>
-        <button className={"cm-ab-tab" + (activeView === "consult" ? " on" : "")} onClick={() => setActiveView("consult")}>상담</button>
-        <button className={"cm-ab-tab" + (activeView === "report" ? " on" : "")} onClick={() => setActiveView("report")}>학습관리표</button>
-        <button className={"cm-ab-tab" + (activeView === "textbooks" ? " on" : "")} onClick={() => setActiveView("textbooks")}>설정</button>
-      </div>
 
       {activeView === "days" && (
         <div className="cm-card">
@@ -2775,13 +2749,6 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
         </div>
       )}
 
-      {activeView === "report" && (
-        <div className="cm-card">
-          <h3 className="cm-h3">학습관리표 <span className="cm-h-hint">(기간별 리포트 · 인쇄/PDF)</span></h3>
-          <StudyReport cls={cls} />
-        </div>
-      )}
-
       {activeView === "textbooks" && (<>
         {isOwner && (
           <div className="cm-card">
@@ -2812,6 +2779,7 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
         )}
       </>)}
     </div>
+    </>
   );
 }
 
@@ -3101,13 +3069,12 @@ function QuestionQueue({ questions, clsId, date, canEdit, books, merged }) {
   );
 }
 
-function AdminDay({ cls, date, canEdit, onBack, meName }) {
+function AdminDay({ cls, date, canEdit, onBack }) {
   const [attendance, setAttendance] = useState({});
   const [questions, setQuestions] = useState([]);
   const [hwDone, setHwDone] = useState({});
   const [scores, setScores] = useState([]);
   const [questioned, setQuestioned] = useState({});
-  const [plogs, setPlogs] = useState({});
   const [detail, setDetail] = useState(null);
 
   const dow = new Date(date + "T00:00:00").getDay();
@@ -3117,13 +3084,12 @@ function AdminDay({ cls, date, canEdit, onBack, meName }) {
 
   useEffect(() => {
     const cids = mergePartner ? [cls.id, mergePartner.id] : [cls.id];
-    const attStore = {}, hwStore = {}, qdStore = {}, scStore = {}, plStore = {};
+    const attStore = {}, hwStore = {}, qdStore = {}, scStore = {};
     const flat = (store) => { const o = {}; cids.forEach((c) => Object.entries(store[c] || {}).forEach(([sid, v]) => (o[c + ":" + sid] = v))); return o; };
     const unsubs = [];
     cids.forEach((cid) => {
       unsubs.push(attCol(cid, date).onSnapshot((s) => { attStore[cid] = {}; s.forEach((d) => (attStore[cid][d.id] = d.data())); setAttendance(flat(attStore)); }));
       unsubs.push(hwCol(cid).onSnapshot((s) => { hwStore[cid] = {}; s.forEach((d) => (hwStore[cid][d.id] = d.data().books || {})); setHwDone(flat(hwStore)); }));
-      unsubs.push(listenPlogClass(cid, (by) => { plStore[cid] = by; setPlogs(flat(plStore)); }));
       unsubs.push(questionedCol(cid).onSnapshot((s) => { qdStore[cid] = {}; s.forEach((d) => (qdStore[cid][d.id] = d.data().books || {})); setQuestioned(flat(qdStore)); }));
       unsubs.push(scoresCol(cid, date).orderBy("time").onSnapshot((s) => {
         scStore[cid] = []; s.forEach((d) => scStore[cid].push({ id: cid + ":" + d.id, _cid: cid, ...d.data() }));
@@ -3144,7 +3110,7 @@ function AdminDay({ cls, date, canEdit, onBack, meName }) {
 
   const dayRef = useSwipeBack(onBack);
 
-  if (detail) return <StudentDetail cls={findClass(detail._cid) || cls} student={detail} hwDone={{ [detail.id]: hwDone[detail._key] || {} }} questioned={{ [detail.id]: questioned[detail._key] || {} }} onBack={() => setDetail(null)} date={date} canEdit={canEdit} teacherName={meName} />;
+  if (detail) return <StudentDetail cls={findClass(detail._cid) || cls} student={detail} hwDone={{ [detail.id]: hwDone[detail._key] || {} }} questioned={{ [detail.id]: questioned[detail._key] || {} }} onBack={() => setDetail(null)} />;
 
   return (
     <div ref={dayRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
@@ -3193,30 +3159,6 @@ function AdminDay({ cls, date, canEdit, onBack, meName }) {
       </div>
 
       <div className="cm-card">
-        <h3 className="cm-h3">진도 기록 <span className="cm-h-hint">(이름을 누르면 작성)</span></h3>
-        {roster.length === 0 ? (<div className="cm-empty">오늘 수업 대상 학생이 없어요</div>) : (
-          roster.map((r) => {
-            const list = plogs[r._key] || [];
-            const today = list.filter((p) => p.date === date);
-            const prev = list.filter((p) => p.date < date)[0];
-            return (
-              <div key={r._key} className="cm-plog-row">
-                <button className="cm-hw-name cm-hw-name-btn" onClick={() => setDetail(r)}>{r.name}</button>
-                <div className="cm-plog-info">
-                  {today.length > 0
-                    ? <div><span className="cm-chip cm-chip-ok">오늘 기록됨</span> <span style={{ fontSize: 13 }}>{today.map((p) => plogLine(p)).filter(Boolean).join(" / ") || "(범위 없음)"}</span></div>
-                    : <div className="cm-plog-none">오늘 기록 없음</div>}
-                  {prev
-                    ? <div className="cm-plog-prev">지난 {shortDate(prev.date)} · {plogLine(prev) || "(범위 없음)"}{(prev.stuck || []).length > 0 && <><br />막힘: {prev.stuck.join(", ")}</>}</div>
-                    : <div className="cm-plog-prev">지난 기록 없음</div>}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      <div className="cm-card">
         <h3 className="cm-h3">테스트 점수</h3>
         {scores.length === 0 ? (<div className="cm-empty">제출된 점수가 없어요</div>) : (
           scores.slice().reverse().map((s) => (
@@ -3233,7 +3175,7 @@ function AdminDay({ cls, date, canEdit, onBack, meName }) {
   );
 }
 
-function StudentDetail({ cls, student, hwDone, questioned, onBack, date, canEdit, teacherName }) {
+function StudentDetail({ cls, student, hwDone, questioned, onBack }) {
   const mine = hwDone[student.id] || {};
   const qmine = (questioned && questioned[student.id]) || {};
   const detailDivRef = useSwipeBack(onBack);
@@ -3241,9 +3183,8 @@ function StudentDetail({ cls, student, hwDone, questioned, onBack, date, canEdit
     <div ref={detailDivRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 현황으로</button>
-        <div className="cm-daybar-date">{student.name} · 진도 / 과제</div>
+        <div className="cm-daybar-date">{student.name} · 누적 진도</div>
       </div>
-      {date && <PlogCard cls={cls} student={student} date={date} canEdit={canEdit} teacherName={teacherName} />}
       {getStudentBooks(cls, student).map((b) => {
         const qnums = qmine[b.name] || [];
         return (
@@ -3268,408 +3209,14 @@ function StudentDetail({ cls, student, hwDone, questioned, onBack, date, canEdit
   );
 }
 
-// ===== 진도 기록 (학생 상세 안에서 작성) =====
-function PlogCard({ cls, student, date, canEdit, teacherName }) {
-  const books = getStudentBooks(cls, student).map((b) => b.name);
-  const [logs, setLogs] = useState(null);
-  const [book, setBook] = useState(books[0] || "");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [stuck, setStuck] = useState([""]);
-  const [memo, setMemo] = useState("");
-  const [err, setErr] = useState("");
-  const [editId, setEditId] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [showAll, setShowAll] = useState(false);
-
-  useEffect(() => listenPlogByStudent(cls.id, student.id, setLogs), [cls.id, student.id]);
-
-  const reset = () => {
-    setBook(books[0] || ""); setFrom(""); setTo(""); setStuck([""]); setMemo(""); setErr(""); setEditId(null);
-  };
-  const startEdit = (p) => {
-    setEditId(p.id); setBook(p.book || ""); setFrom(p.from || ""); setTo(p.to || "");
-    setStuck((p.stuck && p.stuck.length) ? p.stuck.slice() : [""]); setMemo(p.memo || ""); setErr("");
-    if (window.scrollTo) window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const save = async () => {
-    const st = stuck.map((s) => s.trim()).filter(Boolean);
-    if (!from.trim()) { setErr("어디서부터 나갔는지 적어주세요"); return; }
-    if (st.length === 0) { setErr("오늘 막혔던 부분을 최소 1개는 적어주세요"); return; }
-    setBusy(true);
-    const rec = {
-      sid: student.id, name: student.name, date,
-      book: book || "", from: from.trim(), to: (to.trim() || from.trim()),
-      stuck: st, memo: memo.trim(), teacher: teacherName || "",
-    };
-    try {
-      if (editId) await updatePlog(cls.id, editId, rec);
-      else await addPlog(cls.id, rec);
-      reset();
-    } catch (e) { setErr("저장 실패: " + e.message); }
-    setBusy(false);
-  };
-
-  const todayLog = (logs || []).filter((p) => p.date === date);
-  const past = (logs || []).filter((p) => p.date !== date);
-  const shown = showAll ? past : past.slice(0, 3);
-
-  const Item = ({ p }) => (
-    <div className="cm-plog-item">
-      <div className="cm-plog-head">
-        <span className="cm-plog-date">{fmtDate(p.date)}</span>
-        {p.teacher && <span className="cm-day-sub" style={{ margin: 0 }}>{p.teacher}</span>}
-      </div>
-      <div className="cm-plog-range">{plogLine(p) || "(범위 없음)"}</div>
-      {(p.stuck || []).length > 0 && (<>
-        <div className="cm-stuck-label">막혔던 부분</div>
-        <ul className="cm-stuck-list">{p.stuck.map((s, i) => <li key={i}>{s}</li>)}</ul>
-      </>)}
-      {p.memo && <div className="cm-plog-memo">{p.memo}</div>}
-      {canEdit && (
-        <div className="cm-plog-actions">
-          <button className="cm-link" onClick={() => startEdit(p)}>수정</button>
-          <button className="cm-link" onClick={() => { if (window.confirm("이 기록을 지울까요?")) deletePlog(cls.id, p.id); }}>삭제</button>
-        </div>
-      )}
-    </div>
-  );
-
-  return (
-    <div className="cm-card">
-      <h3 className="cm-h3">진도 기록 <span className="cm-h-hint">({fmtDate(date)})</span></h3>
-
-      {canEdit && (<>
-        {books.length > 0 && (<>
-          <label className="cm-label">교재</label>
-          <select className="cm-input" value={book} onChange={(e) => setBook(e.target.value)}>
-            {books.map((b) => <option key={b} value={b}>{b}</option>)}
-            <option value="">(교재 없음 · 직접 적기)</option>
-          </select>
-        </>)}
-        <label className="cm-label">오늘 나간 범위</label>
-        <div className="cm-range2">
-          <input className="cm-input" placeholder="어디서부터 (예: p.112)" value={from} onChange={(e) => setFrom(e.target.value)} />
-          <span className="cm-tilde">~</span>
-          <input className="cm-input" placeholder="어디까지 (예: p.130)" value={to} onChange={(e) => setTo(e.target.value)} />
-        </div>
-
-        <label className="cm-label">오늘 막혔던 / 어려웠던 부분 <span style={{ color: "var(--clay)" }}>* 1개 이상</span></label>
-        {stuck.map((s, i) => (
-          <div className="cm-stuck-row" key={i}>
-            <input className="cm-input" value={s}
-              placeholder={i === 0 ? "예) 치환적분에서 변수 바꾸는 타이밍" : "추가로 막혔던 부분"}
-              onChange={(e) => setStuck(stuck.map((v, j) => (j === i ? e.target.value : v)))} />
-            {stuck.length > 1 && <button className="cm-x" onClick={() => setStuck(stuck.filter((v, j) => j !== i))}>✕</button>}
-          </div>
-        ))}
-        <button className="cm-link" onClick={() => setStuck(stuck.concat(""))}>+ 항목 추가</button>
-
-        <label className="cm-label">메모 (선택)</label>
-        <textarea className="cm-input cm-notice-ta" rows={2} placeholder="다음 시간에 할 것, 특이사항 등"
-          value={memo} onChange={(e) => setMemo(e.target.value)} />
-
-        {err && <div className="cm-err">{err}</div>}
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button className="cm-btn cm-btn-primary" style={{ flex: 1 }} disabled={busy} onClick={save}>
-            {busy ? "저장 중…" : editId ? "수정 저장" : "진도 기록 저장"}
-          </button>
-          {editId && <button className="cm-btn cm-btn-ghost" style={{ marginTop: 16 }} onClick={reset}>취소</button>}
-        </div>
-      </>)}
-
-      {logs === null ? (
-        <div className="cm-empty">불러오는 중…</div>
-      ) : (<>
-        {todayLog.length > 0 && (
-          <div style={{ marginTop: 18 }}>
-            <div className="cm-mini-h">오늘 기록</div>
-            {todayLog.map((p) => <Item key={p.id} p={p} />)}
-          </div>
-        )}
-        <div style={{ marginTop: 18 }}>
-          <div className="cm-mini-h">지난 기록 {past.length > 0 && "(" + past.length + "회)"}</div>
-          {past.length === 0 ? (
-            <div className="cm-empty">아직 지난 기록이 없어요</div>
-          ) : (<>
-            {shown.map((p) => <Item key={p.id} p={p} />)}
-            {past.length > 3 && (
-              <button className="cm-link" onClick={() => setShowAll(!showAll)}>
-                {showAll ? "접기" : "지난 기록 " + past.length + "개 모두 보기"}
-              </button>
-            )}
-          </>)}
-        </div>
-      </>)}
-    </div>
-  );
-}
-
-// ===== 학습관리표 (월간 결과지 · 기간 지정 · 인쇄/PDF) =====
-// 최근 n개월 목록 ["2026-07", "2026-06", ...]
-function monthOptions(n) {
-  const out = [];
-  const d = new Date(todayStr + "T00:00:00");
-  d.setDate(1);
-  for (let i = 0; i < n; i++) {
-    out.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
-    d.setMonth(d.getMonth() - 1);
-  }
-  return out;
-}
-function monthRange(ym) {
-  const y = Number(ym.split("-")[0]), m = Number(ym.split("-")[1]);
-  const last = new Date(y, m, 0).getDate();
-  return [ym + "-01", ym + "-" + String(last).padStart(2, "0")];
-}
-const monthLabel = (ym) => ym.split("-")[0] + "년 " + Number(ym.split("-")[1]) + "월";
-
-// 여러 학생을 한 번에 뽑아도 읽기 횟수가 늘지 않도록 날짜 단위로 한 번씩만 조회
-async function buildReportAgg(cls, sids, from, to, onProgress) {
-  const days = (await listDays(cls.id)).filter((d) => d >= from && d <= to).sort();
-  const att = {}, scores = {}, logs = {}, hw = {};
-  sids.forEach((s) => { att[s] = 0; scores[s] = []; logs[s] = []; });
-  for (let i = 0; i < days.length; i++) {
-    const d = days[i];
-    const a = await attCol(cls.id, d).get();
-    a.forEach((x) => { if (att[x.id] !== undefined) att[x.id]++; });
-    const sc = await scoresCol(cls.id, d).get();
-    sc.forEach((x) => { const v = x.data(); if (scores[v.sid]) scores[v.sid].push({ date: d, ...v }); });
-    if (onProgress) onProgress(i + 1, days.length);
-  }
-  const pl = await plogCol(cls.id).get();
-  pl.forEach((x) => {
-    const v = { id: x.id, ...x.data() };
-    if (logs[v.sid] && v.date >= from && v.date <= to) logs[v.sid].push(v);
-  });
-  Object.keys(logs).forEach((k) => logs[k].sort((a, b) => (a.date || "").localeCompare(b.date || "")));
-  const hwSnap = await hwCol(cls.id).get();
-  hwSnap.forEach((x) => { hw[x.id] = x.data().books || {}; });
-  return { days, att, scores, logs, hw };
-}
-
-// 결과지 한 장 (A4 1장 기준)
-function ReportSheet({ cls, st, from, to, agg, comment, periodLabel }) {
-  const logs = agg.logs[st.id] || [];
-  const scores = agg.scores[st.id] || [];
-  const hw = agg.hw[st.id] || {};
-  const attended = agg.att[st.id] || 0;
-  const expected = agg.days.filter((d) => attendsOn(cls, st, d)).length;
-  const avg = scores.length ? Math.round(scores.reduce((s, x) => s + (x.score || 0), 0) / scores.length) : null;
-  const allStuck = logs.reduce((acc, p) => acc.concat((p.stuck || []).map((s) => ({ s, date: p.date }))), []);
-  const books = getStudentBooks(cls, st);
-
-  return (
-    <div className="cm-rep">
-      <h2 className="cm-rep-title">{st.name} 학습관리표</h2>
-      <div className="cm-rep-sub">
-        CLIMATH · {cls.name} · {periodLabel || (from.split("-").join(".") + " ~ " + to.split("-").join("."))}
-      </div>
-
-      <div className="cm-rep-stats">
-        <div className="cm-rep-stat"><b>{attended}{expected > 0 && <span style={{ fontSize: 14 }}> / {expected}</span>}</b><span>출석</span></div>
-        <div className="cm-rep-stat"><b>{logs.length}</b><span>진도 기록</span></div>
-        <div className="cm-rep-stat"><b>{allStuck.length}</b><span>막힌 부분</span></div>
-        <div className="cm-rep-stat"><b>{avg === null ? "-" : avg}</b><span>평균 점수</span></div>
-      </div>
-
-      <div className="cm-rep-sec">
-        <div className="cm-rep-h">수업별 진도</div>
-        {logs.length === 0 ? (
-          <div className="cm-empty">이 기간에 기록된 진도가 없어요</div>
-        ) : (
-          <table className="cm-rep-table">
-            <thead><tr><th style={{ width: 62 }}>날짜</th><th>교재 · 범위</th><th>막혔던 부분</th></tr></thead>
-            <tbody>
-              {logs.map((p) => (
-                <tr key={p.id}>
-                  <td>{shortDate(p.date)}</td>
-                  <td>{plogLine(p) || "-"}{p.memo && <div style={{ color: "#7c8294", fontSize: 11.5, marginTop: 4 }}>{p.memo}</div>}</td>
-                  <td>{(p.stuck || []).length === 0 ? "-" : <ul className="cm-rep-ul" style={{ fontSize: 12.5, paddingLeft: 15 }}>{p.stuck.map((s, i) => <li key={i}>{s}</li>)}</ul>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {allStuck.length > 0 && (
-        <div className="cm-rep-sec">
-          <div className="cm-rep-h">보완이 필요한 부분 모아보기</div>
-          <ul className="cm-rep-ul">
-            {allStuck.map((x, i) => <li key={i}>{x.s} <span style={{ color: "#7c8294", fontSize: 11.5 }}>({shortDate(x.date)})</span></li>)}
-          </ul>
-        </div>
-      )}
-
-      {scores.length > 0 && (
-        <div className="cm-rep-sec">
-          <div className="cm-rep-h">테스트 점수</div>
-          <table className="cm-rep-table">
-            <thead><tr><th style={{ width: 62 }}>날짜</th><th>구분</th><th style={{ width: 68 }}>맞은 개수</th><th style={{ width: 52 }}>점수</th></tr></thead>
-            <tbody>
-              {scores.map((s, i) => (
-                <tr key={i}><td>{shortDate(s.date)}</td><td>{s.label || "-"}</td><td>{s.correct}/{s.total}</td><td><b>{s.score}</b></td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {books.length > 0 && (
-        <div className="cm-rep-sec">
-          <div className="cm-rep-h">교재 진행률 (누적)</div>
-          <table className="cm-rep-table">
-            <thead><tr><th>교재</th><th style={{ width: 88 }}>푼 문항</th><th style={{ width: 58 }}>진행률</th></tr></thead>
-            <tbody>
-              {books.map((b) => {
-                const n = (hw[b.name] || []).length;
-                return <tr key={b.name}><td>{b.name}</td><td>{n} / {b.total}</td><td>{b.total > 0 ? Math.round(n / b.total * 100) : 0}%</td></tr>;
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {(comment || "").trim() && (
-        <div className="cm-rep-sec">
-          <div className="cm-rep-h">선생님 총평</div>
-          <div className="cm-rep-note">{comment.trim()}</div>
-        </div>
-      )}
-
-      <div className="cm-rep-foot">출력일 {fmtDate(todayStr)} · CLIMATH</div>
-    </div>
-  );
-}
-
-function StudyReport({ cls }) {
-  const students = cls.roster.filter((r) => !r.teacher);
-  const months = monthOptions(12);
-  const [mode, setMode] = useState("month");          // "month" | "range"
-  const [month, setMonth] = useState(months[0]);
-  const [picks, setPicks] = useState(() => students.filter((r) => !isEnded(r)).map((r) => r.id));
-  const [sid, setSid] = useState("");
-  const [from, setFrom] = useState(shiftMonth(todayStr, -1));
-  const [to, setTo] = useState(todayStr);
-  const [comments, setComments] = useState({});
-  const [out, setOut] = useState(null);               // { list, agg, from, to, label }
-  const [prog, setProg] = useState("");
-  const [err, setErr] = useState("");
-
-  const toggle = (id) => setPicks(picks.includes(id) ? picks.filter((x) => x !== id) : picks.concat(id));
-
-  const build = async () => {
-    let f, t, list, label;
-    if (mode === "month") {
-      if (picks.length === 0) { setErr("학생을 1명 이상 선택해주세요"); return; }
-      const r = monthRange(month); f = r[0]; t = r[1];
-      list = students.filter((s) => picks.includes(s.id));
-      label = monthLabel(month);
-    } else {
-      if (!sid) { setErr("학생을 선택해주세요"); return; }
-      if (from > to) { setErr("기간이 거꾸로예요"); return; }
-      f = from; t = to;
-      list = students.filter((s) => s.id === sid);
-      label = "";
-    }
-    setErr(""); setOut(null); setProg("불러오는 중…");
-    try {
-      const agg = await buildReportAgg(cls, list.map((s) => s.id), f, t,
-        (i, n) => setProg("수업 기록 읽는 중… " + i + "/" + n));
-      setOut({ list, agg, from: f, to: t, label });
-    } catch (e) {
-      setErr("불러오지 못했어요: " + e.message);
-    }
-    setProg("");
-  };
-
-  return (
-    <div>
-      <div className="cm-noprint">
-        <div className="cm-ab-tabs">
-          <button className={"cm-ab-tab" + (mode === "month" ? " on" : "")} onClick={() => { setMode("month"); setOut(null); }}>월간 결과지</button>
-          <button className={"cm-ab-tab" + (mode === "range" ? " on" : "")} onClick={() => { setMode("range"); setOut(null); }}>기간 지정</button>
-        </div>
-
-        {mode === "month" ? (<>
-          <label className="cm-label">월</label>
-          <select className="cm-input" value={month} onChange={(e) => { setMonth(e.target.value); setOut(null); }}>
-            {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
-          </select>
-
-          <label className="cm-label">대상 학생 <span className="cm-h-hint">({picks.length}명 선택됨)</span></label>
-          <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
-            <button className="cm-ab-tab" onClick={() => setPicks(students.map((r) => r.id))}>전체 선택</button>
-            <button className="cm-ab-tab" onClick={() => setPicks(students.filter((r) => !isEnded(r)).map((r) => r.id))}>수강중만</button>
-            <button className="cm-ab-tab" onClick={() => setPicks([])}>전체 해제</button>
-          </div>
-          <div className="cm-rep-pick">
-            {students.map((r) => (
-              <label key={r.id}>
-                <input type="checkbox" checked={picks.includes(r.id)} onChange={() => toggle(r.id)} />
-                <span>{r.name}{isEnded(r) ? " (종료)" : ""}</span>
-              </label>
-            ))}
-          </div>
-        </>) : (<>
-          <label className="cm-label">학생</label>
-          <select className="cm-input" value={sid} onChange={(e) => { setSid(e.target.value); setOut(null); }}>
-            <option value="">-- 학생을 선택하세요 --</option>
-            {students.map((r) => <option key={r.id} value={r.id}>{r.name}{isEnded(r) ? " (수강 종료)" : ""}</option>)}
-          </select>
-          <label className="cm-label">기간</label>
-          <div className="cm-range2">
-            <input className="cm-input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-            <span className="cm-tilde">~</span>
-            <input className="cm-input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-            {[1, 2, 3, 6].map((n) => (
-              <button key={n} className="cm-ab-tab" onClick={() => { setFrom(shiftMonth(todayStr, -n)); setTo(todayStr); }}>최근 {n}개월</button>
-            ))}
-          </div>
-        </>)}
-
-        {err && <div className="cm-err">{err}</div>}
-        <button className="cm-btn cm-btn-primary" disabled={!!prog} onClick={build}>
-          {prog ? "만드는 중…" : mode === "month" ? "월간 결과지 만들기" : "학습관리표 만들기"}
-        </button>
-        {prog && <div className="cm-rep-prog">{prog}</div>}
-        {out && (<>
-          <button className="cm-btn cm-btn-ghost" style={{ width: "100%", marginTop: 10, padding: 12 }}
-            onClick={() => window.print()}>인쇄 / PDF로 저장 ({out.list.length}장)</button>
-          <div className="cm-hint" style={{ marginTop: 8 }}>
-            학생 1명당 A4 한 장으로 나뉘어 나가요. 인쇄 창에서 <b>대상을 "PDF로 저장"</b>으로 바꾸면 파일로 받을 수 있어요.
-          </div>
-        </>)}
-      </div>
-
-      {out && (
-        <div className="cm-reps">
-          {out.list.map((st) => (
-            <div key={st.id}>
-              <ReportSheet cls={cls} st={st} from={out.from} to={out.to} agg={out.agg}
-                comment={comments[st.id] || ""} periodLabel={out.label} />
-              <textarea className="cm-input cm-notice-ta cm-noprint cm-rep-cmt" rows={2}
-                placeholder={st.name + " 총평 (선택 · 위 결과지에 실려요)"}
-                value={comments[st.id] || ""}
-                onChange={(e) => setComments({ ...comments, [st.id]: e.target.value })} />
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ===== 앱 루트 =====
 function App() {
   const params = new URLSearchParams(window.location.search);
   const isAdmin = params.get("admin") === "1";
   const urlClass = findClass(params.get("class"));
   const [gateCls, setGateCls] = useState(null);
+  const [sideOpen, setSideOpen] = useState(false);
+  const [hasSide, setHasSide] = useState(false);
 
   let sub, main;
   if (isAdmin) { sub = "수업 관리"; main = <AdminView />; }
@@ -3677,12 +3224,13 @@ function App() {
   else { sub = gateCls ? gateCls.name + " · " + todayStr : "로그인"; main = <StudentGate onClsChange={setGateCls} />; }
 
   return (
-    <div>
+    <SideCtx.Provider value={{ open: sideOpen, setOpen: setSideOpen, setHasSide }}>
       <header className="cm-header">
-        <div className="cm-brand"><span className="cm-logo">CLIMATH</span><span className="cm-sub">{sub}</span></div>
+        {hasSide && <button className="cm-hamb" onClick={() => setSideOpen(true)}>☰</button>}
+        <div className="cm-brand" style={{flex: 1}}><span className="cm-logo">CLIMATH</span><span className="cm-sub">{sub}</span></div>
       </header>
-      <main className="cm-main">{main}</main>
-    </div>
+      <div className="cm-shell"><main className="cm-main">{main}</main></div>
+    </SideCtx.Provider>
   );
 }
 
