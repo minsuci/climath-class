@@ -2619,6 +2619,7 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
         { key: "days", ico: "▤", label: "날짜별" },
         { key: "book", ico: "▦", label: "월간 출석부" },
         { sep: true },
+        { key: "notice", ico: "◑", label: "공지", badge: (hasActive ? 1 : 0) + Object.values(activeDms || {}).filter((v) => v && v.active && v.text).length },
         { key: "progress", ico: "◈", label: "진도표" },
         { key: "notes", ico: "✎", label: "강의노트" },
         { key: "ailog", ico: "✦", label: "AI 질문" },
@@ -2632,6 +2633,7 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
         <div className="cm-daybar-date">{cls.name}{!canEdit && <span className="cm-day-sub">열람 전용</span>}</div>
       </div>
 
+      {activeView === "notice" && (<>
       {/* 전체 공지 */}
       <div className="cm-card">
         <h3 className="cm-h3">전체 공지</h3>
@@ -2704,7 +2706,7 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
         )}
       </div>
       )}
-
+      </>)}
 
       {activeView === "days" && (
         <div className="cm-card">
