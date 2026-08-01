@@ -2806,14 +2806,35 @@ function AttendanceBook({ cls, canEdit }) {
   const nowYM = todayStr.slice(0, 7);
   const [month, setMonth] = React.useState(nowYM);
 
-  // 최근 6개월 옵션
+  // 최근 12개월 옵션
   const monthOptions = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 12; i++) {
     const d = new Date();
     d.setMonth(d.getMonth() - i);
     const ym = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
     monthOptions.push(ym);
   }
+  function shiftMonth(delta) {
+    const [y, m] = month.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    setMonth(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
+  }
+  const monthLabel = (ym) => {
+    const [y, m] = ym.split("-");
+    return Number(m) + "월" + (ym.slice(0, 4) !== nowYM.slice(0, 4) ? " (" + y + ")" : "");
+  };
+  const canNext = month < nowYM;
+  const MonthNav = ({ extra }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+      <button className="cm-ab-tab" style={{ padding: "5px 11px" }} onClick={() => shiftMonth(-1)}>‹</button>
+      <select className="cm-ab-month-sel" style={{ marginBottom: 0, fontWeight: 600 }} value={month} onChange={(e) => setMonth(e.target.value)}>
+        {monthOptions.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+      </select>
+      <button className="cm-ab-tab" style={{ padding: "5px 11px", opacity: canNext ? 1 : .35 }} disabled={!canNext} onClick={() => shiftMonth(1)}>›</button>
+      {month !== nowYM && <button className="cm-link" onClick={() => setMonth(nowYM)}>이번 달</button>}
+      {extra}
+    </div>
+  );
 
   useEffect(() => {
     setLoading(true);
@@ -2890,19 +2911,15 @@ function AttendanceBook({ cls, canEdit }) {
   // 날짜 포맷 M/D
   const shortDate = (d) => { const p = d.split("-"); return parseInt(p[1]) + "/" + parseInt(p[2]); };
 
-  if (loading) return <div className="cm-empty">불러오는 중…</div>;
-  if (days.length === 0) return <div className="cm-empty">이 달에 수업 기록이 없어요</div>;
+  if (loading) return <div><MonthNav /><div className="cm-empty">불러오는 중…</div></div>;
+  if (days.length === 0) return <div><MonthNav /><div className="cm-empty">이 달에 수업 기록이 없어요</div></div>;
 
   // ---- 개별진도반: 학생별 자기 요일만 표시 ----
   if (isIndividual(cls)) {
     const dowOf = (d) => new Date(d + "T00:00:00").getDay();
     return (
       <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-          <select className="cm-ab-month-sel" value={month} onChange={(e) => setMonth(e.target.value)}>
-            {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
+        <MonthNav />
         <div className="cm-ab-wrap" data-no-swipe>
           <table className="cm-ab-table">
             <thead>
@@ -2959,12 +2976,7 @@ function AttendanceBook({ cls, canEdit }) {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <select className="cm-ab-month-sel" value={month} onChange={(e) => setMonth(e.target.value)}>
-          {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
-        <span style={{ fontSize: 12, color: "#8a7f72" }}>총 {days.length}회차</span>
-      </div>
+      <MonthNav extra={<span style={{ fontSize: 12, color: "#8a7f72" }}>총 {days.length}회차</span>} />
       <div className="cm-ab-wrap" data-no-swipe>
         <table className="cm-ab-table">
           <thead>
