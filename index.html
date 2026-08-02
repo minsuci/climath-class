@@ -3492,6 +3492,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
   const [scores, setScores] = useState([]);
   const [questioned, setQuestioned] = useState({});
   const [detail, setDetail] = useState(null);
+  const [mkMap, setMkMap] = useState({}); // "반id:학생id" → makeup
 
   const dow = new Date(date + "T00:00:00").getDay();
   // 합반: 해당 요일이면 짝 반의 출석·과제·점수도 함께 (저장은 각 반, 화면만 병합)
@@ -3505,6 +3506,14 @@ function AdminDay({ cls, date, canEdit, onBack }) {
     const unsubs = [];
     cids.forEach((cid) => {
       unsubs.push(attCol(cid, date).onSnapshot((s) => { attStore[cid] = {}; s.forEach((d) => (attStore[cid][d.id] = d.data())); setAttendance(flat(attStore)); }));
+      unsubs.push(listenMakeups(cid, (m) => {
+        setMkMap((prev) => {
+          const next = { ...prev };
+          Object.keys(next).forEach((k) => { if (k.startsWith(cid + ":")) delete next[k]; });
+          Object.values(m).forEach((v) => { if (v.date === date) next[cid + ":" + v.sid] = v; });
+          return next;
+        });
+      }));
       unsubs.push(hwCol(cid).onSnapshot((s) => { hwStore[cid] = {}; s.forEach((d) => (hwStore[cid][d.id] = d.data().books || {})); setHwDone(flat(hwStore)); }));
       unsubs.push(questionedCol(cid).onSnapshot((s) => { qdStore[cid] = {}; s.forEach((d) => (qdStore[cid][d.id] = d.data().books || {})); setQuestioned(flat(qdStore)); }));
       unsubs.push(scoresCol(cid, date).orderBy("time").onSnapshot((s) => {
@@ -3521,6 +3530,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
   let roster = cls.roster.filter((r) => !r.teacher && attendsOn(cls, r, date)).map((r) => withKey(r, cls.id));
   if (mergePartner) roster = roster.concat(mergePartner.roster.filter((r) => !r.teacher && attendsOn(mergePartner, r, date)).map((r) => withKey(r, mergePartner.id)));
   const presentIds = Object.keys(attendance);
+  const plannedCount = roster.filter((r) => !attendance[r._key] && (mkMap[r._cid + ":" + r.id] || {}).planned).length;
   const waiting = questions.filter((q) => !q.resolved);
   const hwStudents = roster.filter((r) => hwDone[r._key] && getStudentBooks(findClass(r._cid) || cls, r).some((b) => (hwDone[r._key][b.name] || []).length > 0));
 
@@ -3536,7 +3546,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
       </div>
 
       <div className="cm-card cm-admin-top">
-        <div className="cm-stat"><div className="cm-stat-num">{presentIds.length}<span>/{roster.length}</span></div><div className="cm-stat-lab">출석</div></div>
+        <div className="cm-stat"><div className="cm-stat-num">{presentIds.length}<span>/{roster.length - plannedCount}</span></div><div className="cm-stat-lab">출석{plannedCount > 0 && <span style={{color: "#c2703f"}}> · 결석예정 {plannedCount}</span>}</div></div>
         <div className="cm-stat"><div className="cm-stat-num cm-clay">{waiting.length}</div><div className="cm-stat-lab">대기 질문</div></div>
       </div>
 
@@ -3560,15 +3570,25 @@ function AdminDay({ cls, date, canEdit, onBack }) {
         <div className="cm-roster">
           {roster.map((r) => {
             const a = attendance[r._key];
+            const mk = mkMap[r._cid + ":" + r.id] || {};
+            const planned = mk.planned && !a;
+            const vdone = mk.videoDone;
+            const boxColor = a ? "var(--green)" : vdone ? "#2b5f8a" : planned ? "#c2703f" : "var(--line)";
             return (
-              <div key={r._key} className={"cm-rost " + (a ? "in" : "")} style={{display: "flex", alignItems: "center", gap: 10, cursor: "default"}}>
+              <div key={r._key} className={"cm-rost " + (a ? "in" : "")} style={{display: "flex", alignItems: "center", gap: 10, cursor: "default", opacity: planned && !vdone ? .8 : 1}}>
                 <span onClick={(e) => { e.stopPropagation(); if (canEdit) setAttendance(r._cid, date, r, !a); }}
                   title={canEdit ? "탭하여 출석 처리" : ""}
-                  style={{width: 26, height: 26, flex: "none", borderRadius: 8, border: "1.5px solid " + (a ? "var(--green)" : "var(--line)"),
-                    background: a ? "var(--green)" : "#fff", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 15, cursor: canEdit ? "pointer" : "default"}}>{a ? "✓" : ""}</span>
-                <span className="cm-rost-name" style={{flex: 1, cursor: "pointer"}} onClick={() => setDetail(r)}>{r.name}{mergePartner && r._cid !== cls.id && <span className="cm-day-sub" style={{marginLeft: 5, fontSize: 10}}>{mergePartner.name}</span>}</span>
-                <span className="cm-rost-t" style={{cursor: "pointer"}} onClick={() => setDetail(r)}>{a ? hhmm(a.time) : "미출석"} ›</span>
+                  style={{width: 26, height: 26, flex: "none", borderRadius: 8, border: "1.5px solid " + boxColor,
+                    background: a ? "var(--green)" : vdone ? "#e3edf5" : planned ? "#f6e7df" : "#fff",
+                    color: a ? "#fff" : vdone ? "#2b5f8a" : "#c2703f", display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: a ? 15 : 12, fontWeight: 700, cursor: canEdit ? "pointer" : "default"}}>{a ? "✓" : vdone ? "영" : planned ? "예" : ""}</span>
+                <span className="cm-rost-name" style={{flex: 1, cursor: "pointer"}} onClick={() => setDetail(r)}>
+                  {r.name}
+                  {mergePartner && r._cid !== cls.id && <span className="cm-day-sub" style={{marginLeft: 5, fontSize: 10}}>{mergePartner.name}</span>}
+                  {!a && vdone && <span className="cm-chip" style={{marginLeft: 6, background: "#e3edf5", color: "#2b5f8a", fontSize: 11}}>동영상 보강</span>}
+                  {!a && planned && !vdone && <span className="cm-chip" style={{marginLeft: 6, background: "#f6e7df", color: "#c2703f", fontSize: 11}}>결석 예정{mk.memo ? " · " + mk.memo : ""}</span>}
+                </span>
+                <span className="cm-rost-t" style={{cursor: "pointer"}} onClick={() => setDetail(r)}>{a ? hhmm(a.time) : (planned || vdone ? "" : "미출석")} ›</span>
               </div>
             );
           })}
