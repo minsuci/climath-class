@@ -907,6 +907,7 @@ function StudentGate({ onClsChange }) {
     if (candidates.length === 1) setCls(candidates[0].cls);
   }
   function fullLogout() { setMatches(null); setCls(null); setPin(""); setErr(""); }
+  const gatePickRef = useSwipeBack(fullLogout);
 
   // ---- 로그인 전 ----
   if (!matches) {
@@ -928,7 +929,7 @@ function StudentGate({ onClsChange }) {
   // ---- 내 반 선택 (여러 반에 속한 경우만) ----
   if (!cls) {
     return (
-      <div className="cm-stack"><div className="cm-card">
+      <div ref={gatePickRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}><div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 12}}>
           <h3 className="cm-h3" style={{margin: 0}}>{matches[0].member.name}님의 수업</h3>
           <button className="cm-link" onClick={fullLogout}>로그아웃</button>
@@ -1655,6 +1656,10 @@ function MakeupCenter({ onBack }) {
   allPending.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   const overdue = allPending.filter((mm) => mm.date < todayStr);
 
+  const backRef1 = useSwipeBack(onBack);
+  const backRef2 = useSwipeBack(() => setPicked(null));
+  const backRef3 = useSwipeBack(() => setPickedDate(null));
+
   // ---- 3단계: 날짜의 수업 선택 ----
   if (picked && pickedDate) {
     const dow = new Date(pickedDate + "T00:00:00").getDay();
@@ -1664,7 +1669,7 @@ function MakeupCenter({ onBack }) {
       return dows.includes(dow);
     });
     return (
-      <div className="cm-stack">
+      <div ref={backRef3} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
         <div className="cm-card">
           <div className="cm-admin-top" style={{marginBottom: 10}}>
             <h2 className="cm-h2" style={{margin: 0}}>{picked.name}</h2>
@@ -1720,7 +1725,7 @@ function MakeupCenter({ onBack }) {
     });
     pastRecords.sort((a, b) => b.date.localeCompare(a.date));
     return (
-      <div className="cm-stack">
+      <div ref={backRef2} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
         <div className="cm-card">
           <div className="cm-admin-top" style={{marginBottom: 10}}>
             <h2 className="cm-h2" style={{margin: 0}}>{picked.name}</h2>
@@ -1784,7 +1789,7 @@ function MakeupCenter({ onBack }) {
 
   // ---- 1단계: 학생 목록 (가나다순, 이름 통합) ----
   return (
-    <div className="cm-stack">
+    <div ref={backRef1} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 12}}>
           <h2 className="cm-h2" style={{margin: 0}}>보강 관리</h2>
@@ -1846,9 +1851,10 @@ function RiskDashboard({ onBack }) {
   const overdue = data ? data.gaps.filter((g) => g.gapDays === null || g.gapDays >= gapDays) : [];
   const counts = { 3: flagged.filter((x) => x.risk === 3).length, 2: flagged.filter((x) => x.risk === 2).length, 1: flagged.filter((x) => x.risk === 1).length };
   const gapText = (g) => g.gapDays === null ? "상담 기록 없음" : g.gapDays + "일째";
+  const riskBackRef = useSwipeBack(onBack);
 
   return (
-    <div className="cm-stack">
+    <div ref={riskBackRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 12}}>
           <h2 className="cm-h2" style={{margin: 0}}>위험신호</h2>
@@ -2633,8 +2639,9 @@ function ClassCreate({ me, onDone, onCancel }) {
       onDone(newId);
     } catch (e) { setMsg("생성 실패: " + e.message); setBusy(false); }
   }
+  const ccBackRef = useSwipeBack(onCancel);
   return (
-    <div className="cm-card">
+    <div ref={ccBackRef} className="cm-card cm-slide-in" style={{willChange: "transform"}}>
       <h2 className="cm-h2">새 반 만들기</h2>
       <label className="cm-label">반 이름</label>
       <input className="cm-input" placeholder="예: 고2 정규반" value={name} onChange={(e) => setName(e.target.value)} />
@@ -2682,8 +2689,9 @@ function TeacherRegister({ onDone, onCancel }) {
     await addTeacher(name.trim(), p1, sel, "teacher", "pending");
     onDone();
   }
+  const trBackRef = useSwipeBack(onCancel);
   return (
-    <div className="cm-card">
+    <div ref={trBackRef} className="cm-card cm-slide-in" style={{willChange: "transform"}}>
       <h2 className="cm-h2">새 선생님 등록</h2>
       <label className="cm-label">이름</label>
       <input className="cm-input" value={name} onChange={(e) => setName(e.target.value)} />
@@ -2727,8 +2735,9 @@ function TeacherManage({ me, teachers, onRefresh, onBack }) {
     await deleteTeacher(t.tid);
     onRefresh();
   }
+  const tmBackRef = useSwipeBack(onBack);
   return (
-    <div className="cm-stack">
+    <div ref={tmBackRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-card">
         <h2 className="cm-h2">선생님 관리</h2>
         {teachers.map((t) => (
