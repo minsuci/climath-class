@@ -1607,6 +1607,169 @@ function ScoreForm({ cls, me }) {
 }
 
 // ===== 선생님 화면 =====
+// 학생의 다가올 수업 날짜 계산 (요일 기반, weeks주 앞까지)
+function upcomingSessions(cls, st, weeks) {
+  const out = [];
+  const dows = isIndividual(cls) ? (st.days || []) : (cls.classDays || []);
+  if (dows.length === 0) return out;
+  const start = new Date(todayStr + "T00:00:00");
+  const end = new Date(start); end.setDate(end.getDate() + (weeks || 8) * 7);
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    if (!dows.includes(d.getDay())) continue;
+    const ds = ymd(d);
+    if (!isActiveOn(st, ds)) continue;
+    out.push(ds);
+  }
+  return out;
+}
+
+function MakeupCenter({ onBack }) {
+  const [picked, setPicked] = useState(null); // { cls, st }
+  const [mkByClass, setMkByClass] = useState({});
+  const [q, setQ] = useState("");
+  const [weeks, setWeeks] = useState(8);
+
+  useEffect(() => {
+    const unsubs = CLASSES.map((c) => listenMakeups(c.id, (m) => setMkByClass((p) => ({ ...p, [c.id]: m }))));
+    return () => unsubs.forEach((u) => u && u());
+  }, []);
+
+  // 전체 학생 (반 정보 포함)
+  const everyone = [];
+  CLASSES.forEach((c) => (c.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => everyone.push({ cls: c, st })));
+  const norm = (s) => (s || "").replace(/\s+/g, "");
+  const filtered = q ? everyone.filter((x) => norm(x.st.name).includes(norm(q))) : everyone;
+
+  const mkOf = (cid, sid, date) => (mkByClass[cid] || {})[sid + "_" + date];
+  // 전체 미완료 보강
+  const allPending = [];
+  CLASSES.forEach((c) => Object.values(mkByClass[c.id] || {}).forEach((m) => {
+    if (m.planned && !m.videoDone) allPending.push({ ...m, cname: c.name, cid: c.id });
+  }));
+  allPending.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const overdue = allPending.filter((m) => m.date < todayStr);
+
+  // ---- 학생 상세: 다가올 수업 체크 ----
+  if (picked) {
+    const { cls, st } = picked;
+    const dates = upcomingSessions(cls, st, weeks);
+    const past = Object.values(mkByClass[cls.id] || {})
+      .filter((m) => m.sid === st.id && m.date < todayStr)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    return (
+      <div className="cm-stack">
+        <div className="cm-card">
+          <div className="cm-admin-top" style={{marginBottom: 10}}>
+            <h2 className="cm-h2" style={{margin: 0}}>{st.name}</h2>
+            <button className="cm-link" onClick={() => setPicked(null)}>← 목록</button>
+          </div>
+          <div style={{fontSize: 13, color: "var(--muted)"}}>{cls.name}</div>
+          <div className="cm-hint" style={{marginTop: 10}}>빠지는 날을 눌러서 표시하세요. 한 번 더 누르면 <b>동영상 보강 완료</b>, 또 누르면 해제돼요.</div>
+          <div style={{display: "flex", gap: 6, marginTop: 10}}>
+            {[4, 8, 12].map((w) => (
+              <button key={w} className={"cm-ab-tab" + (weeks === w ? " on" : "")} onClick={() => setWeeks(w)}>{w}주</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="cm-card">
+          <h3 className="cm-h3">다가올 수업</h3>
+          {dates.length === 0 && <div className="cm-empty">예정된 수업이 없어요 (요일 설정을 확인해주세요)</div>}
+          <div style={{display: "flex", flexWrap: "wrap", gap: 8}}>
+            {dates.map((d) => {
+              const m = mkOf(cls.id, st.id, d) || {};
+              const on = m.planned;
+              const vd = m.videoDone;
+              return (
+                <button key={d} onClick={() => {
+                  if (vd) clearMakeup(cls.id, st.id, d);
+                  else if (on) setMakeup(cls.id, st.id, st.name, d, { videoDone: true });
+                  else setMakeup(cls.id, st.id, st.name, d, { planned: true, videoDone: false });
+                }}
+                  style={{
+                    border: "1.5px solid " + (vd ? "#2b5f8a" : on ? "#c2703f" : "var(--line)"),
+                    background: vd ? "#e3edf5" : on ? "#f6e7df" : "#fff",
+                    color: vd ? "#2b5f8a" : on ? "#c2703f" : "var(--ink)",
+                    borderRadius: 10, padding: "9px 12px", cursor: "pointer", fontFamily: "inherit",
+                    fontSize: 13, minWidth: 84, textAlign: "center", lineHeight: 1.35,
+                  }}>
+                  <div style={{fontWeight: 600}}>{fmtDate(d)}</div>
+                  <div style={{fontSize: 11, marginTop: 2}}>{vd ? "동영상 완료" : on ? "결석 예정" : "정상"}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {past.length > 0 && (
+          <div className="cm-card">
+            <h3 className="cm-h3">지난 기록</h3>
+            {past.map((m) => (
+              <div key={m.date} style={{display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid var(--line)"}}>
+                <span style={{fontSize: 13}}>{fmtDate(m.date)}</span>
+                <span className="cm-chip" style={{background: m.videoDone ? "#e3edf5" : "#fae3e2", color: m.videoDone ? "#2b5f8a" : "#d6453f"}}>
+                  {m.videoDone ? "동영상 완료" : "미이수"}
+                </span>
+                <span style={{marginLeft: "auto", display: "flex", gap: 4}}>
+                  {!m.videoDone && <button className="cm-link" onClick={() => setMakeup(cls.id, st.id, st.name, m.date, { videoDone: true })}>보강 완료</button>}
+                  <button className="cm-link" style={{color: "#d6453f"}} onClick={() => clearMakeup(cls.id, st.id, m.date)}>삭제</button>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ---- 학생 목록 ----
+  return (
+    <div className="cm-stack">
+      <div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 12}}>
+          <h2 className="cm-h2" style={{margin: 0}}>보강 관리</h2>
+          <button className="cm-link" onClick={onBack}>← 돌아가기</button>
+        </div>
+        <input className="cm-input" style={{margin: 0}} placeholder="학생 이름 검색" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="cm-hint" style={{marginTop: 8}}>학생을 고르면 그 학생의 <b>다가올 수업 날짜</b>가 나와요. 빠지는 날을 눌러 표시하세요.</div>
+      </div>
+
+      {overdue.length > 0 && (
+        <div className="cm-card" style={{borderLeft: "4px solid #d6453f"}}>
+          <h3 className="cm-h3" style={{color: "#d6453f"}}>보강 안 한 결석 {overdue.length}건</h3>
+          {overdue.map((m) => (
+            <div key={m.cid + m.sid + m.date} style={{display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid var(--line)", flexWrap: "wrap"}}>
+              <strong>{m.sname}</strong>
+              <span className="cm-day-sub">{m.cname}</span>
+              <span style={{fontSize: 13, color: "var(--muted)"}}>{fmtDate(m.date)}</span>
+              <button className="cm-link" style={{marginLeft: "auto"}} onClick={() => setMakeup(m.cid, m.sid, m.sname, m.date, { videoDone: true })}>보강 완료</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="cm-card">
+        <h3 className="cm-h3">학생 {filtered.length}명</h3>
+        {filtered.length === 0 && <div className="cm-empty">검색 결과가 없어요</div>}
+        {filtered.map(({ cls, st }) => {
+          const mine = Object.values(mkByClass[cls.id] || {}).filter((m) => m.sid === st.id);
+          const pend = mine.filter((m) => m.planned && !m.videoDone).length;
+          return (
+            <button key={cls.id + st.id} className="cm-day" onClick={() => setPicked({ cls, st })}>
+              <div className="cm-day-left">
+                <span className="cm-day-date">{st.name}</span>
+                <span className="cm-day-sub">{cls.name}</span>
+                {pend > 0 && <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f"}}>결석 {pend}</span>}
+              </div>
+              <span className="cm-day-arrow">›</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function RiskDashboard({ onBack }) {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("flag"); // flag | gap
@@ -1815,6 +1978,7 @@ function AdminView() {
 
   // ---- 위험신호 대시보드 ----
   if (mode === "risk") return <RiskDashboard onBack={() => setMode("login")} />;
+  if (mode === "makeup") return <MakeupCenter onBack={() => setMode("login")} />;
 
   // ---- 반 선택 ----
   if (!cls) {
@@ -1834,6 +1998,7 @@ function AdminView() {
           ))}
         </div>
         <button className="cm-link" onClick={() => setMode("risk")}>⚠ 위험신호</button>
+        <button className="cm-link" onClick={() => setMode("makeup")}>▷ 보강 관리</button>
         <button className="cm-link" onClick={() => setMode("newclass")}>+ 새 반 만들기</button>
         {me.role === "owner" && <button className="cm-link" onClick={() => setMode("manage")}>⚙ 선생님 관리</button>}
       </div></div>
