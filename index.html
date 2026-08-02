@@ -2050,7 +2050,22 @@ function AdminView() {
 
   // ---- 반 선택 ----
   if (!cls) {
-    return (
+    return (<>
+      <Sidebar title={me.name + " 선생님"} active="classes" onSelect={(k) => {
+        if (k === "classes") return;
+        if (k === "logout") { logout(); return; }
+        setMode(k);
+      }}
+        items={[
+          { key: "classes", ico: "▤", label: "내 수업" },
+          { sep: true },
+          { key: "makeup", ico: "▷", label: "보강 관리" },
+          { key: "risk", ico: "⚠", label: "위험신호" },
+          { sep: true },
+          { key: "newclass", ico: "+", label: "새 반 만들기" },
+          ...(me.role === "owner" ? [{ key: "manage", ico: "⚙", label: "선생님 관리" }] : []),
+          { key: "logout", ico: "→", label: "로그아웃" },
+        ]} />
       <div className="cm-stack"><div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 12}}>
           <h3 className="cm-h3" style={{margin: 0}}>{me.name} 선생님</h3>
@@ -2065,12 +2080,8 @@ function AdminView() {
             </button>
           ))}
         </div>
-        <button className="cm-link" onClick={() => setMode("risk")}>⚠ 위험신호</button>
-        <button className="cm-link" onClick={() => setMode("makeup")}>▷ 보강 관리</button>
-        <button className="cm-link" onClick={() => setMode("newclass")}>+ 새 반 만들기</button>
-        {me.role === "owner" && <button className="cm-link" onClick={() => setMode("manage")}>⚙ 선생님 관리</button>}
       </div></div>
-    );
+    </>);
   }
   return <AdminDays cls={cls} canEdit={canEdit(cls)} isOwner={me.role === "owner"} meName={me.name} onBack={() => setCls(null)} />;
 }
@@ -2838,8 +2849,6 @@ function useSwipeBack(onBack) {
 
 function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
   const [rosterVer, bumpVer] = useState(0);
-  const [mkAll, setMkAll] = useState({});
-  useEffect(() => listenMakeups(cls.id, setMkAll), [cls.id]);
   const [selected, setSelected] = useState(null);
   const [days, setDays] = useState(null);
   const [activeView, setActiveView] = useState("days"); // "days" | "book"
@@ -2878,7 +2887,6 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
         { key: "days", ico: "▤", label: "날짜별" },
         { key: "book", ico: "▦", label: "월간 출석부" },
         { sep: true },
-        { key: "makeup", ico: "▷", label: "보강 관리", badge: Object.values(mkAll).filter((m) => m.planned && !m.videoDone).length },
         { key: "notice", ico: "◑", label: "공지", badge: (hasActive ? 1 : 0) + Object.values(activeDms || {}).filter((v) => v && v.active && v.text).length },
         { key: "progress", ico: "◈", label: "진도표" },
         { key: "notes", ico: "✎", label: "강의노트" },
@@ -2892,13 +2900,6 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
         <div className="cm-daybar-date">{cls.name}{!canEdit && <span className="cm-day-sub">열람 전용</span>}</div>
       </div>
-
-      {activeView === "makeup" && (
-        <div className="cm-card">
-          <h3 className="cm-h3">보강 관리 <span className="cm-h-hint">(결석 예정 · 동영상 보강)</span></h3>
-          <MakeupManager cls={cls} canEdit={canEdit} />
-        </div>
-      )}
 
       {activeView === "notice" && (<>
       {/* 전체 공지 */}
@@ -3061,99 +3062,6 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
 }
 
 // ===== 월간 출석부 =====
-function MakeupManager({ cls, canEdit }) {
-  const [makeups, setMakeups] = useState({});
-  const [adding, setAdding] = useState(false);
-  const [sid, setSid] = useState("");
-  const [date, setDate] = useState(todayStr);
-  const [memo, setMemo] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-  useEffect(() => listenMakeups(cls.id, setMakeups), [cls.id]);
-
-  const students = cls.roster.filter((r) => !r.teacher && !isEnded(r));
-  const list = Object.values(makeups).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-  const pending = list.filter((m) => m.planned && !m.videoDone);
-  const done = list.filter((m) => m.videoDone);
-  const upcoming = pending.filter((m) => m.date >= todayStr);
-  const overdue = pending.filter((m) => m.date < todayStr);
-
-  async function add() {
-    if (busy) return;
-    const target = sid || (students[0] && students[0].id);
-    if (!target) { setMsg("학생을 선택해주세요"); return; }
-    const st = students.find((s) => s.id === target);
-    setBusy(true); setMsg("");
-    try {
-      await setMakeup(cls.id, target, st.name, date, { planned: true, videoDone: false, memo: memo.trim() });
-      setAdding(false); setMemo(""); setSid("");
-    } catch (e) { setMsg("저장 실패: " + e.message); }
-    setBusy(false);
-  }
-
-  const Row = ({ m, tone }) => (
-    <div style={{display: "flex", alignItems: "center", gap: 8, padding: "11px 0", borderBottom: "1px solid var(--line)", flexWrap: "wrap"}}>
-      <strong>{m.sname}</strong>
-      <span className="cm-chip" style={{background: tone === "done" ? "#e3edf5" : tone === "over" ? "#fae3e2" : "#f6e7df",
-        color: tone === "done" ? "#2b5f8a" : tone === "over" ? "#d6453f" : "#c2703f"}}>
-        {tone === "done" ? "동영상 완료" : tone === "over" ? "미이수" : "결석 예정"}
-      </span>
-      <span style={{fontSize: 13, color: "var(--muted)"}}>{fmtDate(m.date)}</span>
-      {m.memo && <span style={{fontSize: 12, color: "var(--muted)", width: "100%"}}>· {m.memo}</span>}
-      {canEdit && (
-        <span style={{marginLeft: "auto", display: "flex", gap: 4}}>
-          {!m.videoDone && <button className="cm-link" onClick={() => setMakeup(cls.id, m.sid, m.sname, m.date, { videoDone: true })}>보강 완료</button>}
-          {m.videoDone && <button className="cm-link" onClick={() => setMakeup(cls.id, m.sid, m.sname, m.date, { videoDone: false })}>완료 취소</button>}
-          <button className="cm-link" style={{color: "#d6453f"}} onClick={() => { if (confirm(m.sname + " · " + m.date + " 기록을 지울까요?")) clearMakeup(cls.id, m.sid, m.date); }}>삭제</button>
-        </span>
-      )}
-    </div>
-  );
-
-  return (
-    <div>
-      {canEdit && !adding && (
-        <button className="cm-btn cm-btn-ghost" style={{marginTop: 0, marginBottom: 14}} onClick={() => { setAdding(true); setSid(students[0] ? students[0].id : ""); setDate(todayStr); }}>
-          + 결석 예정 등록
-        </button>
-      )}
-      {canEdit && adding && (
-        <div style={{borderBottom: "1px solid var(--line)", paddingBottom: 14, marginBottom: 12}}>
-          <label className="cm-label">학생</label>
-          <select className="cm-input" value={sid} onChange={(e) => setSid(e.target.value)}>
-            {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <label className="cm-label">결석하는 날</label>
-          <input className="cm-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          <label className="cm-label">메모 <span className="cm-h-hint">(선택)</span></label>
-          <input className="cm-input" placeholder="예: 학교 행사" value={memo} onChange={(e) => setMemo(e.target.value)} />
-          {msg && <div className="cm-err">{msg}</div>}
-          <div style={{display: "flex", gap: 10}}>
-            <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy} onClick={add}>{busy ? "저장 중..." : "등록"}</button>
-            <button className="cm-btn cm-btn-ghost" style={{margin: 0}} onClick={() => { setAdding(false); setMsg(""); }}>취소</button>
-          </div>
-        </div>
-      )}
-
-      {overdue.length > 0 && (<>
-        <div className="cm-mini-h" style={{color: "#d6453f"}}>보강 안 한 결석 {overdue.length}건</div>
-        {overdue.map((m) => <Row key={m.sid + m.date} m={m} tone="over" />)}
-      </>)}
-
-      <div className="cm-mini-h" style={{marginTop: overdue.length ? 18 : 0}}>결석 예정 {upcoming.length}건</div>
-      {upcoming.length === 0 ? <div className="cm-empty">예정된 결석이 없어요</div>
-        : upcoming.map((m) => <Row key={m.sid + m.date} m={m} tone="plan" />)}
-
-      {done.length > 0 && (
-        <details style={{marginTop: 18}}>
-          <summary style={{cursor: "pointer", fontSize: 13, color: "var(--muted)"}}>동영상 보강 완료 {done.length}건</summary>
-          {done.slice().reverse().map((m) => <Row key={m.sid + m.date} m={m} tone="done" />)}
-        </details>
-      )}
-    </div>
-  );
-}
-
 function AttendanceBook({ cls, canEdit }) {
   const students = cls.roster.filter((r) => !r.teacher);
   const [days, setDays] = React.useState([]);
