@@ -57,6 +57,39 @@ html,body{margin:0; padding:0;}
 .cm-side-sep{height:1px; background:var(--line); margin:9px 12px;}
 .cm-backdrop{display:none;}
 
+/* ===== 학습관리 보고서 (A4 인쇄) ===== */
+.rp-sheet{background:#fff; color:#1c2333; padding:26px 28px; border-radius:14px; border:1px solid var(--line); font-size:13px; line-height:1.6;}
+.rp-head{display:flex; align-items:flex-end; justify-content:space-between; border-bottom:2px solid var(--navy); padding-bottom:12px; margin-bottom:18px;}
+.rp-logo{font-family:'Fraunces',serif; font-size:19px; font-weight:600; letter-spacing:.13em; color:var(--navy);}
+.rp-title{font-size:12px; color:#6b7280; margin-top:3px;}
+.rp-who{text-align:right;}
+.rp-who b{font-size:17px;}
+.rp-sec{margin:18px 0 0;}
+.rp-sec-h{font-family:'Fraunces',serif; font-size:14px; color:var(--navy); font-weight:600; border-left:3px solid var(--clay); padding-left:8px; margin-bottom:9px;}
+.rp-stats{display:flex; gap:10px;}
+.rp-stat{flex:1; background:#f7f4ee; border-radius:10px; padding:11px 8px; text-align:center;}
+.rp-stat b{display:block; font-size:20px; font-family:'Fraunces',serif; color:var(--navy);}
+.rp-stat span{font-size:11px; color:#6b7280;}
+.rp-table{width:100%; border-collapse:collapse; font-size:12.5px;}
+.rp-table th{background:#f7f4ee; padding:7px 9px; text-align:left; font-weight:600; color:#4b5563; border-bottom:1px solid #e5ded2;}
+.rp-table td{padding:7px 9px; border-bottom:1px solid #f0ece5;}
+.rp-bar{height:7px; background:#eee8dd; border-radius:99px; overflow:hidden; min-width:60px;}
+.rp-bar i{display:block; height:100%; background:var(--navy); border-radius:99px;}
+.rp-note{background:#f7f4ee; border-radius:10px; padding:12px 14px; white-space:pre-wrap; min-height:56px;}
+.rp-consult{padding:9px 0; border-bottom:1px solid #f0ece5;}
+.rp-consult:last-child{border-bottom:0;}
+.rp-foot{margin-top:22px; padding-top:11px; border-top:1px solid #e5ded2; font-size:11px; color:#9ca3af; display:flex; justify-content:space-between;}
+
+@media print{
+  @page{size:A4; margin:14mm;}
+  body{background:#fff;}
+  .cm-header, .cm-side, .cm-backdrop, .cm-hamb, .rp-noprint{display:none !important;}
+  .cm-shell > .cm-main{display:block; max-width:none; padding:0;}
+  .cm-main > *{max-width:none !important; padding-top:0 !important;}
+  .rp-sheet{border:0; border-radius:0; padding:0; font-size:12px;}
+  .rp-sheet + .rp-sheet{page-break-before:always;}
+}
+
 @media (max-width: 860px){
   .cm-hamb{display:flex;}
   .cm-shell > .cm-main{display:block; max-width:560px; padding:22px 16px 40px;}
@@ -640,6 +673,73 @@ const catInfo = (k) => CONSULT_CATS.find((c) => c.key === k) || { label: k, colo
 const CONSULT_WITH = [{ key: "student", label: "학생" }, { key: "parent", label: "학부모" }];
 
 const consultCol = () => db.collection("consultations");
+
+// ----- 학습관리 보고서 (reports 컬렉션) -----
+// 문서 id = "{cid}_{sid}_{YYYY-MM}"
+const reportsCol = () => db.collection("reports");
+const reportId = (cid, sid, ym) => cid + "_" + sid + "_" + ym;
+async function getReport(cid, sid, ym) {
+  const d = await reportsCol().doc(reportId(cid, sid, ym)).get();
+  return d.exists ? d.data() : null;
+}
+async function saveReport(cid, sid, ym, data) {
+  await reportsCol().doc(reportId(cid, sid, ym)).set({ cid, sid, ym, ...data, updated: Date.now() }, { merge: true });
+}
+// 이전 달 스냅샷 (진도 증가분 계산용)
+function prevYM(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m - 2, 1);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+}
+
+// 한 학생의 월간 보고서 데이터 집계
+async function buildReportData(cls, st, ym) {
+  // 1) 출석: 해당 월 수업일
+  const allDays = await listDays(cls.id);
+  const monthDays = allDays.filter((d) => d.startsWith(ym)).sort();
+  const myDays = monthDays.filter((d) => attendsOn(cls, st, d));
+  let present = 0;
+  const absentDates = [];
+  for (const d of myDays) {
+    const doc = await attCol(cls.id, d).doc(st.id).get();
+    if (doc.exists) present++; else absentDates.push(d);
+  }
+  // 보강 정보
+  const mkSnap = await makeupCol(cls.id).get();
+  const mk = {};
+  mkSnap.forEach((d) => { const v = d.data(); if (v.sid === st.id && (v.date || "").startsWith(ym)) mk[v.date] = v; });
+  const videoDone = absentDates.filter((d) => mk[d] && mk[d].videoDone).length;
+  const planned = absentDates.filter((d) => mk[d] && mk[d].planned).length;
+
+  // 2) 과제 진도 (현재 누적 + 지난달 스냅샷 대비 증가분)
+  const hwDoc = await hwCol(cls.id).doc(st.id).get();
+  const hwNow = hwDoc.exists ? (hwDoc.data().books || {}) : {};
+  const prev = await getReport(cls.id, st.id, prevYM(ym));
+  const prevSnap = (prev && prev.hwSnapshot) || null;
+  const books = getStudentBooks(cls, st).map((b) => {
+    const done = (hwNow[b.name] || []).length;
+    const before = prevSnap && prevSnap[b.name] != null ? prevSnap[b.name] : null;
+    return { name: b.name, total: b.total, done, gained: before != null ? done - before : null,
+             pct: b.total > 0 ? Math.round(done / b.total * 100) : 0 };
+  });
+  const hwSnapshot = {};
+  books.forEach((b) => { hwSnapshot[b.name] = b.done; });
+
+  // 3) 상담 (해당 월)
+  const cs = await consultCol().where("cid", "==", cls.id).get();
+  const consults = [];
+  cs.forEach((d) => {
+    const v = d.data();
+    if (v.sid === st.id && (v.date || "").startsWith(ym)) consults.push(v);
+  });
+  consults.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+
+  return {
+    sessions: myDays.length, present, absent: myDays.length - present,
+    videoDone, planned, rate: myDays.length > 0 ? Math.round(present / myDays.length * 100) : null,
+    books, hwSnapshot, consults, hasPrev: !!prevSnap,
+  };
+}
 async function addConsult(rec) { await consultCol().add({ ...rec, time: Date.now() }); }
 async function updateConsult(id, patch) { await consultCol().doc(id).update(patch); }
 async function deleteConsult(id) { await consultCol().doc(id).delete(); }
@@ -1638,6 +1738,197 @@ function upcomingSessions(cls, st, weeks) {
   return out;
 }
 
+function ReportSheet({ cls, st, ym, data, comment }) {
+  const ci = (k) => catInfo(k);
+  const [y, m] = ym.split("-");
+  return (
+    <div className="rp-sheet">
+      <div className="rp-head">
+        <div>
+          <div className="rp-logo">CLIMATH</div>
+          <div className="rp-title">{y}년 {Number(m)}월 학습관리 보고서</div>
+        </div>
+        <div className="rp-who">
+          <b>{st.name}</b>
+          <div style={{fontSize: 11, color: "#6b7280", marginTop: 2}}>{cls.name}</div>
+        </div>
+      </div>
+
+      <div className="rp-sec">
+        <div className="rp-sec-h">출결 현황</div>
+        <div className="rp-stats">
+          <div className="rp-stat"><b>{data.sessions}</b><span>수업일</span></div>
+          <div className="rp-stat"><b>{data.present}</b><span>출석</span></div>
+          <div className="rp-stat"><b>{data.absent}</b><span>결석</span></div>
+          <div className="rp-stat"><b>{data.rate == null ? "-" : data.rate + "%"}</b><span>출석률</span></div>
+        </div>
+        {data.videoDone > 0 && (
+          <div style={{fontSize: 12, color: "#4b5563", marginTop: 8}}>
+            결석 {data.absent}회 중 <b>{data.videoDone}회</b>는 동영상 보강을 완료했습니다.
+          </div>
+        )}
+      </div>
+
+      <div className="rp-sec">
+        <div className="rp-sec-h">교재별 진도</div>
+        {data.books.length === 0 ? <div style={{color: "#9ca3af", fontSize: 12}}>등록된 교재가 없습니다.</div> : (
+          <table className="rp-table">
+            <thead><tr>
+              <th>교재</th><th style={{width: 92}}>진도</th>
+              {data.hasPrev && <th style={{width: 74}}>이번 달</th>}
+              <th style={{width: 108}}>완성률</th>
+            </tr></thead>
+            <tbody>
+              {data.books.map((b) => (
+                <tr key={b.name}>
+                  <td>{b.name}</td>
+                  <td>{b.done} / {b.total}</td>
+                  {data.hasPrev && <td style={{color: b.gained > 0 ? "#2b5f8a" : "#9ca3af", fontWeight: b.gained > 0 ? 600 : 400}}>
+                    {b.gained == null ? "-" : b.gained > 0 ? "+" + b.gained : "0"}
+                  </td>}
+                  <td>
+                    <div style={{display: "flex", alignItems: "center", gap: 7}}>
+                      <div className="rp-bar" style={{flex: 1}}><i style={{width: b.pct + "%"}} /></div>
+                      <span style={{fontSize: 11, color: "#6b7280", width: 30, textAlign: "right"}}>{b.pct}%</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {!data.hasPrev && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 6}}>* 다음 달부터는 한 달간 진행한 분량이 함께 표시됩니다.</div>}
+      </div>
+
+      {data.consults.length > 0 && (
+        <div className="rp-sec">
+          <div className="rp-sec-h">상담 내용</div>
+          {data.consults.map((c, i) => (
+            <div key={i} className="rp-consult">
+              <div style={{fontSize: 11, color: "#6b7280", marginBottom: 3}}>
+                {c.date} · {c.withWho === "parent" ? "학부모 상담" : "학생 면담"} · {ci(c.cat).label}
+              </div>
+              <div>{c.content}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="rp-sec">
+        <div className="rp-sec-h">담당 선생님 코멘트</div>
+        <div className="rp-note">{comment || "(작성 전)"}</div>
+      </div>
+
+      <div className="rp-foot">
+        <span>CLIMATH 수학전문학원</span>
+        <span>발행일 {fmtDate(todayStr)}</span>
+      </div>
+    </div>
+  );
+}
+
+function ReportCenter({ onBack }) {
+  const [picked, setPicked] = useState(null); // { cls, st }
+  const [ym, setYm] = useState(todayStr.slice(0, 7));
+  const [data, setData] = useState(null);
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [q, setQ] = useState("");
+  const backRef = useSwipeBack(onBack);
+  const backRef2 = useSwipeBack(() => setPicked(null));
+
+  const norm = (s) => (s || "").replace(/\s+/g, "");
+  const everyone = [];
+  CLASSES.forEach((c) => (c.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => everyone.push({ cls: c, st })));
+  everyone.sort((a, b) => a.st.name.localeCompare(b.st.name, "ko") || a.cls.name.localeCompare(b.cls.name, "ko"));
+  const filtered = q ? everyone.filter((x) => norm(x.st.name).includes(norm(q))) : everyone;
+
+  const monthOpts = [];
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(); d.setMonth(d.getMonth() - i);
+    monthOpts.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
+  }
+
+  async function load(cls, st, m) {
+    setData(null); setSaved(false); setBusy(true);
+    try {
+      const d = await buildReportData(cls, st, m);
+      const existing = await getReport(cls.id, st.id, m);
+      setData(d);
+      setComment(existing && existing.comment ? existing.comment : "");
+    } catch (e) { alert("불러오기 실패: " + e.message); }
+    setBusy(false);
+  }
+
+  async function save() {
+    if (!picked || !data) return;
+    setBusy(true);
+    try {
+      await saveReport(picked.cls.id, picked.st.id, ym, { comment, hwSnapshot: data.hwSnapshot, sname: picked.st.name, cname: picked.cls.name });
+      setSaved(true);
+    } catch (e) { alert("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+
+  if (picked) {
+    return (
+      <div ref={backRef2} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+        <div className="cm-card rp-noprint">
+          <div className="cm-admin-top" style={{marginBottom: 10}}>
+            <h2 className="cm-h2" style={{margin: 0}}>{picked.st.name}</h2>
+            <button className="cm-link" onClick={() => setPicked(null)}>← 목록</button>
+          </div>
+          <div style={{fontSize: 13, color: "var(--muted)"}}>{picked.cls.name}</div>
+          <label className="cm-label">보고서 기준 월</label>
+          <select className="cm-input" value={ym} onChange={(e) => { setYm(e.target.value); load(picked.cls, picked.st, e.target.value); }}>
+            {monthOpts.map((m) => <option key={m} value={m}>{m.split("-")[0]}년 {Number(m.split("-")[1])}월</option>)}
+          </select>
+          <label className="cm-label">담당 선생님 코멘트</label>
+          <textarea className="cm-input cm-notice-ta" rows={4} placeholder="한 달간 학습 태도, 강점, 보완할 점 등을 적어주세요"
+            value={comment} onChange={(e) => { setComment(e.target.value); setSaved(false); }} />
+          <div style={{display: "flex", gap: 10, flexWrap: "wrap"}}>
+            <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy || !data} onClick={save}>
+              {busy ? "처리 중..." : saved ? "저장됨 ✓" : "코멘트 저장"}
+            </button>
+            <button className="cm-btn cm-btn-ghost" style={{margin: 0}} disabled={!data} onClick={() => window.print()}>인쇄 / PDF 저장</button>
+          </div>
+          <div className="cm-hint" style={{marginTop: 8}}>인쇄 창에서 <b>대상을 "PDF로 저장"</b>으로 바꾸면 파일로 받을 수 있어요. 저장하면 이번 달 진도가 기록돼서 다음 달 보고서에 <b>한 달간 진행 분량</b>이 표시돼요.</div>
+        </div>
+
+        {busy && !data && <div className="cm-card rp-noprint"><div className="cm-empty">집계하는 중…</div></div>}
+        {data && <ReportSheet cls={picked.cls} st={picked.st} ym={ym} data={data} comment={comment} />}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={backRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 12}}>
+          <h2 className="cm-h2" style={{margin: 0}}>학습관리 보고서</h2>
+          <button className="cm-link" onClick={onBack}>← 돌아가기</button>
+        </div>
+        <input className="cm-input" style={{margin: 0}} placeholder="학생 이름 검색" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="cm-hint" style={{marginTop: 8}}>학생을 고르면 출결·진도·상담이 자동으로 집계돼요. 코멘트만 쓰고 인쇄하면 됩니다.</div>
+      </div>
+      <div className="cm-card">
+        <h3 className="cm-h3">학생 {filtered.length}명</h3>
+        {filtered.length === 0 && <div className="cm-empty">검색 결과가 없어요</div>}
+        {filtered.map(({ cls, st }) => (
+          <button key={cls.id + st.id} className="cm-day" onClick={() => { setPicked({ cls, st }); load(cls, st, ym); }}>
+            <div className="cm-day-left">
+              <span className="cm-day-date">{st.name}</span>
+              <span className="cm-day-sub">{cls.name}</span>
+            </div>
+            <span className="cm-day-arrow">›</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MakeupCenter({ onBack }) {
   const [picked, setPicked] = useState(null); // { name, entries:[{cls,st}] }
   const [pickedDate, setPickedDate] = useState(null);
@@ -2064,6 +2355,7 @@ function AdminView() {
   // ---- 위험신호 대시보드 ----
   if (mode === "risk") return <RiskDashboard onBack={() => setMode("login")} />;
   if (mode === "makeup") return <MakeupCenter onBack={() => setMode("login")} />;
+  if (mode === "report") return <ReportCenter onBack={() => setMode("login")} />;
 
   // ---- 반 선택 ----
   if (!cls) {
@@ -2078,6 +2370,7 @@ function AdminView() {
           { sep: true },
           { key: "makeup", ico: "▷", label: "보강 관리" },
           { key: "risk", ico: "⚠", label: "위험신호" },
+          { key: "report", ico: "▣", label: "학습관리 보고서" },
           { sep: true },
           { key: "newclass", ico: "+", label: "새 반 만들기" },
           ...(me.role === "owner" ? [{ key: "manage", ico: "⚙", label: "선생님 관리" }] : []),
