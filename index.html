@@ -969,7 +969,8 @@ const SideCtx = React.createContext({ open: false, setOpen: () => {}, setHasSide
 
 function Sidebar({ items, active, onSelect, title }) {
   const { open, setOpen, setHasSide } = React.useContext(SideCtx);
-  useEffect(() => { setHasSide(true); return () => setHasSide(false); }, []);
+  // 화면 전환 시 새 Sidebar 마운트 → 옛 Sidebar 정리 순서라, 카운터로 관리
+  useEffect(() => { setHasSide((n) => n + 1); return () => setHasSide((n) => n - 1); }, []);
   function pick(key) { onSelect(key); setOpen(false); }
   return (<>
     <div className={"cm-backdrop" + (open ? " show" : "")} onClick={() => setOpen(false)} />
@@ -2433,7 +2434,7 @@ function AdminView() {
       </div></div>
     </>);
   }
-  return <AdminDays cls={cls} canEdit={canEdit(cls)} isOwner={me.role === "owner"} meName={me.name} onBack={() => setCls(null)} />;
+  return <AdminDays cls={cls} canEdit={canEdit(cls)} isOwner={me.role === "owner"} meName={me.name} onGlobal={(k) => { setCls(null); setMode(k === "classes" ? "login" : k); }} onBack={() => setCls(null)} />;
 }
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
@@ -3197,7 +3198,7 @@ function useSwipeBack(onBack) {
   }, []);
 }
 
-function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
+function AdminDays({ cls, canEdit, isOwner, meName, onGlobal, onBack }) {
   const [rosterVer, bumpVer] = useState(0);
   const [selected, setSelected] = useState(null);
   const [days, setDays] = useState(null);
@@ -3228,11 +3229,11 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
   const hasActive = !!(notice && notice.active && notice.text);
   const students = cls.roster.filter((r) => !r.teacher);
 
-  if (selected) return <AdminDay cls={cls} date={selected} canEdit={canEdit} onBack={() => { setSelected(null); refresh(); }} />;
-
-  return (
-    <>
-    <Sidebar title={cls.name} active={activeView} onSelect={setActiveView}
+  const classSide = (
+    <Sidebar title={cls.name} active={activeView} onSelect={(k) => {
+      if (k === "g:classes" || k === "g:makeup" || k === "g:report" || k === "g:risk") { onGlobal && onGlobal(k.slice(2)); return; }
+      setSelected(null); setActiveView(k);
+    }}
       items={[
         { key: "days", ico: "▤", label: "날짜별" },
         { key: "book", ico: "▦", label: "월간 출석부" },
@@ -3244,7 +3245,18 @@ function AdminDays({ cls, canEdit, isOwner, meName, onBack }) {
         { key: "consult", ico: "◉", label: "상담" },
         { sep: true },
         { key: "textbooks", ico: "⚙", label: "설정" },
+        { sep: true },
+        { key: "g:makeup", ico: "▷", label: "보강 관리" },
+        { key: "g:report", ico: "▣", label: "학습관리 보고서" },
+        { key: "g:classes", ico: "←", label: "반 목록" },
       ]} />
+  );
+
+  if (selected) return <AdminDay cls={cls} date={selected} canEdit={canEdit} side={classSide} onBack={() => { setSelected(null); refresh(); }} />;
+
+  return (
+    <>
+    {classSide}
     <div ref={daysRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
@@ -3743,7 +3755,7 @@ function QuestionQueue({ questions, clsId, date, canEdit, books, merged }) {
   );
 }
 
-function AdminDay({ cls, date, canEdit, onBack }) {
+function AdminDay({ cls, date, canEdit, side, onBack }) {
   const [attendance, setAttendance] = useState({});
   const [questions, setQuestions] = useState([]);
   const [hwDone, setHwDone] = useState({});
@@ -3797,6 +3809,8 @@ function AdminDay({ cls, date, canEdit, onBack }) {
   if (detail) return <StudentDetail cls={findClass(detail._cid) || cls} student={detail} hwDone={{ [detail.id]: hwDone[detail._key] || {} }} questioned={{ [detail.id]: questioned[detail._key] || {} }} canEdit={canEdit} onBack={() => setDetail(null)} />;
 
   return (
+    <>
+    {side}
     <div ref={dayRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 날짜 선택</button>
@@ -3881,6 +3895,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
       </div>
 
     </div>
+    </>
   );
 }
 
@@ -3936,7 +3951,7 @@ function App() {
   const urlClass = findClass(params.get("class"));
   const [gateCls, setGateCls] = useState(null);
   const [sideOpen, setSideOpen] = useState(false);
-  const [hasSide, setHasSide] = useState(false);
+  const [hasSide, setHasSide] = useState(0);
 
   let sub, main;
   if (isAdmin) { sub = "수업 관리"; main = <AdminView />; }
@@ -3946,7 +3961,7 @@ function App() {
   return (
     <SideCtx.Provider value={{ open: sideOpen, setOpen: setSideOpen, setHasSide }}>
       <header className="cm-header">
-        {hasSide && <button className="cm-hamb" onClick={() => setSideOpen(true)}>☰</button>}
+        {hasSide > 0 && <button className="cm-hamb" onClick={() => setSideOpen(true)}>☰</button>}
         <div className="cm-brand" style={{flex: 1}}><span className="cm-logo">CLIMATH</span><span className="cm-sub">{sub}</span></div>
       </header>
       <div className="cm-shell"><main className="cm-main">{main}</main></div>
