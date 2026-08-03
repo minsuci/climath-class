@@ -246,13 +246,14 @@ details[open] .cm-resolved-summary::before { content: "▼ "; }
 .cm-ab-month-sel { font-size: 13px; border: 1px solid #d4c9b8; border-radius: 8px; padding: 4px 8px; font-family: inherit; color: #2c3e5c; background: #fff; margin-bottom: 12px; }
 .cm-q-resolved{font-size:13px; color:var(--green); font-weight:700; white-space:nowrap;}
 
-.cm-roster{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
-.cm-rost{display:flex; justify-content:space-between; align-items:center; padding:11px 13px; border-radius:10px; background:#f3ede0; font-size:14px; color:var(--muted); border:1px solid transparent; width:100%; cursor:pointer; font-family:inherit; text-align:left; transition:border-color .15s, transform .08s;}
+.cm-roster{display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:stretch;}
+.cm-rost{display:flex; justify-content:space-between; align-items:center; padding:10px 11px; border-radius:10px; background:#f3ede0; font-size:14px; color:var(--muted); border:1px solid transparent; width:100%; cursor:pointer; font-family:inherit; text-align:left; transition:border-color .15s, transform .08s; min-height:52px; overflow:hidden;}
 .cm-rost:hover{border-color:var(--navy2);}
 .cm-rost:active{transform:translateY(1px);}
 .cm-rost.in{background:#e7f0ea; color:var(--navy); font-weight:500;}
-.cm-rost-name{font-weight:700;}
-.cm-rost-t{font-size:12px;}
+.cm-rost-name{font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0;}
+.cm-rost-t{font-size:11px; white-space:nowrap; flex:none;}
+.cm-rost-sub{display:block; font-size:10px; font-weight:500; color:#9a8f80; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 
 .cm-hw-row{display:flex; gap:12px; padding:11px 0; border-bottom:1px solid var(--line); align-items:flex-start;}
 .cm-hw-row:last-child{border-bottom:0;}
@@ -3854,13 +3855,14 @@ function AdminDay({ cls, date, canEdit, side, onBack }) {
                     background: a ? "var(--green)" : vdone ? "#e3edf5" : planned ? "#f6e7df" : "#fff",
                     color: a ? "#fff" : vdone ? "#2b5f8a" : "#c2703f", display: "flex", alignItems: "center", justifyContent: "center",
                     fontSize: a ? 15 : 12, fontWeight: 700, cursor: canEdit ? "pointer" : "default"}}>{a ? "✓" : vdone ? "영" : planned ? "예" : ""}</span>
-                <span className="cm-rost-name" style={{flex: 1, cursor: "pointer"}} onClick={() => setDetail(r)}>
-                  {r.name}
-                  {mergePartner && r._cid !== cls.id && <span className="cm-day-sub" style={{marginLeft: 5, fontSize: 10}}>{mergePartner.name}</span>}
-                  {!a && vdone && <span className="cm-chip" style={{marginLeft: 6, background: "#e3edf5", color: "#2b5f8a", fontSize: 11}}>동영상 보강</span>}
-                  {!a && planned && !vdone && <span className="cm-chip" style={{marginLeft: 6, background: "#f6e7df", color: "#c2703f", fontSize: 11}}>결석 예정{mk.memo ? " · " + mk.memo : ""}</span>}
+                <span style={{flex: 1, minWidth: 0, cursor: "pointer"}} onClick={() => setDetail(r)}>
+                  <span className="cm-rost-name" style={{display: "block"}}>{r.name}</span>
+                  <span className="cm-rost-sub">
+                    {mergePartner && r._cid !== cls.id ? mergePartner.name + " · " : ""}
+                    {a ? hhmm(a.time) : vdone ? "동영상 보강" : planned ? ("결석 예정" + (mk.memo ? " · " + mk.memo : "")) : "미출석"}
+                  </span>
                 </span>
-                <span className="cm-rost-t" style={{cursor: "pointer"}} onClick={() => setDetail(r)}>{a ? hhmm(a.time) : (planned || vdone ? "" : "미출석")} ›</span>
+                <span className="cm-rost-t" style={{cursor: "pointer", color: "#b3a89a"}} onClick={() => setDetail(r)}>›</span>
               </div>
             );
           })}
