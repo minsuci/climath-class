@@ -438,7 +438,7 @@ function listenMakeups(cid, cb) {
   }, () => cb({}));
 }
 
-async function setAttendance(cid, date, student, on) {
+async function markAttendance(cid, date, student, on) {
   if (on) await attCol(cid, date).doc(student.id).set({ name: student.name, time: Date.now(), byTeacher: true });
   else await attCol(cid, date).doc(student.id).delete();
   touchDay(cid, date);
@@ -3812,9 +3812,9 @@ function AdminDay({ cls, date, canEdit, onBack }) {
           {canEdit && roster.length > 0 && (
             <button className="cm-link" style={{marginLeft: "auto"}} onClick={async () => {
               const missing = roster.filter((r) => !attendance[r._key]);
-              if (missing.length === 0) { if (confirm("모두 출석 상태예요. 전체 출석을 취소할까요?")) { for (const r of roster) await setAttendance(r._cid, date, r, false); } return; }
+              if (missing.length === 0) { if (confirm("모두 출석 상태예요. 전체 출석을 취소할까요?")) { for (const r of roster) await markAttendance(r._cid, date, r, false); } return; }
               if (!confirm("미출석 " + missing.length + "명을 모두 출석 처리할까요?")) return;
-              for (const r of missing) await setAttendance(r._cid, date, r, true);
+              for (const r of missing) await markAttendance(r._cid, date, r, true);
             }}>{roster.every((r) => attendance[r._key]) ? "전체 취소" : "전체 출석"}</button>
           )}
         </div>
@@ -3827,7 +3827,7 @@ function AdminDay({ cls, date, canEdit, onBack }) {
             const boxColor = a ? "var(--green)" : vdone ? "#2b5f8a" : planned ? "#c2703f" : "var(--line)";
             return (
               <div key={r._key} className={"cm-rost " + (a ? "in" : "")} style={{display: "flex", alignItems: "center", gap: 10, cursor: "default", opacity: planned && !vdone ? .8 : 1}}>
-                <span onClick={(e) => { e.stopPropagation(); if (canEdit) setAttendance(r._cid, date, r, !a); }}
+                <span onClick={(e) => { e.stopPropagation(); if (canEdit) markAttendance(r._cid, date, r, !a); }}
                   title={canEdit ? "탭하여 출석 처리" : ""}
                   style={{width: 26, height: 26, flex: "none", borderRadius: 8, border: "1.5px solid " + boxColor,
                     background: a ? "var(--green)" : vdone ? "#e3edf5" : planned ? "#f6e7df" : "#fff",
