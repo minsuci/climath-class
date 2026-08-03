@@ -980,6 +980,8 @@ function Sidebar({ items, active, onSelect, title }) {
       {title && <div className="cm-side-title">{title}</div>}
       {items.map((it, i) => it.sep
         ? <div key={"s" + i} className="cm-side-sep" />
+        : it.group
+        ? <div key={"g" + i} className="cm-side-title" style={{paddingTop: 4}}>{it.group}</div>
         : (
           <button key={it.key} disabled={it.disabled}
             className={"cm-side-btn" + (active === it.key ? " on" : "")}
@@ -2272,6 +2274,8 @@ function AdminView() {
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
   const [mode, setMode] = useState("login"); // login | register | manage
+  const [classView, setClassView] = useState("days"); // 반 내부 화면
+  const [dayPick, setDayPick] = useState(null); // 선택한 날짜
   const [editOrder, setEditOrder] = useState(false);
   const [orderList, setOrderList] = useState(null); // 편집 중 임시 순서
   const [orderBusy, setOrderBusy] = useState(false);
@@ -2345,11 +2349,14 @@ function AdminView() {
   }
 
   // ---- 전역 메뉴 사이드바 (반 내부가 아닌 모든 화면 공통) ----
+  // ---- 통합 사이드바: 어느 화면에서든 항목 위치가 동일 ----
+  const activeKey = cls ? "c:" + classView : (mode === "login" ? "classes" : mode);
   const homeSide = (
-    <Sidebar title={me.name + " 선생님"} active={mode === "login" ? "classes" : mode} onSelect={(k) => {
-      if (k === "classes") { setMode("login"); return; }
+    <Sidebar title={me.name + " 선생님"} active={activeKey} onSelect={(k) => {
+      if (k.startsWith("c:")) { setClassView(k.slice(2)); setDayPick(null); return; }
+      if (k === "classes") { setCls(null); setMode("login"); return; }
       if (k === "logout") { logout(); return; }
-      setMode(k);
+      setCls(null); setMode(k);
     }}
       items={[
         { key: "classes", ico: "▤", label: "내 수업" },
@@ -2357,6 +2364,18 @@ function AdminView() {
         { key: "makeup", ico: "▷", label: "보강 관리" },
         { key: "risk", ico: "⚠", label: "위험신호" },
         { key: "report", ico: "▣", label: "학습관리 보고서" },
+        ...(cls ? [
+          { sep: true },
+          { group: cls.name },
+          { key: "c:days", ico: "▤", label: "날짜별" },
+          { key: "c:book", ico: "▦", label: "월간 출석부" },
+          { key: "c:notice", ico: "◑", label: "공지" },
+          { key: "c:progress", ico: "◈", label: "진도표" },
+          { key: "c:notes", ico: "✎", label: "강의노트" },
+          { key: "c:ailog", ico: "✦", label: "AI 질문" },
+          { key: "c:consult", ico: "◉", label: "상담" },
+          { key: "c:textbooks", ico: "⚙", label: "반 설정" },
+        ] : []),
         { sep: true },
         { key: "newclass", ico: "+", label: "새 반 만들기" },
         ...(me.role === "owner" ? [{ key: "manage", ico: "⚙", label: "선생님 관리" }] : []),
@@ -2394,7 +2413,7 @@ function AdminView() {
         {!editOrder && (
           <div className="cm-daylist">
             {CLASSES.map((c) => (
-              <button key={c.id} className="cm-day" onClick={() => setCls(c)}>
+              <button key={c.id} className="cm-day" onClick={() => { setCls(c); setClassView("days"); setDayPick(null); }}>
                 <div className="cm-day-left"><span className="cm-day-date">{c.name}</span>
                   <span className="cm-day-sub">{canEdit(c) ? "담당" : "열람 전용"}</span></div>
                 <span className="cm-day-arrow">›</span>
@@ -2435,7 +2454,9 @@ function AdminView() {
       </div></div>
     </>);
   }
-  return <AdminDays cls={cls} canEdit={canEdit(cls)} isOwner={me.role === "owner"} meName={me.name} onGlobal={(k) => { setCls(null); setMode(k === "classes" ? "login" : k); }} onBack={() => setCls(null)} />;
+  return <><AdminDays cls={cls} canEdit={canEdit(cls)} isOwner={me.role === "owner"} meName={me.name}
+    activeView={classView} setActiveView={setClassView} selected={dayPick} setSelected={setDayPick}
+    side={homeSide} onBack={() => { setCls(null); setClassView("days"); setDayPick(null); }} /></>;
 }
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
@@ -3199,11 +3220,9 @@ function useSwipeBack(onBack) {
   }, []);
 }
 
-function AdminDays({ cls, canEdit, isOwner, meName, onGlobal, onBack }) {
+function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, selected, setSelected, side, onBack }) {
   const [rosterVer, bumpVer] = useState(0);
-  const [selected, setSelected] = useState(null);
   const [days, setDays] = useState(null);
-  const [activeView, setActiveView] = useState("days"); // "days" | "book"
   const [notice, setNotice] = useState(null);
   const [noticeText, setNoticeText] = useState("");
   const [dmStudent, setDmStudent] = useState("");
@@ -3230,34 +3249,11 @@ function AdminDays({ cls, canEdit, isOwner, meName, onGlobal, onBack }) {
   const hasActive = !!(notice && notice.active && notice.text);
   const students = cls.roster.filter((r) => !r.teacher);
 
-  const classSide = (
-    <Sidebar title={cls.name} active={activeView} onSelect={(k) => {
-      if (k === "g:classes" || k === "g:makeup" || k === "g:report" || k === "g:risk") { onGlobal && onGlobal(k.slice(2)); return; }
-      setSelected(null); setActiveView(k);
-    }}
-      items={[
-        { key: "days", ico: "▤", label: "날짜별" },
-        { key: "book", ico: "▦", label: "월간 출석부" },
-        { sep: true },
-        { key: "notice", ico: "◑", label: "공지", badge: (hasActive ? 1 : 0) + Object.values(activeDms || {}).filter((v) => v && v.active && v.text).length },
-        { key: "progress", ico: "◈", label: "진도표" },
-        { key: "notes", ico: "✎", label: "강의노트" },
-        { key: "ailog", ico: "✦", label: "AI 질문" },
-        { key: "consult", ico: "◉", label: "상담" },
-        { sep: true },
-        { key: "textbooks", ico: "⚙", label: "설정" },
-        { sep: true },
-        { key: "g:makeup", ico: "▷", label: "보강 관리" },
-        { key: "g:report", ico: "▣", label: "학습관리 보고서" },
-        { key: "g:classes", ico: "←", label: "반 목록" },
-      ]} />
-  );
-
-  if (selected) return <AdminDay cls={cls} date={selected} canEdit={canEdit} side={classSide} onBack={() => { setSelected(null); refresh(); }} />;
+  if (selected) return <AdminDay cls={cls} date={selected} canEdit={canEdit} side={side} onBack={() => { setSelected(null); refresh(); }} />;
 
   return (
     <>
-    {classSide}
+    {side}
     <div ref={daysRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
