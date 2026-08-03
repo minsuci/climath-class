@@ -56,6 +56,8 @@ html,body{margin:0; padding:0;}
 .cm-side-ico{font-size:15px; width:19px; text-align:center; flex:none;}
 .cm-side-sep{height:1px; background:var(--line); margin:9px 12px;}
 .cm-backdrop{display:none;}
+/* PC에선 사이드바가 항상 보이므로 최상위 화면의 돌아가기 버튼 숨김 */
+@media (min-width: 861px){ .cm-home-back{display:none;} }
 
 /* ===== 학습관리 보고서 (A4 인쇄) ===== */
 .rp-sheet{background:#fff; color:#1c2333; padding:26px 28px; border-radius:14px; border:1px solid var(--line); font-size:13px; line-height:1.6;}
@@ -1907,7 +1909,7 @@ function ReportCenter({ onBack }) {
       <div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 12}}>
           <h2 className="cm-h2" style={{margin: 0}}>학습관리 보고서</h2>
-          <button className="cm-link" onClick={onBack}>← 돌아가기</button>
+          <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
         </div>
         <input className="cm-input" style={{margin: 0}} placeholder="학생 이름 검색" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="cm-hint" style={{marginTop: 8}}>학생을 고르면 출결·진도·상담이 자동으로 집계돼요. 코멘트만 쓰고 인쇄하면 됩니다.</div>
@@ -2098,7 +2100,7 @@ function MakeupCenter({ onBack }) {
       <div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 12}}>
           <h2 className="cm-h2" style={{margin: 0}}>보강 관리</h2>
-          <button className="cm-link" onClick={onBack}>← 돌아가기</button>
+          <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
         </div>
         <input className="cm-input" style={{margin: 0}} placeholder="학생 이름 검색" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="cm-hint" style={{marginTop: 8}}>학생 → 날짜 → 수업 순서로 골라 결석을 표시해요.</div>
@@ -2163,7 +2165,7 @@ function RiskDashboard({ onBack }) {
       <div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 12}}>
           <h2 className="cm-h2" style={{margin: 0}}>위험신호</h2>
-          <button className="cm-link" onClick={onBack}>← 돌아가기</button>
+          <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
         </div>
         <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
           <button className={"cm-ab-tab" + (tab === "flag" ? " on" : "")} onClick={() => setTab("flag")}>표시된 신호 {flagged.length}</button>
@@ -2340,46 +2342,51 @@ function AdminView() {
     );
   }
 
+  // ---- 전역 메뉴 사이드바 (반 내부가 아닌 모든 화면 공통) ----
+  const homeSide = (
+    <Sidebar title={me.name + " 선생님"} active={mode === "login" ? "classes" : mode} onSelect={(k) => {
+      if (k === "classes") { setMode("login"); return; }
+      if (k === "logout") { logout(); return; }
+      setMode(k);
+    }}
+      items={[
+        { key: "classes", ico: "▤", label: "내 수업" },
+        { sep: true },
+        { key: "makeup", ico: "▷", label: "보강 관리" },
+        { key: "risk", ico: "⚠", label: "위험신호" },
+        { key: "report", ico: "▣", label: "학습관리 보고서" },
+        { sep: true },
+        { key: "newclass", ico: "+", label: "새 반 만들기" },
+        ...(me.role === "owner" ? [{ key: "manage", ico: "⚙", label: "선생님 관리" }] : []),
+        { key: "logout", ico: "→", label: "로그아웃" },
+      ]} />
+  );
+
   // ---- 새 반 만들기 ----
-  if (mode === "newclass") return <ClassCreate me={me} onDone={async (newId) => {
+  if (mode === "newclass") return <>{homeSide}<ClassCreate me={me} onDone={async (newId) => {
     const next = [...(me.classIds || []), newId];
     await updateTeacher(me.tid, { classIds: next });
     setMe({ ...me, classIds: next });
     await refreshTeachers();
     setMode("login");
-  }} onCancel={() => setMode("login")} />;
+  }} onCancel={() => setMode("login")} /></>;
 
   // ---- 선생님 관리 (관리자 전용) ----
-  if (mode === "manage") return <TeacherManage me={me} teachers={teachers} onRefresh={refreshTeachers} onBack={() => setMode("login")} />;
+  if (mode === "manage") return <>{homeSide}<TeacherManage me={me} teachers={teachers} onRefresh={refreshTeachers} onBack={() => setMode("login")} /></>;
 
-  // ---- 위험신호 대시보드 ----
-  if (mode === "risk") return <RiskDashboard onBack={() => setMode("login")} />;
-  if (mode === "makeup") return <MakeupCenter onBack={() => setMode("login")} />;
-  if (mode === "report") return <ReportCenter onBack={() => setMode("login")} />;
+  // ---- 위험신호 / 보강 / 보고서 ----
+  if (mode === "risk") return <>{homeSide}<RiskDashboard onBack={() => setMode("login")} /></>;
+  if (mode === "makeup") return <>{homeSide}<MakeupCenter onBack={() => setMode("login")} /></>;
+  if (mode === "report") return <>{homeSide}<ReportCenter onBack={() => setMode("login")} /></>;
 
   // ---- 반 선택 ----
   if (!cls) {
     return (<>
-      <Sidebar title={me.name + " 선생님"} active="classes" onSelect={(k) => {
-        if (k === "classes") return;
-        if (k === "logout") { logout(); return; }
-        setMode(k);
-      }}
-        items={[
-          { key: "classes", ico: "▤", label: "내 수업" },
-          { sep: true },
-          { key: "makeup", ico: "▷", label: "보강 관리" },
-          { key: "risk", ico: "⚠", label: "위험신호" },
-          { key: "report", ico: "▣", label: "학습관리 보고서" },
-          { sep: true },
-          { key: "newclass", ico: "+", label: "새 반 만들기" },
-          ...(me.role === "owner" ? [{ key: "manage", ico: "⚙", label: "선생님 관리" }] : []),
-          { key: "logout", ico: "→", label: "로그아웃" },
-        ]} />
+      {homeSide}
       <div className="cm-stack"><div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 12}}>
           <h3 className="cm-h3" style={{margin: 0}}>{me.name} 선생님</h3>
-          {!editOrder && <button className="cm-link" onClick={logout}>로그아웃</button>}
+          {!editOrder && <button className="cm-link cm-home-back" onClick={logout}>로그아웃</button>}
         </div>
 
         {!editOrder && (
@@ -3130,7 +3137,7 @@ function TeacherManage({ me, teachers, onRefresh, onBack }) {
           </div>
         ))}
       </div>
-      <button className="cm-link" onClick={onBack}>← 돌아가기</button>
+      <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
     </div>
   );
 }
