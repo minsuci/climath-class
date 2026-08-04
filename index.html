@@ -75,8 +75,6 @@ html,body{margin:0; padding:0;}
 .rp-table{width:100%; border-collapse:collapse; font-size:12.5px;}
 .rp-table th{background:#f7f4ee; padding:7px 9px; text-align:left; font-weight:600; color:#4b5563; border-bottom:1px solid #e5ded2;}
 .rp-table td{padding:7px 9px; border-bottom:1px solid #f0ece5;}
-.rp-bar{height:7px; background:#eee8dd; border-radius:99px; overflow:hidden; min-width:60px;}
-.rp-bar i{display:block; height:100%; background:var(--navy); border-radius:99px;}
 .rp-note{background:#f7f4ee; border-radius:10px; padding:12px 14px; white-space:pre-wrap; min-height:56px;}
 .rp-consult{padding:9px 0; border-bottom:1px solid #f0ece5;}
 .rp-consult:last-child{border-bottom:0;}
@@ -1769,7 +1767,6 @@ function upcomingSessions(cls, st, weeks) {
 
 function ReportSheet({ cls, st, ym, data, comment }) {
   const ci = (k) => catInfo(k);
-  const indiv = isIndividual(cls); // 개별진도반은 완성률 표시 안 함
   const [y, m] = ym.split("-");
   return (
     <div className="rp-sheet">
@@ -1797,39 +1794,6 @@ function ReportSheet({ cls, st, ym, data, comment }) {
             결석 {data.absent}회 중 <b>{data.videoDone}회</b>는 동영상 보강을 완료했습니다.
           </div>
         )}
-      </div>
-
-      <div className="rp-sec">
-        <div className="rp-sec-h">교재별 진도</div>
-        {data.books.length === 0 ? <div style={{color: "#9ca3af", fontSize: 12}}>등록된 교재가 없습니다.</div> : (
-          <table className="rp-table">
-            <thead><tr>
-              <th>교재</th><th style={{width: 92}}>진도</th>
-              {data.hasPrev && <th style={{width: 74}}>이번 달</th>}
-              {!indiv && <th style={{width: 108}}>완성률</th>}
-            </tr></thead>
-            <tbody>
-              {data.books.map((b) => (
-                <tr key={b.name}>
-                  <td>{b.name}</td>
-                  <td>{b.done}{!indiv && " / " + b.total}{indiv ? "번" : ""}</td>
-                  {data.hasPrev && <td style={{color: b.gained > 0 ? "#2b5f8a" : "#9ca3af", fontWeight: b.gained > 0 ? 600 : 400}}>
-                    {b.gained == null ? "-" : b.gained > 0 ? "+" + b.gained : "0"}
-                  </td>}
-                  {!indiv && (
-                    <td>
-                      <div style={{display: "flex", alignItems: "center", gap: 7}}>
-                        <div className="rp-bar" style={{flex: 1}}><i style={{width: b.pct + "%"}} /></div>
-                        <span style={{fontSize: 11, color: "#6b7280", width: 30, textAlign: "right"}}>{b.pct}%</span>
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {!data.hasPrev && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 6}}>* 다음 달부터는 한 달간 진행한 분량이 함께 표시됩니다.</div>}
       </div>
 
       {data.notes && data.notes.length > 0 && (
