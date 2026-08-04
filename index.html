@@ -1765,7 +1765,47 @@ function upcomingSessions(cls, st, weeks) {
   return out;
 }
 
-function ReportSheet({ cls, st, ym, data, comment }) {
+function ReportNoteEdit({ note, cid, onChanged }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(note.text);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setText(note.text); }, [note.text]);
+
+  async function save() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await saveDailyNote(cid, note.sid, note.sname, note.date, text, note.teacher);
+      setEditing(false);
+      onChanged && onChanged(note.date, text.trim());
+    } catch (e) { alert("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+  async function remove() {
+    if (!confirm(note.date + " 수업 기록을 삭제할까요?")) return;
+    setBusy(true);
+    try { await saveDailyNote(cid, note.sid, note.sname, note.date, "", note.teacher); onChanged && onChanged(note.date, ""); }
+    catch (e) { alert("삭제 실패: " + e.message); }
+    setBusy(false);
+  }
+
+  if (!editing) {
+    return <div style={{cursor: "pointer"}} onClick={() => setEditing(true)}>{note.text}</div>;
+  }
+  return (
+    <div className="rp-noprint">
+      <textarea className="cm-input" style={{margin: "2px 0 6px", fontSize: 13, minHeight: 62, resize: "vertical"}}
+        value={text} onChange={(e) => setText(e.target.value)} autoFocus />
+      <div style={{display: "flex", gap: 8, alignItems: "center"}}>
+        <button className="cm-btn cm-btn-primary" style={{margin: 0, padding: "6px 14px", fontSize: 13}} disabled={busy} onClick={save}>저장</button>
+        <button className="cm-btn cm-btn-ghost" style={{margin: 0, padding: "6px 14px", fontSize: 13}} onClick={() => { setText(note.text); setEditing(false); }}>취소</button>
+        <button className="cm-link" style={{color: "#d6453f", marginLeft: "auto"}} disabled={busy} onClick={remove}>삭제</button>
+      </div>
+    </div>
+  );
+}
+
+function ReportSheet({ cls, st, ym, data, comment, editable, onNoteChange }) {
   const ci = (k) => catInfo(k);
   const [y, m] = ym.split("-");
   return (
@@ -1800,9 +1840,14 @@ function ReportSheet({ cls, st, ym, data, comment }) {
         <div className="rp-sec">
           <div className="rp-sec-h">수업 기록</div>
           {data.notes.map((n, i) => (
-            <div key={i} className="rp-consult">
-              <div style={{fontSize: 11, color: "#6b7280", marginBottom: 3}}>{n.date}</div>
-              <div>{n.text}</div>
+            <div key={n.date + i} className="rp-consult">
+              <div style={{fontSize: 11, color: "#6b7280", marginBottom: 3}}>
+                {n.date}
+                {editable && <span className="rp-noprint" style={{marginLeft: 6, color: "#b3a89a"}}>· 눌러서 수정</span>}
+              </div>
+              {editable
+                ? <ReportNoteEdit note={n} cid={cls.id} onChanged={onNoteChange} />
+                : <div>{n.text}</div>}
             </div>
           ))}
         </div>
@@ -1901,11 +1946,16 @@ function ReportCenter({ onBack }) {
             </button>
             <button className="cm-btn cm-btn-ghost" style={{margin: 0}} disabled={!data} onClick={() => window.print()}>인쇄 / PDF 저장</button>
           </div>
-          <div className="cm-hint" style={{marginTop: 8}}>인쇄 창에서 <b>대상을 "PDF로 저장"</b>으로 바꾸면 파일로 받을 수 있어요. 저장하면 이번 달 진도가 기록돼서 다음 달 보고서에 <b>한 달간 진행 분량</b>이 표시돼요.</div>
+          <div className="cm-hint" style={{marginTop: 8}}>아래 미리보기에서 <b>수업 기록을 눌러 바로 수정</b>할 수 있어요. 인쇄 창에서 <b>대상을 "PDF로 저장"</b>으로 바꾸면 파일로 받을 수 있어요. 저장하면 이번 달 진도가 기록돼서 다음 달 보고서에 <b>한 달간 진행 분량</b>이 표시돼요.</div>
         </div>
 
         {busy && !data && <div className="cm-card rp-noprint"><div className="cm-empty">집계하는 중…</div></div>}
-        {data && <ReportSheet cls={picked.cls} st={picked.st} ym={ym} data={data} comment={comment} />}
+        {data && <ReportSheet cls={picked.cls} st={picked.st} ym={ym} data={data} comment={comment}
+          editable onNoteChange={(date, text) => {
+            setData((d) => ({ ...d, notes: text
+              ? d.notes.map((n) => (n.date === date ? { ...n, text } : n))
+              : d.notes.filter((n) => n.date !== date) }));
+          }} />}
       </div>
     );
   }
