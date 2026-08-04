@@ -677,6 +677,25 @@ const CONSULT_WITH = [{ key: "student", label: "학생" }, { key: "parent", labe
 
 const consultCol = () => db.collection("consultations");
 
+// ----- 수업별 코멘트 (classDoc/dailyNotes) -----
+// 문서 id = "{sid}_{date}"
+const noteCol = (cid) => classDoc(cid).collection("dailyNotes");
+async function saveDailyNote(cid, sid, sname, date, text, teacher) {
+  const ref = noteCol(cid).doc(sid + "_" + date);
+  if (!text || !text.trim()) { await ref.delete().catch(() => {}); return; }
+  await ref.set({ sid, sname, date, text: text.trim(), teacher: teacher || "", time: Date.now() });
+}
+function listenDailyNote(cid, sid, date, cb) {
+  return noteCol(cid).doc(sid + "_" + date).onSnapshot((d) => cb(d.exists ? d.data() : null), () => cb(null));
+}
+async function getMonthNotes(cid, sid, ym) {
+  const s = await noteCol(cid).get();
+  const arr = [];
+  s.forEach((d) => { const v = d.data(); if (v.sid === sid && (v.date || "").startsWith(ym)) arr.push(v); });
+  arr.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  return arr;
+}
+
 // ----- 학습관리 보고서 (reports 컬렉션) -----
 // 문서 id = "{cid}_{sid}_{YYYY-MM}"
 const reportsCol = () => db.collection("reports");
@@ -737,7 +756,11 @@ async function buildReportData(cls, st, ym) {
   });
   consults.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 
+  // 4) 수업별 코멘트
+  const notes = await getMonthNotes(cls.id, st.id, ym);
+
   return {
+    notes,
     sessions: myDays.length, present, absent: myDays.length - present,
     videoDone, planned, rate: myDays.length > 0 ? Math.round(present / myDays.length * 100) : null,
     books, hwSnapshot, consults, hasPrev: !!prevSnap,
@@ -1805,6 +1828,18 @@ function ReportSheet({ cls, st, ym, data, comment }) {
         )}
         {!data.hasPrev && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 6}}>* 다음 달부터는 한 달간 진행한 분량이 함께 표시됩니다.</div>}
       </div>
+
+      {data.notes && data.notes.length > 0 && (
+        <div className="rp-sec">
+          <div className="rp-sec-h">수업 기록</div>
+          {data.notes.map((n, i) => (
+            <div key={i} className="rp-consult">
+              <div style={{fontSize: 11, color: "#6b7280", marginBottom: 3}}>{n.date}</div>
+              <div>{n.text}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {data.consults.length > 0 && (
         <div className="rp-sec">
@@ -3249,7 +3284,7 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
   const hasActive = !!(notice && notice.active && notice.text);
   const students = cls.roster.filter((r) => !r.teacher);
 
-  if (selected) return <AdminDay cls={cls} date={selected} canEdit={canEdit} side={side} onBack={() => { setSelected(null); refresh(); }} />;
+  if (selected) return <AdminDay cls={cls} date={selected} canEdit={canEdit} side={side} meName={meName} onBack={() => { setSelected(null); refresh(); }} />;
 
   return (
     <>
@@ -3752,7 +3787,7 @@ function QuestionQueue({ questions, clsId, date, canEdit, books, merged }) {
   );
 }
 
-function AdminDay({ cls, date, canEdit, side, onBack }) {
+function AdminDay({ cls, date, canEdit, side, meName, onBack }) {
   const [attendance, setAttendance] = useState({});
   const [questions, setQuestions] = useState([]);
   const [hwDone, setHwDone] = useState({});
@@ -3803,7 +3838,7 @@ function AdminDay({ cls, date, canEdit, side, onBack }) {
 
   const dayRef = useSwipeBack(onBack);
 
-  if (detail) return <StudentDetail cls={findClass(detail._cid) || cls} student={detail} hwDone={{ [detail.id]: hwDone[detail._key] || {} }} questioned={{ [detail.id]: questioned[detail._key] || {} }} canEdit={canEdit} onBack={() => setDetail(null)} />;
+  if (detail) return <StudentDetail cls={findClass(detail._cid) || cls} student={detail} hwDone={{ [detail.id]: hwDone[detail._key] || {} }} questioned={{ [detail.id]: questioned[detail._key] || {} }} canEdit={canEdit} date={date} meName={meName} onBack={() => setDetail(null)} />;
 
   return (
     <>
@@ -3897,7 +3932,49 @@ function AdminDay({ cls, date, canEdit, side, onBack }) {
   );
 }
 
-function StudentDetail({ cls, student, hwDone, questioned, canEdit, onBack }) {
+function DailyNoteCard({ cid, student, date, canEdit, meName }) {
+  const [note, setNote] = useState(undefined);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => listenDailyNote(cid, student.id, date, (n) => {
+    setNote(n); setText(n ? n.text : ""); setSaved(false);
+  }), [cid, student.id, date]);
+
+  async function save() {
+    if (busy) return;
+    setBusy(true);
+    try { await saveDailyNote(cid, student.id, student.name, date, text, meName); setSaved(true); }
+    catch (e) { alert("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+  const dirty = note ? text.trim() !== note.text : !!text.trim();
+
+  return (
+    <div className="cm-card">
+      <div className="cm-book-head">
+        <h3 className="cm-h3" style={{margin: 0}}>오늘 수업 코멘트 <span className="cm-h-hint">({fmtDate(date)})</span></h3>
+        {saved && !dirty && <span style={{fontSize: 12, color: "var(--green)"}}>저장됨 ✓</span>}
+      </div>
+      {canEdit ? (<>
+        <textarea className="cm-input cm-notice-ta" rows={3}
+          placeholder="예: 이차함수 최대·최소 파트 이해도 좋음. 계산 실수 줄이는 연습 필요."
+          value={text} onChange={(e) => { setText(e.target.value); setSaved(false); }} />
+        <div style={{display: "flex", gap: 10, alignItems: "center"}}>
+          <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy || !dirty} onClick={save}>
+            {busy ? "저장 중..." : "저장"}
+          </button>
+          <span style={{fontSize: 11, color: "var(--muted)"}}>한 달치가 모여 학습관리 보고서에 실려요</span>
+        </div>
+      </>) : (
+        note ? <div style={{fontSize: 14, lineHeight: 1.6, whiteSpace: "pre-wrap"}}>{note.text}</div>
+             : <div className="cm-empty">작성된 코멘트가 없어요</div>
+      )}
+    </div>
+  );
+}
+
+function StudentDetail({ cls, student, hwDone, questioned, canEdit, date, meName, onBack }) {
   const mine = hwDone[student.id] || {};
   const qmine = (questioned && questioned[student.id]) || {};
   const detailDivRef = useSwipeBack(onBack);
@@ -3910,6 +3987,8 @@ function StudentDetail({ cls, student, hwDone, questioned, canEdit, onBack }) {
         <div className="cm-daybar-date">{student.name} · 누적 진도</div>
         {canEdit && <button className="cm-link" style={{marginLeft: "auto"}} onClick={() => setEditHw(!editHw)}>{editHw ? "완료" : "과제 체크"}</button>}
       </div>
+      {date && <DailyNoteCard cid={targetCid} student={student} date={date} canEdit={canEdit} meName={meName} />}
+
       {editHw && <div className="cm-hint">번호를 눌러 체크하거나, 길게 눌러 드래그하면 여러 개를 한 번에 칠할 수 있어요. 학생이 직접 체크한 것과 똑같이 기록돼요.</div>}
       {getStudentBooks(cls, student).map((b) => {
         const qnums = qmine[b.name] || [];
