@@ -1,0 +1,5 @@
+# 로컬 검사 도구 (배포에 영향 주지 않도록 커밋하지 않음)
+tools/node_modules/
+tools/package-lock.json
+tools/appsrc.js
+.vercel/

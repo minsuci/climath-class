@@ -1,0 +1,10 @@
+{
+  "name": "climath-tools",
+  "private": true,
+  "type": "module",
+  "description": "index.html JSX 문법 검사용 로컬 도구. 배포 저장소에는 커밋하지 않는다.",
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "@babel/preset-react": "^7.24.0"
+  }
+}

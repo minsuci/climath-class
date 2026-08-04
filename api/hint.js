@@ -8,7 +8,7 @@
 //       이름: GEMINI_API_KEY   값: (AIza...로 시작하는 키)  로 등록
 //  4. 다시 배포(Redeploy)
 
-const MODEL = "gemini-2.5-flash-lite"; // 무료 등급, 빠르고 똑똑함
+const MODEL = "gemini-2.5-flash-lite"; // 무료 등급, 한도 넉넉하고 빠름
 
 const SYSTEM_PROMPT = `너는 CLIMATH 수학학원의 AI 조교야. 고등학교 학생이 수학 문제를 물어보면 도와줘.
 
@@ -20,7 +20,7 @@ const SYSTEM_PROMPT = `너는 CLIMATH 수학학원의 AI 조교야. 고등학교
 - 최종 수치 답, 완성된 풀이 전체는 주지 않는다. 부분적인 방향만.
 
 말투: 한국 고등학생 눈높이로 친근하고 따뜻하게. 너무 길지 않게.
-수식: 읽기 쉽게 평문으로 써 (예: x^2, √2, ∫, a/b, x→0). 복잡한 LaTeX는 피해.
+수식: LaTeX로 써. 인라인 수식은 $...$, 별도 줄 수식은 $$...$$ 로 감싸. (예: $x^2+1$, $\\frac{1}{2}$, $\\sqrt{2}$, $$\\int_0^1 x\\,dx$$) 학생 화면에서 예쁜 수식으로 렌더링되니 적극 활용해. 단, 일반 설명 문장은 한국어 그대로 쓰고 수식 부분만 LaTeX로.
 문제 사진을 보내면 문제를 정확히 읽고, 마찬가지로 힌트만 줘.`;
 
 export default async function handler(req, res) {
