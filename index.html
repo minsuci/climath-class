@@ -1769,6 +1769,7 @@ function upcomingSessions(cls, st, weeks) {
 
 function ReportSheet({ cls, st, ym, data, comment }) {
   const ci = (k) => catInfo(k);
+  const indiv = isIndividual(cls); // 개별진도반은 완성률 표시 안 함
   const [y, m] = ym.split("-");
   return (
     <div className="rp-sheet">
@@ -1805,22 +1806,24 @@ function ReportSheet({ cls, st, ym, data, comment }) {
             <thead><tr>
               <th>교재</th><th style={{width: 92}}>진도</th>
               {data.hasPrev && <th style={{width: 74}}>이번 달</th>}
-              <th style={{width: 108}}>완성률</th>
+              {!indiv && <th style={{width: 108}}>완성률</th>}
             </tr></thead>
             <tbody>
               {data.books.map((b) => (
                 <tr key={b.name}>
                   <td>{b.name}</td>
-                  <td>{b.done} / {b.total}</td>
+                  <td>{b.done}{!indiv && " / " + b.total}{indiv ? "번" : ""}</td>
                   {data.hasPrev && <td style={{color: b.gained > 0 ? "#2b5f8a" : "#9ca3af", fontWeight: b.gained > 0 ? 600 : 400}}>
                     {b.gained == null ? "-" : b.gained > 0 ? "+" + b.gained : "0"}
                   </td>}
-                  <td>
-                    <div style={{display: "flex", alignItems: "center", gap: 7}}>
-                      <div className="rp-bar" style={{flex: 1}}><i style={{width: b.pct + "%"}} /></div>
-                      <span style={{fontSize: 11, color: "#6b7280", width: 30, textAlign: "right"}}>{b.pct}%</span>
-                    </div>
-                  </td>
+                  {!indiv && (
+                    <td>
+                      <div style={{display: "flex", alignItems: "center", gap: 7}}>
+                        <div className="rp-bar" style={{flex: 1}}><i style={{width: b.pct + "%"}} /></div>
+                        <span style={{fontSize: 11, color: "#6b7280", width: 30, textAlign: "right"}}>{b.pct}%</span>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
