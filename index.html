@@ -1926,7 +1926,7 @@ function ReportCenter({ onBack }) {
 
   if (picked) {
     return (
-      <div ref={backRef2} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <div key="rp-detail" ref={backRef2} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
         <div className="cm-card rp-noprint">
           <div className="cm-admin-top" style={{marginBottom: 10}}>
             <h2 className="cm-h2" style={{margin: 0}}>{picked.st.name}</h2>
@@ -1961,7 +1961,7 @@ function ReportCenter({ onBack }) {
   }
 
   return (
-    <div ref={backRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+    <div key="rp-list" ref={backRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 12}}>
           <h2 className="cm-h2" style={{margin: 0}}>학습관리 보고서</h2>
@@ -2032,7 +2032,7 @@ function MakeupCenter({ onBack }) {
       return dows.includes(dow);
     });
     return (
-      <div ref={backRef3} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <div key="mk-session" ref={backRef3} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
         <div className="cm-card">
           <div className="cm-admin-top" style={{marginBottom: 10}}>
             <h2 className="cm-h2" style={{margin: 0}}>{picked.name}</h2>
@@ -2088,7 +2088,7 @@ function MakeupCenter({ onBack }) {
     });
     pastRecords.sort((a, b) => b.date.localeCompare(a.date));
     return (
-      <div ref={backRef2} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <div key="mk-date" ref={backRef2} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
         <div className="cm-card">
           <div className="cm-admin-top" style={{marginBottom: 10}}>
             <h2 className="cm-h2" style={{margin: 0}}>{picked.name}</h2>
@@ -2152,7 +2152,7 @@ function MakeupCenter({ onBack }) {
 
   // ---- 1단계: 학생 목록 (가나다순, 이름 통합) ----
   return (
-    <div ref={backRef1} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+    <div key="mk-list" ref={backRef1} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 12}}>
           <h2 className="cm-h2" style={{margin: 0}}>보강 관리</h2>
@@ -3224,13 +3224,9 @@ function useSwipeBack(onBack) {
   return React.useCallback((el) => {
     if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
     if (!el) return;
-    // 같은 자리·같은 태그면 React가 DOM 노드를 재사용한다. 스와이프로 화면 밖까지 밀어둔
-    // 인라인 transform이 남아 다음 화면이 안 보이므로(빈 화면), 붙일 때 반드시 지운다.
+    // DOM 노드가 재사용되는 경우(같은 컴포넌트 내 화면 전환) 이전 스와이프 잔재 제거
     el.style.transition = "none";
     el.style.transform = "";
-    el.style.animation = "";
-    void el.offsetWidth;              // 리플로우 → cm-slide-in 을 새 화면에서 다시 재생
-    el.style.transition = "";
     let start = null;
     let active = false;
     function onStart(e) {
@@ -3259,7 +3255,13 @@ function useSwipeBack(onBack) {
       el.style.transition = "transform 0.22s cubic-bezier(.25,.8,.25,1)";
       if (active && dx > 80) {
         el.style.transform = "translateX(" + window.innerWidth + "px)";
-        setTimeout(() => { onBackRef.current(); }, 230);
+        setTimeout(() => {
+          onBackRef.current();
+          // 같은 노드가 다음 화면에 재사용될 수 있으므로 즉시 원복
+          el.style.transition = "none";
+          el.style.transform = "";
+          active = false;
+        }, 230);
       } else {
         el.style.transform = "";
         active = false;
