@@ -3224,6 +3224,13 @@ function useSwipeBack(onBack) {
   return React.useCallback((el) => {
     if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
     if (!el) return;
+    // 같은 자리·같은 태그면 React가 DOM 노드를 재사용한다. 스와이프로 화면 밖까지 밀어둔
+    // 인라인 transform이 남아 다음 화면이 안 보이므로(빈 화면), 붙일 때 반드시 지운다.
+    el.style.transition = "none";
+    el.style.transform = "";
+    el.style.animation = "";
+    void el.offsetWidth;              // 리플로우 → cm-slide-in 을 새 화면에서 다시 재생
+    el.style.transition = "";
     let start = null;
     let active = false;
     function onStart(e) {

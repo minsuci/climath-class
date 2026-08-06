@@ -161,6 +161,7 @@ Vercel 환경변수 **`GEMINI_API_KEY`**. 답을 주지 않고 힌트만 주도�
 | 스와이프 뒤로가기 안 먹음 | `useEffect([])`는 리마운트 시 재등록 안 됨 → **ref callback**(`useSwipeBack`). `touch-action:pan-y` 필수, CSS 애니메이션이 인라인 transform을 덮으므로 `el.style.animation="none"` 필요 |
 | 표 안에서 스와이프하면 뒤로가기 | 가로 스크롤 영역에 `data-no-swipe` 부여 |
 | 출석 카드 글자가 세로로 쪼개짐 | 2열 그리드 폭 부족 → `min-height` 고정 + `white-space:nowrap` + 상태를 둘째 줄로 |
+| 스와이프로 뒤로 가면 화면이 빈다 | 목록/상세가 같은 자리에 같은 `<div class="cm-stack cm-slide-in">`을 반환 → React가 **DOM 노드를 재사용**하는데 스와이프가 박아둔 `transform:translateX(화면폭)`이 남아 다음 화면이 화면 밖에 그려짐. `useSwipeBack` ref 부착 시 `transform`·`animation`·`transition`을 지우도록 수정 |
 
 ---
 
