@@ -3,3 +3,8 @@ tools/node_modules/
 tools/package-lock.json
 tools/appsrc.js
 .vercel/
+
+# 교재 제작 (앱 배포와 무관)
+textbook/node_modules/
+textbook/package-lock.json
+textbook/package.json

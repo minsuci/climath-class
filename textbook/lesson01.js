@@ -1,0 +1,674 @@
+const fs = require("fs");
+const {
+  Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+  WidthType, ShadingType, AlignmentType, BorderStyle, HeadingLevel,
+  ImageRun, Footer, PageNumber, PageBreak, VerticalAlign, HeightRule,
+} = require("docx");
+
+/* ── 팔레트 ───────────────────────────────────────────── */
+const NAVY = "1B3A5C";
+const ACC  = "C2410C";
+const GREY = "64748B";
+const LINE = "D6DEE8";
+const BOX  = "F4F7FA";
+const WARM = "FDF5EA";
+const ANSB = "F0F5F1";
+const W    = 9638;                      // 본문 폭 (DXA)
+const FONT = "맑은 고딕";
+
+/* ── 인라인 서식 파서: **굵게**, ^지수 / ^{여러글자} ──── */
+function rich(text, base = {}) {
+  const runs = [];
+  text.split("**").forEach((seg, i) => {
+    const bold = base.bold || i % 2 === 1;
+    let buf = "", j = 0;
+    const flush = () => { if (buf) { runs.push(new TextRun({ ...base, bold, text: buf })); buf = ""; } };
+    while (j < seg.length) {
+      if (seg[j] === "^") {
+        flush(); j++;
+        let sup = "";
+        if (seg[j] === "{") { j++; while (j < seg.length && seg[j] !== "}") sup += seg[j++]; j++; }
+        else { sup = seg[j] ?? ""; j++; }
+        runs.push(new TextRun({ ...base, bold, text: sup, superScript: true }));
+      } else { buf += seg[j++]; }
+    }
+    flush();
+  });
+  return runs.length ? runs : [new TextRun({ ...base, text: "" })];
+}
+
+/* ── 문단 헬퍼 ───────────────────────────────────────── */
+const p = (text = "", o = {}) => new Paragraph({
+  children: rich(text, { size: o.size ?? 21, color: o.color ?? "1F2937", font: FONT, italics: o.italics }),
+  alignment: o.align,
+  spacing: { before: o.before ?? 0, after: o.after ?? 90, line: o.line ?? 300 },
+  indent: o.indent,
+});
+
+const spacer = (h = 120) => new Paragraph({ spacing: { after: h }, children: [] });
+
+/* 회차 배너 */
+function banner(no, title, sub) {
+  return new Table({
+    columnWidths: [W], width: { size: W, type: WidthType.DXA },
+    borders: noBorders(),
+    rows: [new TableRow({ children: [new TableCell({
+      width: { size: W, type: WidthType.DXA },
+      shading: { type: ShadingType.CLEAR, fill: NAVY, color: "auto" },
+      margins: { top: 260, bottom: 260, left: 340, right: 340 },
+      children: [
+        new Paragraph({ spacing: { after: 60 }, children: rich(`CLIMATH 성인수학 · ${no}회차`, { size: 18, color: "9DB6CE", font: FONT }) }),
+        new Paragraph({ spacing: { after: 70 }, children: rich(title, { size: 34, color: "FFFFFF", bold: true, font: FONT }) }),
+        new Paragraph({ children: rich(sub, { size: 19, color: "C7D6E5", font: FONT }) }),
+      ],
+    })] })],
+  });
+}
+
+const noBorders = () => ({
+  top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+  bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+  left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+  right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+  insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+  insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+});
+
+/* 블록 머리 (시간 + 제목) */
+function blockHead(time, title) {
+  return new Table({
+    columnWidths: [W], width: { size: W, type: WidthType.DXA }, borders: noBorders(),
+    rows: [new TableRow({ children: [new TableCell({
+      width: { size: W, type: WidthType.DXA },
+      shading: { type: ShadingType.CLEAR, fill: NAVY, color: "auto" },
+      margins: { top: 130, bottom: 130, left: 240, right: 240 },
+      children: [new Paragraph({ children: [
+        ...rich(time, { size: 18, color: "9DB6CE", font: FONT }),
+        new TextRun({ text: "   ", font: FONT }),
+        ...rich(title, { size: 24, color: "FFFFFF", bold: true, font: FONT }),
+      ] })],
+    })] })],
+  });
+}
+
+/* 소제목 */
+const h3 = (t) => new Paragraph({
+  children: rich(t, { size: 23, color: NAVY, bold: true, font: FONT }),
+  spacing: { before: 260, after: 130 },
+  border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: LINE, space: 6 } },
+});
+
+const h4 = (t) => new Paragraph({
+  children: rich(t, { size: 21, color: ACC, bold: true, font: FONT }),
+  spacing: { before: 200, after: 90 },
+});
+
+/* 컬러 박스 */
+function box(lines, o = {}) {
+  const fill = o.fill ?? BOX;
+  const bar = o.bar ?? NAVY;
+  return new Table({
+    columnWidths: [W], width: { size: W, type: WidthType.DXA },
+    borders: { ...noBorders(), left: { style: BorderStyle.SINGLE, size: 18, color: bar } },
+    rows: [new TableRow({ cantSplit: true, children: [new TableCell({
+      width: { size: W, type: WidthType.DXA },
+      shading: { type: ShadingType.CLEAR, fill, color: "auto" },
+      margins: { top: 190, bottom: 190, left: 300, right: 280 },
+      children: lines.length ? lines : [p("")],
+    })] })],
+  });
+}
+
+/* 가운데 정렬 수식 줄 */
+const eq = (t, o = {}) => new Paragraph({
+  children: rich(t, { size: o.size ?? 22, color: o.color ?? "1F2937", font: FONT, bold: o.bold }),
+  alignment: AlignmentType.CENTER,
+  spacing: { before: o.before ?? 40, after: o.after ?? 40, line: 300 },
+});
+
+/* 들여쓴 수식 줄 (유도용) */
+const step = (t, o = {}) => new Paragraph({
+  children: rich(t, { size: 21, color: o.color ?? "1F2937", font: FONT, bold: o.bold }),
+  indent: { left: 400 },
+  spacing: { after: 50, line: 290 },
+});
+
+/* 인용 / 멘트 */
+const quote = (t) => new Paragraph({
+  children: rich(t, { size: 21, color: NAVY, font: FONT, italics: true }),
+  indent: { left: 300 },
+  spacing: { before: 100, after: 140, line: 310 },
+  border: { left: { style: BorderStyle.SINGLE, size: 12, color: ACC, space: 10 } },
+});
+
+/* 일반 표 */
+function table(headers, rows, widths, o = {}) {
+  const cell = (txt, i, head) => new TableCell({
+    width: { size: widths[i], type: WidthType.DXA },
+    shading: { type: ShadingType.CLEAR, fill: head ? NAVY : (o.zebra && o.r % 2 ? BOX : "FFFFFF"), color: "auto" },
+    margins: { top: 110, bottom: 110, left: 160, right: 160 },
+    verticalAlign: VerticalAlign.CENTER,
+    children: [new Paragraph({
+      children: rich(String(txt), { size: 20, color: head ? "FFFFFF" : "1F2937", bold: head, font: FONT }),
+      alignment: o.center?.includes(i) ? AlignmentType.CENTER : undefined,
+      spacing: { after: 0, line: 280 },
+    })],
+  });
+  return new Table({
+    columnWidths: widths, width: { size: widths.reduce((a, b) => a + b, 0), type: WidthType.DXA },
+    borders: {
+      top: { style: BorderStyle.SINGLE, size: 6, color: LINE },
+      bottom: { style: BorderStyle.SINGLE, size: 6, color: LINE },
+      left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      insideVertical: { style: BorderStyle.SINGLE, size: 4, color: "EDF1F6" },
+    },
+    rows: [
+      new TableRow({ tableHeader: true, children: headers.map((h, i) => cell(h, i, true)) }),
+      ...rows.map((r, ri) => { o.r = ri; return new TableRow({ children: r.map((c, i) => cell(c, i, false)) }); }),
+    ],
+  });
+}
+
+/* 답안 기입용 밑줄 n줄 — 인접 문단의 같은 테두리는 병합되므로 표로 그린다 */
+function ruled(n, width = W - 500) {
+  return [
+    new Paragraph({ spacing: { after: 130 }, children: [] }),
+    new Table({
+      columnWidths: [width], width: { size: width, type: WidthType.DXA },
+      indent: { size: 240, type: WidthType.DXA },
+      borders: {
+        top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+        left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+        right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+        insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+        bottom: { style: BorderStyle.SINGLE, size: 4, color: "C8D3E0" },
+        insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: "C8D3E0" },
+      },
+      rows: Array.from({ length: n }, () => new TableRow({
+        height: { value: 440, rule: HeightRule.ATLEAST },
+        children: [new TableCell({
+          width: { size: width, type: WidthType.DXA },
+          margins: { top: 0, bottom: 0, left: 0, right: 0 },
+          children: [new Paragraph({ spacing: { after: 0 }, children: [] })],
+        })],
+      })),
+    }),
+    new Paragraph({ spacing: { after: 0 }, children: [] }),
+  ];
+}
+
+/* 문제 격자 (n열) — 아래 여백 또는 밑줄이 풀이 공간 */
+function probs(items, cols = 2, space = 320, rule = 0) {
+  const cw = Math.floor(W / cols);
+  const widths = Array(cols).fill(cw);
+  const rows = [];
+  for (let i = 0; i < items.length; i += cols) {
+    const chunk = items.slice(i, i + cols);
+    while (chunk.length < cols) chunk.push("");
+    rows.push(new TableRow({ cantSplit: true, children: chunk.map((t) => new TableCell({
+      width: { size: cw, type: WidthType.DXA },
+      margins: { top: 90, bottom: rule ? 200 : space, left: 60, right: 200 },
+      children: [
+        ...String(t).split("\n").map((ln) => new Paragraph({
+          children: rich(ln, { size: 21, font: FONT }), spacing: { after: 0, line: 290 },
+        })),
+        ...(rule && t ? ruled(rule) : []),
+      ],
+    })) }));
+  }
+  return new Table({ columnWidths: widths, width: { size: W, type: WidthType.DXA }, borders: noBorders(), rows });
+}
+
+/* 정답 항목 */
+const ansItem = (no, ans, sol) => new Paragraph({
+  children: [
+    ...rich(`${no} `, { size: 20, color: GREY, font: FONT }),
+    ...rich(ans, { size: 20, color: ACC, bold: true, font: FONT }),
+    ...(sol ? rich(`   ${sol}`, { size: 19, color: "475569", font: FONT }) : []),
+  ],
+  spacing: { after: 70, line: 285 },
+  indent: { left: 120, hanging: 0 },
+});
+
+const ansHead = (t) => new Paragraph({
+  children: rich(t, { size: 21, color: NAVY, bold: true, font: FONT }),
+  spacing: { before: 220, after: 110 },
+});
+
+/* ══════════════════════════════════════════════════════
+   본문
+   ══════════════════════════════════════════════════════ */
+const body = [];
+const A = (...xs) => body.push(...xs);
+
+/* ── 표지 배너 ── */
+A(banner("1", "수와 식의 문법", "음수 · 지수 · 근호를 법칙 하나로 꿰기"), spacer(220));
+
+A(box([
+  new Paragraph({ children: rich("오늘의 목표", { size: 21, color: NAVY, bold: true, font: FONT }), spacing: { after: 110 } }),
+  p("1.  (−3) × (−4) = 12인 **이유**를 분배법칙으로 직접 만들어낸다.", { after: 60 }),
+  p("2.  지수법칙 세 개에서 a^0 = 1과 음의 지수를 **유도**한다. 외우지 않는다.", { after: 60 }),
+  p("3.  −3^2과 (−3)^2을 틀리지 않는다.", { after: 60 }),
+  p("4.  상황을 보고 식을 세운다. (이 교재 전체의 핵심 기술)", { after: 0 }),
+]), spacer(240));
+
+A(h3("오늘의 시간표"),
+  table(["시간", "블록", "내용"],
+    [["0:00 – 0:20", "오프닝", "12회 뒤에 우리가 서 있을 자리"],
+     ["0:20 – 1:10", "블록 1", "음수 — 규칙이 아니라 결과다"],
+     ["1:10 – 1:20", "휴식", ""],
+     ["1:20 – 2:10", "블록 2", "지수와 근호 — 큰 수를 다루는 언어"],
+     ["2:10 – 2:20", "휴식", ""],
+     ["2:20 – 2:50", "블록 3", "통합 연습 — 계산 · 식 세우기 · 설명하기"],
+     ["2:50 – 3:00", "마무리", "한 장 요약 + 과제"]],
+    [1900, 1400, 6338], { zebra: true, center: [0, 1] }),
+  spacer(200));
+
+/* ── 오프닝 ── */
+A(new Paragraph({ children: [new PageBreak()] }));
+A(blockHead("0:00 – 0:20", "오프닝 — 우리가 가는 곳"), spacer(160));
+
+A(p("이 교재는 12회 뒤에 아래 그림에 도착합니다."));
+
+A(new Paragraph({
+  alignment: AlignmentType.CENTER,
+  spacing: { before: 140, after: 100 },
+  children: [new ImageRun({
+    type: "png",
+    data: fs.readFileSync(__dirname + "/assets/tangent.png"),
+    transformation: { width: 540, height: 246 },
+  })],
+}));
+
+A(p("곡선 위의 한 점 P에 딱 붙은 직선이 있습니다. 이 직선의 **기울기는 얼마인가?** — 그것이 우리의 도착점입니다.", { align: AlignmentType.CENTER, color: GREY, size: 19, after: 220 }));
+
+A(quote("지금은 무슨 그림인지 몰라도 괜찮습니다. 12회 뒤에 이 기울기를 직접 계산하게 됩니다."));
+
+A(p("가는 길은 문장 세 개입니다. 이 세 문장이 12회 전체의 뼈대입니다.", { before: 100 }));
+
+A(box([
+  p("**기울기는 변화의 속도다.**", { after: 40 }),
+  p("직선이 얼마나 가파른지는, 그 상황이 얼마나 빨리 변하는지와 같은 말입니다.  →  6회차", { size: 19, color: GREY, after: 150 }),
+  p("**아주 짧은 구간의 기울기는 그 순간의 속도다.**", { after: 40 }),
+  p("구간을 한없이 좁히면 '평균'이 '순간'이 됩니다.  →  10회차", { size: 19, color: GREY, after: 150 }),
+  p("**그것을 계산하는 방법이 미분이다.**", { after: 40 }),
+  p("여기까지 오면 곡선의 모양을 손으로 그릴 수 있게 됩니다.  →  11 · 12회차", { size: 19, color: GREY, after: 0 }),
+], { fill: WARM, bar: ACC }), spacer(220));
+
+A(h3("오늘의 질문"));
+A(box([
+  eq("(−3) × (−4) = 12 인 이유를 설명할 수 있습니까?", { size: 26, bold: true, color: NAVY, before: 20, after: 130 }),
+  p("‘마이너스 곱하기 마이너스는 플러스’는 **이유가 아니라 결과**입니다. 그것은 외운 문장이지 설명이 아닙니다. 오늘 우리는 그 이유를 직접 만들어냅니다.", { after: 0, align: AlignmentType.CENTER }),
+]));
+
+A(new Paragraph({ children: [new PageBreak()] }));
+
+/* ══ 블록 1 ══ */
+A(blockHead("0:20 – 1:10", "블록 1 — 음수는 규칙이 아니라 결과다"), spacer(160));
+
+A(h3("1. 인정할 것은 딱 하나, 분배법칙"));
+A(p("수학에서 규칙을 늘리면 외울 것이 늘어납니다. 반대로 **규칙 하나를 끝까지 밀면 나머지가 따라 나옵니다.** 오늘 우리가 인정할 것은 이것 하나뿐입니다."));
+A(box([eq("a(b + c) = ab + ac", { size: 28, bold: true, color: NAVY, before: 30, after: 30 })]));
+A(p("믿기 어려우면 숫자로 확인하면 됩니다.", { before: 140 }));
+A(step("3 × (10 + 2) = 3 × 12 = **36**"));
+A(step("3 × 10 + 3 × 2 = 30 + 6 = **36**   ✓"));
+A(p("가로 3, 세로 (10 + 2)인 직사각형을 가로선으로 잘라 두 조각으로 나눈 것과 같습니다. 넓이는 당연히 변하지 않습니다.", { color: GREY, size: 19, before: 80 }));
+
+A(h3("2. (양수) × (음수) 를 유도한다"));
+A(p("3 × (−2)의 값을 **모른다고 치고** 시작합니다. 이름을 붙이지 말고, 분배법칙만 지켜봅시다."));
+A(box([
+  step("3 × ( 2 + (−2) ) = 3 × 0 = **0**", { color: NAVY }),
+  step("분배법칙을 쓰면 ─"),
+  step("3 × 2  +  3 × (−2) = 0"),
+  step("6  +  3 × (−2) = 0"),
+  step("∴  3 × (−2) = **−6**", { color: ACC, bold: true }),
+], { fill: WARM, bar: ACC }));
+A(p("2와 −2를 더하면 0이라는 사실, 그리고 분배법칙. 이 두 가지만으로 답이 강제됩니다. **다른 값은 불가능합니다.**", { before: 140 }));
+
+A(h3("3. (음수) × (음수) 를 유도한다"));
+A(p("똑같은 방법을 한 번 더 씁니다. 앞에 3 대신 −3을 놓기만 하면 됩니다."));
+A(box([
+  step("(−3) × ( 2 + (−2) ) = (−3) × 0 = **0**", { color: NAVY }),
+  step("분배법칙을 쓰면 ─"),
+  step("(−3) × 2  +  (−3) × (−2) = 0"),
+  step("−6  +  (−3) × (−2) = 0        ← 앞 항은 방금 유도한 값"),
+  step("∴  (−3) × (−2) = **6**", { color: ACC, bold: true }),
+], { fill: WARM, bar: ACC }));
+A(quote("마이너스끼리 곱하면 플러스인 것은 약속이 아닙니다. 분배법칙을 지키려면 그럴 수밖에 없는 결과입니다."));
+A(p("그래서 부호 규칙은 이렇게 한 줄로 줄어듭니다.", { before: 120 }));
+A(box([eq("곱셈·나눗셈의 부호는 **음수의 개수**가 정한다 — 짝수 개면 +, 홀수 개면 −", { size: 22, bold: true, color: NAVY, before: 20, after: 20 })]));
+
+A(h3("4. 계산 순서 — 아는 것을 틀리게 만드는 범인"));
+A(p("2 + 3 × 4 는 20일까요 14일까요? 순서를 정해두지 않으면 답이 두 개가 됩니다. 전 세계가 아래 순서로 약속했습니다."));
+A(box([
+  p("① **괄호** 안", { after: 50 }),
+  p("② **거듭제곱**", { after: 50 }),
+  p("③ **× ÷** — 같은 급끼리는 반드시 **왼쪽부터** 차례로", { after: 50 }),
+  p("④ **+ −** — 같은 급끼리는 반드시 **왼쪽부터** 차례로", { after: 0 }),
+]));
+A(h4("성인이 실제로 틀리는 지점 세 곳"));
+A(table(["함정", "잘못된 계산", "올바른 계산"],
+  [["÷ 와 × 는 왼쪽부터", "12 ÷ 2 × 3 = 12 ÷ 6 = 2", "12 ÷ 2 × 3 = 6 × 3 = **18**"],
+   ["− 도 왼쪽부터", "20 − 8 − 5 = 20 − 3 = 17", "20 − 8 − 5 = 12 − 5 = **7**"],
+   ["지수는 바로 앞 하나에만", "−3^2 = 9 라고 생각", "−3^2 = −(3×3) = **−9**,  (−3)^2 = **9**"]],
+  [2200, 3400, 4038], { zebra: true }));
+A(p("세 번째가 특히 중요합니다. −3^2에서 지수 2는 **3에만** 걸리고 마이너스는 결과에 붙습니다. (−3)^2은 괄호 전체가 밑이라 (−3)×(−3)입니다. 10회차 이후 함수식에서 이 차이가 계속 나옵니다.", { color: GREY, size: 19, before: 80 }));
+
+A(h4("[예제 1]  다음을 계산하시오."));
+A(probs(["(1)  (−5) × 4", "(2)  (−5) × (−4)", "(3)  (−2)^4", "(4)  −2^4"], 2, 400));
+A(h4("[예제 2]  다음을 계산하시오."));
+A(probs(["(1)  18 − 4 × 3", "(2)  (18 − 4) × 3", "(3)  24 ÷ 4 ÷ 2", "(4)  5 + 2 × (7 − 9)^2"], 2, 400));
+
+A(new Paragraph({ children: [new PageBreak()] }));
+
+A(h4("[연습 1]  부호"));
+A(probs(["1.  (−7) + 12", "2.  (−7) − 12", "3.  6 − (−9)", "4.  (−3) × (−6)",
+         "5.  (−48) ÷ 6", "6.  (−2) × (−3) × (−5)", "7.  −5^2", "8.  (−5)^2"], 2, 680));
+A(h4("[연습 2]  계산 순서"));
+A(probs(["1.  20 − 3 × 4", "2.  (20 − 3) × 4", "3.  36 ÷ 3 × 2", "4.  36 ÷ (3 × 2)",
+         "5.  15 − 7 − 3", "6.  15 − (7 − 3)", "7.  2 + 3 × (−4)^2", "8.  (−2)^3 + 4 × (5 − 8)"], 2, 680));
+A(h4("[연습 3]  유도해 보기"));
+A(box([
+  p("앞에서 한 방법을 그대로 흉내 내어, **(−4) × (−5) = 20** 임을 분배법칙으로 보이시오.", { after: 120 }),
+  p("(힌트: −4 × ( 5 + (−5) ) 에서 출발합니다.)", { size: 19, color: GREY, after: 0 }),
+  ...ruled(5, 8300),
+]));
+
+A(new Paragraph({ children: [new PageBreak()] }));
+
+/* ══ 블록 2 ══ */
+A(blockHead("1:20 – 2:10", "블록 2 — 지수와 근호, 큰 수를 다루는 언어"), spacer(160));
+
+A(h3("1. 지수법칙은 그냥 개수 세기다"));
+A(p("a^3 × a^5 을 풀어 쓰면 a가 3개, 그리고 a가 5개입니다. 전부 곱해져 있으니 a가 8개입니다. 그게 전부입니다."));
+A(box([
+  eq("a^m × a^n = a^{m+n}", { size: 24, bold: true, color: NAVY, after: 60 }),
+  eq("(a^m)^n = a^{mn}", { size: 24, bold: true, color: NAVY, after: 60 }),
+  eq("a^m ÷ a^n = a^{m−n}", { size: 24, bold: true, color: NAVY, after: 20 }),
+]));
+
+A(h3("2. 여기서 a^0 = 1 이 공짜로 나온다"));
+A(p("a^0을 따로 외울 필요가 없습니다. 같은 것을 두 가지 방법으로 계산해 보면 답이 강제됩니다."));
+A(box([
+  step("a^3 ÷ a^3 = a^{3−3} = a^0        ← 법칙대로 계산하면"),
+  step("a^3 ÷ a^3 = **1**                     ← 같은 것끼리 나누니까 당연히", { color: NAVY }),
+  step("∴  a^0 = **1**", { color: ACC, bold: true }),
+], { fill: WARM, bar: ACC }));
+
+A(h3("3. 음의 지수도 마찬가지다"));
+A(box([
+  step("a^2 ÷ a^5 = a^{2−5} = a^{−3}      ← 법칙대로 계산하면"),
+  step("a^2 ÷ a^5 = 1 / a^3                  ← 약분하면", { color: NAVY }),
+  step("∴  a^{−n} = 1 / a^n", { color: ACC, bold: true }),
+], { fill: WARM, bar: ACC }));
+A(quote("외울 것이 하나도 없습니다. 법칙 하나를 끝까지 밀면 나머지가 따라 나옵니다 — 오늘 두 번째로 같은 일이 일어났습니다."));
+
+A(h3("4. 근호 — 넓이에서 한 변을 되찾는 일"));
+A(p("넓이가 9인 정사각형의 한 변은 3입니다. 그러면 넓이가 12인 정사각형의 한 변은? 딱 떨어지는 정수가 없습니다. 그래서 √12 라는 **이름을 붙여** 그대로 계산에 쓰는 것입니다."));
+A(box([
+  p("**√a** 는 제곱해서 a가 되는 양수입니다.  (√a)^2 = a", { after: 70 }),
+  p("**√a × √b = √(ab)**  —  루트 안끼리는 곱하고 나눌 수 있습니다.", { after: 70 }),
+  p("**√12 = √(4×3) = 2√3**  —  제곱수를 밖으로 꺼내 간단히 합니다.", { after: 70 }),
+  p("**1/√2 = √2/2**  —  분모의 루트는 없애 둡니다. (유리화)", { after: 0 }),
+]));
+A(p("유리화를 왜 하는지는 4회차 ‘두 점 사이의 거리’에서 다시 만납니다. 지금은 손에 익혀 두기만 하면 됩니다.", { color: GREY, size: 19, before: 80 }));
+
+A(h3("5. 실생활 — 복리, 그리고 72의 법칙"));
+A(p("지수가 실제로 힘을 발휘하는 자리는 **이자**입니다. 원금 100만 원을 연 5% 복리로 10년 두면"));
+A(eq("100 × 1.05^{10} ≈ 100 × 1.629 = **약 163만 원**", { size: 23, color: NAVY, before: 90, after: 90 }));
+A(p("여기서 오래된 어림법이 하나 있습니다."));
+A(box([
+  eq("**72 의 법칙** — 72 ÷ 이자율(%) ≈ 원금이 두 배가 되는 햇수", { size: 23, bold: true, color: NAVY, before: 20, after: 90 }),
+  p("연 6%라면 72 ÷ 6 = 12년. 실제로 1.06^{12} = 2.012 이니 거의 정확합니다.", { align: AlignmentType.CENTER, after: 0 }),
+], { fill: WARM, bar: ACC }));
+A(quote("왜 하필 72인지는 11회차 로그에서 밝힙니다. 그때 이 페이지로 돌아옵니다."));
+
+A(h4("[예제 3]  지수법칙"));
+A(probs(["(1)  a^3 × a^5", "(2)  (a^3)^5", "(3)  a^7 ÷ a^7", "(4)  a^3 ÷ a^7"], 2, 400));
+A(h4("[예제 4]  근호"));
+A(probs(["(1)  √12", "(2)  √3 × √6", "(3)  3 / √3", "(4)  (2 + √3)(2 − √3)"], 2, 400));
+
+A(new Paragraph({ children: [new PageBreak()] }));
+
+A(h4("[연습 4]  지수"));
+A(probs(["1.  2^3 × 2^4", "2.  (3^2)^3", "3.  5^6 ÷ 5^4", "4.  7^0",
+         "5.  2^{−3}", "6.  (a^2 b)^3", "7.  (2a^3)^2 × a", "8.  (x^5 ÷ x^2)^3"], 2, 680));
+A(h4("[연습 5]  근호"));
+A(probs(["1.  √50", "2.  √8 × √2", "3.  √27 ÷ √3", "4.  2√5 + 3√5",
+         "5.  √18 − √2", "6.  1 / √5", "7.  (√7)^2", "8.  (3 + √2)(3 − √2)"], 2, 680));
+
+A(new Paragraph({ children: [new PageBreak()] }));
+
+/* ══ 블록 3 ══ */
+A(blockHead("2:20 – 2:50", "블록 3 — 통합 연습"), spacer(160));
+A(p("세 가지를 섞어서 풉니다. **A는 손**, **B는 번역**, **C는 이해**를 확인합니다. 특히 C를 건너뛰지 마십시오. 문장으로 설명되지 않는 것은 아직 이해한 것이 아닙니다.", { after: 200 }));
+
+A(h4("A.  계산"));
+A(probs(["1.  (−3)^2 − 3^2", "2.  −4^2 + (−4)^2", "3.  24 ÷ (−2)^3", "4.  2^5 ÷ 2^2 × 2",
+         "5.  (−1)^{100} + (−1)^{101}", "6.  √32 + √8", "7.  (2 − √5)(2 + √5)", "8.  (3^{−1} + 3^{−2}) × 9"], 2, 680));
+
+A(h4("B.  식 세우기  —  상황을 식으로 옮기시오"));
+A(probs([
+  "1.  기본료 12,000원에 데이터 1GB당 3,000원인 요금제가 있다.\n     한 달에 x GB를 썼을 때 요금을 x로 나타내시오.",
+  "2.  현재 잔고가 A만 원이고 매달 m만 원씩 자동이체로 빠져나간다.\n     n개월 뒤의 잔고를 나타내시오.",
+  "3.  원금 P원을 연이율 r(소수로 표기)의 복리로 n년 예치했을 때\n     찾게 되는 금액을 나타내시오.",
+  "4.  넓이가 50인 정사각형의 한 변의 길이를 근호로 나타내고,\n     소수 둘째 자리까지 어림하시오.",
+], 1, 0, 2));
+
+A(h4("C.  설명하기  —  문장으로 쓰시오"));
+A(probs([
+  "1.  a^0 = 1 인 이유를 지수법칙을 이용해 설명하시오.",
+  "2.  −3^2 과 (−3)^2 의 값이 다른 이유를 설명하시오.",
+], 1, 0, 4));
+
+A(new Paragraph({ children: [new PageBreak()] }));
+
+/* ══ 마무리 ══ */
+A(blockHead("2:50 – 3:00", "마무리 — 오늘 한 장 요약"), spacer(160));
+A(box([
+  p("**1.  규칙을 늘리지 말고, 규칙 하나를 끝까지 민다.**", { after: 40 }),
+  p("오늘 우리가 인정한 것은 분배법칙과 지수법칙뿐입니다. 부호 규칙도, a^0 = 1도, 음의 지수도 전부 거기서 나왔습니다.", { size: 19, color: GREY, after: 160 }),
+  p("**2.  곱셈·나눗셈의 부호는 음수의 개수가 정한다.**", { after: 40 }),
+  p("짝수 개면 +, 홀수 개면 −.", { size: 19, color: GREY, after: 160 }),
+  p("**3.  계산 순서는 괄호 → 거듭제곱 → ×÷ → +− , 같은 급끼리는 왼쪽부터.**", { after: 40 }),
+  p("−3^2 = −9 이고 (−3)^2 = 9 입니다. 지수는 바로 앞 하나에만 걸립니다.", { size: 19, color: GREY, after: 160 }),
+  p("**4.  a^0 = 1, a^{−n} = 1/a^n 은 외운 것이 아니라 유도한 것이다.**", { after: 40 }),
+  p("잊어버리면 a^3 ÷ a^3 을 두 가지 방법으로 계산해 보면 됩니다.", { size: 19, color: GREY, after: 0 }),
+]), spacer(240));
+
+A(h3("다음 회차 예고 — 문자와 식"));
+A(p("2회차는 이 교재 전체에서 **심리적으로 가장 어려운 회차**입니다. 계산이 어려워서가 아니라, ‘2,300원짜리 3개’는 바로 계산하면서 그것을 2300x라고 쓰라고 하면 손이 멈추기 때문입니다."));
+A(p("오늘 과제 B(식 세우기)가 그 예방주사입니다. 반드시 풀어 오십시오. **틀려도 좋으니 비워 두지는 마십시오.**"));
+
+A(new Paragraph({ children: [new PageBreak()] }));
+
+/* ══ 과제 ══ */
+A(blockHead("과제", "1회차 — 권장 소요 40분"), spacer(160));
+
+A(h4("A.  계산  (10문항)"));
+A(probs(["1.  (−8) + 3", "2.  (−8) − (−3)", "3.  (−2)^6", "4.  −2^6", "5.  40 ÷ (−5) × 2",
+         "6.  6 − 2 × (3 − 7)", "7.  3^4 ÷ 3^2", "8.  (2a^4)^3", "9.  √75 − √12", "10.  (1 + √3)(1 − √3)"], 2, 620));
+
+A(h4("B.  식 세우기  (4문항)"));
+A(probs([
+  "1.  택시 요금은 기본요금 4,800원(2km까지)이고, 2km를 넘으면 100m마다 120원이 붙는다.\n     d km(단, d > 2)를 갔을 때의 요금을 d로 나타내시오.",
+  "2.  정가 P원인 상품을 20% 할인한 뒤 부가세 10%를 붙였다. 최종 가격을 P로 나타내시오.",
+  "3.  매달 초 s만 원씩 이자 없이 모을 때, n개월 뒤의 총액을 나타내시오.",
+  "4.  한 모서리의 길이가 x인 정육면체의 겉넓이와 부피를 각각 x로 나타내시오.\n     또 겉넓이가 96일 때 부피를 구하시오.",
+], 1, 0, 2));
+
+A(h4("C.  설명하기  (1문항)"));
+A(probs(["1.  a^{−n} = 1/a^n 인 이유를 지수법칙을 이용해 설명하시오."], 1, 0, 5));
+
+A(h4("D.  실생활 미션"));
+A(box([
+  p("계산기를 꺼내서 **72의 법칙**이 정말 맞는지 직접 확인해 보십시오.", { after: 110 }),
+  p("연 6% 복리로 100만 원을 맡기면 72 ÷ 6 = 12년 뒤에 두 배가 된다고 했습니다.", { after: 60 }),
+  p("1.06을 12번 곱해서(또는 계산기의 x^y 기능으로) 정말 2에 가까운지 확인하고, 그 값을 적어 오십시오.", { after: 130 }),
+  new Paragraph({ children: rich("1.06^{12} = ______________", { size: 22, color: NAVY, bold: true, font: FONT }), spacing: { after: 0 } }),
+]));
+
+A(new Paragraph({ children: [new PageBreak()] }));
+
+/* ══ 정답 및 풀이 ══ */
+A(banner("1", "정답 및 풀이", "틀린 문제는 답만 고치지 말고, 어디서 갈렸는지 되짚어 보십시오"), spacer(220));
+
+A(ansHead("[예제 1]"));
+A(ansItem("(1)", "−20", "음수 1개(홀수) → 부호는 −, 크기는 5×4=20."));
+A(ansItem("(2)", "20", "음수 2개(짝수) → 부호는 +."));
+A(ansItem("(3)", "16", "밑이 −2. (−2)(−2)(−2)(−2), 음수 4개(짝수) → +16."));
+A(ansItem("(4)", "−16", "밑은 2이고 앞의 −는 결과에 붙는다. −(2×2×2×2) = −16.  (3)과 (4)의 차이가 오늘의 핵심."));
+
+A(ansHead("[예제 2]"));
+A(ansItem("(1)", "6", "곱셈 먼저. 18 − 12 = 6."));
+A(ansItem("(2)", "42", "괄호 먼저. 14 × 3 = 42."));
+A(ansItem("(3)", "3", "÷가 두 번이면 왼쪽부터. (24÷4)÷2 = 6÷2 = 3.  24÷(4÷2)=12 로 하면 틀린다."));
+A(ansItem("(4)", "13", "괄호 → 거듭제곱 → 곱셈 → 덧셈. 5 + 2×(−2)² = 5 + 2×4 = 13."));
+
+A(ansHead("[연습 1]  부호"));
+A(ansItem("1.", "5", "부호가 다르므로 12−7=5, 큰 쪽 부호 +."));
+A(ansItem("2.", "−19", "(−7) + (−12). 부호가 같으므로 더하고 −."));
+A(ansItem("3.", "15", "− (−9) = +9 이므로 6+9."));
+A(ansItem("4.", "18", "음수 2개 → +."));
+A(ansItem("5.", "−8", "음수 1개 → −."));
+A(ansItem("6.", "−30", "음수 3개(홀수) → −, 크기 2×3×5=30."));
+A(ansItem("7.", "−25", "밑은 5. −(5×5)."));
+A(ansItem("8.", "25", "밑은 −5. (−5)(−5)."));
+
+A(ansHead("[연습 2]  계산 순서"));
+A(ansItem("1.", "8", "20 − 12."));
+A(ansItem("2.", "68", "17 × 4."));
+A(ansItem("3.", "24", "왼쪽부터. (36÷3)×2 = 12×2."));
+A(ansItem("4.", "6", "괄호가 있으므로 36÷6.  3번과 4번의 차이를 확인할 것."));
+A(ansItem("5.", "5", "왼쪽부터. (15−7)−3 = 8−3."));
+A(ansItem("6.", "11", "괄호 먼저. 15−4."));
+A(ansItem("7.", "50", "(−4)² = 16 → 2 + 48."));
+A(ansItem("8.", "−20", "(−2)³ = −8, 4×(−3) = −12 → −8 −12."));
+
+A(ansHead("[연습 3]  유도해 보기"));
+A(new Paragraph({ children: rich("모범 답안", { size: 20, color: ACC, bold: true, font: FONT }), spacing: { after: 80 } }));
+A(box([
+  step("(−4) × ( 5 + (−5) ) = (−4) × 0 = 0"),
+  step("분배법칙:  (−4)×5 + (−4)×(−5) = 0"),
+  step("−20 + (−4)×(−5) = 0"),
+  step("∴  (−4) × (−5) = **20**", { color: ACC, bold: true }),
+  p("핵심은 ‘5 + (−5) = 0’이라는 사실과 분배법칙, 이 둘만으로 답이 하나로 정해진다는 점입니다.", { size: 19, color: GREY, before: 90, after: 0 }),
+], { fill: ANSB, bar: NAVY }));
+
+A(ansHead("[예제 3]  지수법칙"));
+A(ansItem("(1)", "a^8", "a가 3개와 5개, 합쳐서 8개."));
+A(ansItem("(2)", "a^{15}", "a³ 덩어리가 5개이므로 3×5=15개."));
+A(ansItem("(3)", "1", "a^{7−7} = a^0 = 1."));
+A(ansItem("(4)", "a^{−4} = 1/a^4", "a^{3−7} = a^{−4}."));
+
+A(ansHead("[예제 4]  근호"));
+A(ansItem("(1)", "2√3", "√12 = √(4×3) = √4 × √3 = 2√3."));
+A(ansItem("(2)", "3√2", "√3 × √6 = √18 = √(9×2) = 3√2."));
+A(ansItem("(3)", "√3", "분모·분자에 √3을 곱하면 3√3/3 = √3."));
+A(ansItem("(4)", "1", "(2)² − (√3)² = 4 − 3 = 1.  합·차의 곱은 2회차에서 공식으로 다시 만난다."));
+
+A(ansHead("[연습 4]  지수"));
+A(ansItem("1.", "2^7 = 128", "지수끼리 더한다."));
+A(ansItem("2.", "3^6 = 729", "2×3 = 6."));
+A(ansItem("3.", "5^2 = 25", "6−4 = 2."));
+A(ansItem("4.", "1", "0이 아닌 수의 0제곱은 1."));
+A(ansItem("5.", "1/8", "2^{−3} = 1/2^3."));
+A(ansItem("6.", "a^6 b^3", "괄호 안 각 문자에 지수 3이 모두 걸린다."));
+A(ansItem("7.", "4a^7", "(2a³)² = 4a⁶, 여기에 a를 곱해 4a⁷."));
+A(ansItem("8.", "x^9", "먼저 괄호 안 x^{5−2}=x³, 그다음 (x³)³ = x⁹."));
+
+A(ansHead("[연습 5]  근호"));
+A(ansItem("1.", "5√2", "√(25×2)."));
+A(ansItem("2.", "4", "√16 = 4."));
+A(ansItem("3.", "3", "√(27÷3) = √9."));
+A(ansItem("4.", "5√5", "√5를 문자처럼 보면 2개 + 3개 = 5개."));
+A(ansItem("5.", "2√2", "3√2 − √2. 먼저 √18을 3√2로 간단히 하는 것이 핵심."));
+A(ansItem("6.", "√5/5", "분모·분자에 √5를 곱한다."));
+A(ansItem("7.", "7", "제곱근을 제곱하면 원래 수."));
+A(ansItem("8.", "7", "3² − (√2)² = 9 − 2."));
+
+A(new Paragraph({ children: [new PageBreak()] }));
+
+A(ansHead("[통합 A]  계산"));
+A(ansItem("1.", "0", "9 − 9. (−3)²과 3²은 둘 다 9다. 다른 것은 −3²(=−9)이다."));
+A(ansItem("2.", "0", "−16 + 16."));
+A(ansItem("3.", "−3", "(−2)³ = −8 이므로 24 ÷ (−8)."));
+A(ansItem("4.", "16", "왼쪽부터. (2^5÷2^2)×2 = 2³×2 = 2⁴ = 16."));
+A(ansItem("5.", "0", "−1의 짝수제곱은 1, 홀수제곱은 −1. 1 + (−1)."));
+A(ansItem("6.", "6√2", "√32 = 4√2, √8 = 2√2. 합쳐서 6√2."));
+A(ansItem("7.", "−1", "2² − (√5)² = 4 − 5."));
+A(ansItem("8.", "4", "(1/3 + 1/9)×9 = 3 + 1."));
+
+A(ansHead("[통합 B]  식 세우기"));
+A(ansItem("1.", "12000 + 3000x  (원)", "고정으로 붙는 것은 그냥 더하고, 쓴 만큼 늘어나는 것에 문자를 곱한다."));
+A(ansItem("2.", "A − mn  (만 원)", "매달 m씩 n개월이면 총 mn이 빠진다. A + (−m)n 으로 써도 같다."));
+A(ansItem("3.", "P(1 + r)^n  (원)", "1년마다 (1+r)배가 되므로 n년이면 (1+r)을 n번 곱한다. 오늘 복리 예시와 같은 구조."));
+A(ansItem("4.", "√50 = 5√2 ≈ 7.07", "한 변을 x라 하면 x² = 50, x > 0이므로 x = √50 = 5√2. √2 ≈ 1.414 이므로 약 7.07."));
+
+A(ansHead("[통합 C]  설명하기"));
+A(box([
+  p("**1.  a^0 = 1 인 이유**", { after: 70 }),
+  p("a^n ÷ a^n 을 두 가지 방법으로 계산한다. 지수법칙대로 하면 a^{n−n} = a^0 이고, 같은 수끼리 나누는 것이므로 값은 1이다. 같은 계산의 결과이므로 a^0 = 1일 수밖에 없다.", { after: 190 }),
+  p("**2.  −3^2 과 (−3)^2 이 다른 이유**", { after: 70 }),
+  p("지수는 바로 앞에 있는 하나에만 걸린다. −3^2 은 지수가 3에만 걸리므로 3×3 = 9를 먼저 계산하고 마이너스를 결과에 붙여 −9가 된다. (−3)^2 은 괄호 전체가 밑이므로 (−3)×(−3) = 9 이다.", { after: 0 }),
+], { fill: ANSB, bar: NAVY }));
+
+A(ansHead("[과제 A]  계산"));
+A(ansItem("1.", "−5", "부호가 다르므로 8−3=5, 큰 쪽 부호 −."));
+A(ansItem("2.", "−5", "−(−3) = +3 이므로 −8+3."));
+A(ansItem("3.", "64", "밑이 −2, 음수 6개(짝수) → +."));
+A(ansItem("4.", "−64", "밑은 2. −(2^6).  3번과 4번을 반드시 비교할 것."));
+A(ansItem("5.", "−16", "왼쪽부터. (40÷(−5))×2 = (−8)×2."));
+A(ansItem("6.", "14", "괄호 먼저. 6 − 2×(−4) = 6 + 8."));
+A(ansItem("7.", "9", "3^{4−2} = 3² = 9."));
+A(ansItem("8.", "8a^{12}", "2³ = 8, (a⁴)³ = a¹². 계수에도 지수가 걸리는 것을 빠뜨리기 쉽다."));
+A(ansItem("9.", "3√3", "√75 = 5√3, √12 = 2√3. 5√3 − 2√3."));
+A(ansItem("10.", "−2", "1² − (√3)² = 1 − 3."));
+
+A(ansHead("[과제 B]  식 세우기"));
+A(ansItem("1.", "4800 + 1200(d − 2)  (원)",
+  "2km를 넘은 거리는 (d−2)km = (d−2)×1000 m. 100m마다 붙으므로 구간 수는 10(d−2)개, 요금은 120×10(d−2) = 1200(d−2). 예를 들어 5km면 4800 + 1200×3 = 8,400원."));
+A(ansItem("2.", "0.88P  (원)",
+  "20% 할인은 0.8배, 부가세 10%는 1.1배. P×0.8×1.1 = 0.88P. 할인율과 세율을 더하거나 빼는 것이 아니라 배율을 곱한다는 점이 핵심 — 2회차에서 다시 다룬다."));
+A(ansItem("3.", "sn  (만 원)", "이자가 없으므로 단순히 매달 s씩 n번."));
+A(ansItem("4.", "겉넓이 6x^2,  부피 x^3,  부피 = 64",
+  "정육면체의 면은 6개이고 각 면의 넓이가 x². 6x² = 96 → x² = 16 → x = 4 (길이이므로 양수). 부피는 4³ = 64. 9회차 최적화 문제에서 이 식들을 다시 쓴다."));
+
+A(ansHead("[과제 C]  설명하기"));
+A(box([
+  p("**a^{−n} = 1/a^n 인 이유**", { after: 70 }),
+  p("a^m ÷ a^{m+n} 을 두 가지 방법으로 계산한다. 지수법칙대로 하면 a^{m−(m+n)} = a^{−n} 이다. 한편 분자·분모를 약분하면 분모에 a가 n개 남아 1/a^n 이다. 같은 계산의 결과이므로 두 값은 같다.", { after: 140 }),
+  p("예를 들어 a² ÷ a⁵ 은 법칙대로 하면 a^{−3}, 약분하면 1/a³ 이다.", { size: 19, color: GREY, after: 0 }),
+], { fill: ANSB, bar: NAVY }));
+
+A(ansHead("[과제 D]  실생활 미션"));
+A(ansItem("", "1.06^{12} = 2.0122…",
+  "100만 원이 약 201만 원이 되어 정확히 두 배를 조금 넘는다. 72 ÷ 6 = 12 라는 어림이 잘 맞는다. 이자율이 낮을수록 더 정확하고, 아주 높아지면 오차가 커진다."));
+
+A(spacer(300));
+A(new Paragraph({
+  children: rich("1회차 끝.  다음 회차는 «문자와 식 — 상황을 식으로».", { size: 20, color: GREY, font: FONT, italics: true }),
+  alignment: AlignmentType.CENTER,
+  border: { top: { style: BorderStyle.SINGLE, size: 6, color: LINE, space: 14 } },
+  spacing: { before: 200 },
+}));
+
+/* ══ 문서 조립 ══ */
+const doc = new Document({
+  styles: { default: { document: { run: { font: FONT, size: 21, color: "1F2937" } } } },
+  sections: [{
+    properties: { page: { margin: { top: 1134, bottom: 1134, left: 1134, right: 1134 } } },
+    footers: { default: new Footer({ children: [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ font: FONT, size: 17, color: GREY, children: ["CLIMATH 성인수학  ·  1회차  ·  ", PageNumber.CURRENT] })],
+    })] }) },
+    children: body,
+  }],
+});
+
+Packer.toBuffer(doc).then((buf) => {
+  fs.writeFileSync(__dirname + "/out/CLIMATH_성인수학_1회차_수와식의문법.docx", buf);
+  console.log("작성 완료:", buf.length, "bytes");
+});
