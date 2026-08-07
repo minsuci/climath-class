@@ -24,6 +24,11 @@
 **4. 회차마다 "미리 걸어두기"를 하나씩 심는다.**
 1회차의 72의 법칙 → 11회차 로그에서 회수. 성인 학습자 이탈 방지에 가장 잘 듣는다.
 
+> ⚠️ **1회차 표지 그림과 12회차 오프닝은 한 몸이다.**
+> 두 회차 모두 `f(x) = x³ − 6x² + 9x + 3` 의 그래프를 쓴다. 1회차는 점 P(4, 7)의
+> 접선만 그려놓고 정체를 숨기고, 12회차 오프닝에서 `f′(4) = 9` 를 계산하며 밝힌다.
+> 함수를 바꾸려면 `assets/figures.py`, `lesson01.js`, `lesson12.js` 를 **함께** 고쳐야 한다.
+
 **5. 문항 구성은 계산 : 식 세우기 : 설명하기 = 1 : 1 : 1.**
 '설명하기'(서술형)가 이 교재의 특징이다. 성인은 서술을 부담스러워하지 않고
 오히려 자기가 이해했는지 확인하는 도구로 쓴다.
@@ -47,7 +52,7 @@
 | 9 | 다항함수와 도형 | 기하 흡수 ② + 최적화 재료 | |
 | 10 | 극한 — 무한히 가까이 | **최대 고비.** 평균변화율 → 순간변화율 | |
 | 11 | 미분 — 도함수와 접선 | 계산할 수 있게 됨 | |
-| 12 | 미분의 활용 — 그래프 개형·최적화 | 도착 | |
+| 12 | 미분의 활용 — 그래프 개형·최적화 | 도착 | ✅ |
 
 **범위 밖:** 삼각함수·지수로그함수의 미분은 다루지 않는다. 36시간에 다항함수 미분까지
 가는 것만으로도 빡세다. 과제는 선택이 아니라 필수 전제다.
@@ -74,17 +79,32 @@
 
 ```bash
 cd textbook
-npm install docx          # 최초 1회
-python3 assets/fig_tangent.py   # 그림이 없을 때만 (matplotlib 필요)
-node lesson01.js          # → out/*.docx
+npm install docx                  # 최초 1회
+python3 assets/figures.py         # 그림을 다시 만들 때만 (matplotlib 필요)
+node lesson01.js                  # → out/*.docx
+node lesson12.js
 ```
 
 `.docx`는 한/글에서 그대로 열린다. 최종본을 `.hwp`로 조판할 경우 한/글에서
 다른 이름으로 저장하면 된다 (한/글 자동화는 윈도우 전용이라 리눅스에서는 불가).
 
-### lesson01.js 구조
+### 파일 구조
 
-상단 절반이 렌더링 헬퍼, 하단 절반이 내용 데이터다. 새 회차는 헬퍼를 복사해 쓴다.
+```
+textbook/
+├── lib/doc.js        렌더링 헬퍼 + buildDoc  ← 모든 회차가 공유
+├── lessonNN.js       회차별 내용만. 실행하면 out/ 에 .docx 를 쓴다
+├── assets/
+│   ├── figures.py    그림 생성 (matplotlib). 한글은 NanumGothic 필요
+│   └── *.png         생성된 그림
+├── verify/           회차별 정답 검산 스크립트
+└── out/              산출물
+```
+
+새 회차는 `lessonNN.js` 하나만 만들면 된다. **헬퍼를 복사하지 말 것** —
+회차가 늘어나면 서식이 조용히 어긋난다.
+
+### lib/doc.js 가 주는 것
 
 - `rich(text)` — 인라인 서식 파서. `**굵게**`, `^2` / `^{m+n}` 위첨자
 - `banner` `blockHead` `h3` `h4` — 제목 계층
@@ -93,6 +113,7 @@ node lesson01.js          # → out/*.docx
 - `table(headers, rows, widths)` — 폭은 DXA, 합이 `W`(9638)여야 한다
 - `probs(items, cols, space, rule)` — 문제 격자. `rule`을 주면 답안 밑줄
 - `ansItem(no, ans, sol)` — 정답 + 풀이 한 줄
+- `buildDoc({lesson, body, outPath})` — A4 문서로 묶어 파일로 쓴다. 꼬리말 자동
 
 ### 주의사항
 
@@ -102,5 +123,24 @@ node lesson01.js          # → out/*.docx
   만들면 여러 줄이 한 줄로 합쳐진다. `ruled()`가 표로 그리는 이유다.
 - **표 색은 `ShadingType.CLEAR`.** `SOLID`는 검게 렌더된다.
 - 박스가 페이지 경계에서 쪼개지지 않도록 `TableRow`에 `cantSplit: true`.
-- **모든 답은 코드로 검산할 것.** 1회차는 56항목을 파이썬으로 검증했다.
-  손으로 만든 답은 반드시 틀린다.
+- 이미지는 페이지에 안 들어가면 통째로 다음 장으로 밀려 **앞 장이 반쯤 빈다.**
+  렌더해서 눈으로 확인하고, 필요하면 앞뒤 `PageBreak` 를 빼거나 크기를 줄인다.
+- **모든 답은 코드로 검산할 것.** 손으로 만든 답은 반드시 틀린다.
+  문항을 고쳤으면 `verify/lessonNN.py` 도 같이 고치고 다시 돌린다.
+
+```bash
+python3 verify/lesson01.py     # 56항목
+python3 verify/lesson12.py     # 전 문항 (sympy 필요)
+```
+
+### 렌더링해서 눈으로 보기
+
+리눅스에서는 `libreoffice-writer`, `poppler-utils`, `fonts-nanum` 이 필요하다.
+
+```bash
+soffice --headless --convert-to pdf out/파일.docx
+pdftoppm -jpeg -r 75 파일.pdf pg     # pg-01.jpg … 를 열어서 확인
+```
+
+LibreOffice 에는 맑은 고딕이 없어 나눔고딕으로 대체 렌더된다. 자간과 줄바꿈이
+한/글·Word 와 다르므로 **레이아웃 구조 확인용**으로만 쓴다.
