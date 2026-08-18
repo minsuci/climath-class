@@ -2044,10 +2044,18 @@ function MakeupCenter({ onBack }) {
   // ---- 3단계: 날짜의 수업 선택 ----
   if (picked && pickedDate) {
     const dow = new Date(pickedDate + "T00:00:00").getDay();
+    // 본인 반 중 그날 수업 있는 것
     const sessions = picked.entries.filter(({ cls, st }) => {
       if (!isActiveOn(st, pickedDate)) return false;
       const dows = isIndividual(cls) ? (st.days || []) : (cls.classDays || []);
       return dows.includes(dow);
+    });
+    // 본인 반이 아니지만 그날 수업이 열리는 반 (보강 참석 등)
+    const myCids = picked.entries.map((e) => e.cls.id);
+    const others = CLASSES.filter((c) => {
+      if (myCids.includes(c.id)) return false;
+      if (isIndividual(c)) return false; // 개별진도반은 학생별 요일이라 제외
+      return (c.classDays || []).includes(dow);
     });
     return (
       <div key="mk-session" ref={backRef3} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
@@ -2084,6 +2092,33 @@ function MakeupCenter({ onBack }) {
               </button>
             );
           })}
+
+          {others.length > 0 && (<>
+            <div className="cm-mini-h" style={{marginTop: 16}}>다른 반 수업 <span className="cm-h-hint">(보강 참석 등)</span></div>
+            {others.map((c) => {
+              const st = picked.entries[0].st; // 이름·id는 본인 소속 기준으로 기록
+              const mm = mkOf(c.id, st.id, pickedDate) || {};
+              const on = mm.planned, vd = mm.videoDone;
+              return (
+                <button key={"o" + c.id} className="cm-day" style={{
+                  borderLeft: "4px solid " + (vd ? "#2b5f8a" : on ? "#c2703f" : "transparent"),
+                  background: vd ? "#e3edf5" : on ? "#f6e7df" : undefined,
+                }} onClick={() => {
+                  if (vd) clearMakeup(c.id, st.id, pickedDate);
+                  else if (on) setMakeup(c.id, st.id, st.name, pickedDate, { videoDone: true });
+                  else setMakeup(c.id, st.id, st.name, pickedDate, { planned: true, videoDone: false });
+                }}>
+                  <div className="cm-day-left">
+                    <span className="cm-day-date">{c.name}</span>
+                    <span className="cm-day-sub" style={{color: vd ? "#2b5f8a" : on ? "#c2703f" : undefined}}>
+                      {vd ? "동영상 보강 완료" : on ? "결석 예정" : "이 반 수업에 참석 예정이면 표시"}
+                    </span>
+                  </div>
+                  <span className="cm-day-arrow">{vd ? "▶" : on ? "✕" : "○"}</span>
+                </button>
+              );
+            })}
+          </>)}
         </div>
       </div>
     );
@@ -2113,11 +2148,14 @@ function MakeupCenter({ onBack }) {
             <button className="cm-link" onClick={() => setPicked(null)}>← 목록</button>
           </div>
           <div style={{fontSize: 13, color: "var(--muted)"}}>{picked.entries.map((e) => e.cls.name).join(" · ")}</div>
-          <div className="cm-hint" style={{marginTop: 10}}>빠지는 날짜를 고르세요.</div>
-          <div style={{display: "flex", gap: 6, marginTop: 10}}>
+          <div className="cm-hint" style={{marginTop: 10}}>빠지는 날짜를 고르세요. 아래 목록에 없는 날(보강 참석 등)은 직접 지정할 수 있어요.</div>
+          <div style={{display: "flex", gap: 6, marginTop: 10, alignItems: "center", flexWrap: "wrap"}}>
             {[4, 8, 12].map((w) => (
               <button key={w} className={"cm-ab-tab" + (weeks === w ? " on" : "")} onClick={() => setWeeks(w)}>{w}주</button>
             ))}
+            <input className="cm-input" style={{margin: 0, width: 150, marginLeft: "auto"}} type="date"
+              title="지난 날짜도 지정할 수 있어요"
+              onChange={(e) => e.target.value && setPickedDate(e.target.value)} />
           </div>
         </div>
         <div className="cm-card">
