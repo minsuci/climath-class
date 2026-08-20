@@ -10,13 +10,14 @@ const html = readFileSync(join(root, "index.html"), "utf8");
 
 // 순수 함수 구간만 잘라 실행한다 (React·Firestore에 의존하지 않는 부분)
 const from = html.indexOf("const CL_PALETTE");
-const to = html.indexOf("function clSegments");
+const to = html.indexOf("async function clMakeNote");
 if (from < 0 || to < 0) { console.error("실패: 감지 함수 구간을 찾지 못했습니다"); process.exit(1); }
 const code = html.slice(from, to);
 
 const sandbox = {};
-new Function("exports", code + "\nObject.assign(exports,{clJamo,clSim,clDetect,clCountUtt,CL_CLOSED,CL_OPEN});")(sandbox);
-const { clSim, clDetect, clCountUtt, CL_CLOSED, CL_OPEN } = sandbox;
+new Function("exports", code +
+  "\nObject.assign(exports,{clJamo,clSim,clDetect,clCountUtt,clSegments,clSplitTranscript,CL_CLOSED,CL_OPEN});")(sandbox);
+const { clSim, clDetect, clCountUtt, clSplitTranscript, CL_CLOSED, CL_OPEN } = sandbox;
 
 const people = [
   { sid: "a", name: "승훈", aliases: [], units: ["유리함수", "무리식과 무리함수"] },
@@ -62,6 +63,28 @@ const utt = [
 ];
 chk("폐쇄형 3발화", clCountUtt(utt, CL_CLOSED), 3);
 chk("개방형 3발화", clCountUtt(utt, CL_OPEN), 3);
+
+console.log("\n[전사 분배] 어느 말이 누구에게 한 말인가");
+const segs = [
+  { sid: "a", name: "승훈", kind: "lesson", unit: "무리함수", start: 0,   end: 600 },
+  { sid: null, name: "",   kind: "mic",    unit: "",        start: 600, end: 900 },
+  { sid: "b", name: "지오", kind: "lesson", unit: "적분",     start: 900, end: 1500 },
+  { sid: "c", name: "태경", kind: "qa",     unit: "",         start: 1500, end: 1600 },
+];
+const tr = [
+  { t: 10,   text: "무리함수 정의역부터" },      // 승훈
+  { t: 590,  text: "여기까지 하고" },            // 승훈
+  { t: 700,  text: "마이크 꺼진 구간 잡담" },     // 버림
+  { t: 1000, text: "치환적분 들어갑니다" },       // 지오
+  { t: 1550, text: "태경이 질문 응대" },          // qa → 버림
+  { t: 9999, text: "수업 끝난 뒤" },              // 구간 밖 → 버림
+];
+const split = clSplitTranscript(tr, segs);
+chk("승훈 2문장", (split.a || []).length, 2);
+chk("지오 1문장", (split.b || []).length, 1);
+chk("마이크꺼짐 제외", Object.values(split).flat().some((t) => t.includes("잡담")), false);
+chk("질문응대 제외 (태경 없음)", split.c === undefined, true);
+chk("구간 밖 제외", Object.values(split).flat().some((t) => t.includes("끝난 뒤")), false);
 
 console.log(fail ? "\n실패 " + fail + "건\n" : "\n전부 통과\n");
 process.exit(fail ? 1 : 0);

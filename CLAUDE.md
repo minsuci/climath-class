@@ -6,6 +6,7 @@ CLIMATH 학원(한민수 선생님)의 수업관리 앱. **빌드 없는 단일 
 repo/
 ├── index.html              # 앱 전체 (CSS + React, 4,786줄)
 ├── api/hint.js             # AI 힌트 중계 (Vercel serverless)
+├── api/note.js             # 수업기록 초안 생성 (Vercel serverless)
 ├── tools/check-jsx.mjs     # JSX 문법 검사 (배포 안 됨)
 ├── tools/test-detect.mjs   # 수업 로그 이름/단원 감지 테스트
 ├── tools/make-preview.mjs  # Firestore를 메모리 가짜로 바꾼 preview.html 생성
@@ -158,6 +159,17 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
   같이 나오는 것이 본체에 가깝다 — **학생별 배분 시간**(강의/질문 분리)과 **계획 대비 진도**.
   강의 구간이 20초 미만이면 오탭으로 보고 버린다(그래서 눌러보기만 하면 내보내기가 안 뜬다).
 
+  **수업기록 초안**: `clSplitTranscript`가 받아쓴 발화를 학생 구간에 맞춰 나누고
+  (버릴 구간·구간 밖은 제외), `/api/note`가 학생별 수업기록으로 요약한다.
+  저장하면 `dailyNotes`에 들어가 **학습관리 보고서에 그대로 실린다.**
+  원문은 두 갈래다 — 마이크를 켰으면 라이브 자막, 아니면 PC에서
+  `split_by_log.py --transcribe`(faster-whisper)로 받아쓴 걸 붙여넣는다. 후자가 훨씬 정확하다.
+
+  > [!warning] 음성 파일은 앱에 저장하지 않는다
+  > 앱의 파일 저장 한계는 4.5MB인데 2시간 음성은 8kbps로 눌러도 base64 9.6MB다.
+  > 애초에 안 들어간다. 그리고 **음성은 이미 녹화 영상 안에 있다** —
+  > `split_by_log.py --audio`가 학생별로 뽑아낸다. 브라우저 녹음은 중복이다.
+
   > [!warning] 마이크는 제안만 한다. 자동으로 바꾸지 않는다
   > `useLessonMic`이 Web Speech API(`ko-KR`)로 받아쓰고 `clDetect`가 이름·단원을 찾아
   > **"바꿀까요?"를 띄운다.** 자동 전환은 체크박스를 켜야만 동작하고 기본값은 꺼짐이다.
@@ -176,6 +188,12 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - **학습관리 보고서**: 출결 / 수업기록(dailyNotes) / 상담 / 종합코멘트. A4 인쇄·PDF.
   미리보기에서 수업기록 클릭 시 인라인 수정 가능. 인쇄 시 `.rp-noprint` 요소는 숨김.
   교재별 진도는 **표시 제거됨**(집계 로직과 hwSnapshot 저장은 남아 있어 되살리기 가능)
+
+### 수업기록 초안 (`api/note.js`)
+`hint.js`와 같은 `GEMINI_API_KEY`·같은 모델을 쓰지만 **프롬프트가 정반대**다.
+hint는 "답을 주지 마", note는 "일어난 일만 적어". 원문에 없는 내용을 지어내지 않도록,
+수업 내용이 안 보이면 그렇다고 답하도록 못박아 뒀다.
+학부모에게 나가는 글이라 **저장 전 사람이 읽고 고치는 것을 전제**로 한다.
 
 ### AI 힌트 (`api/hint.js`)
 Google Gemini 무료 등급, 모델 `gemini-2.5-flash-lite`.

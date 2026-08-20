@@ -4103,6 +4103,30 @@ function clFfmpeg(groups, src) {
   return L.join("\n");
 }
 
+/* 받아쓴 발화를 학생 구간에 맞춰 나눈다.
+   transcript = [{t(초), text}], segments = clSegments 결과.
+   이게 있어야 "이 말은 누구에게 한 말인가"가 정해진다. */
+function clSplitTranscript(transcript, segments) {
+  const by = {};
+  (transcript || []).forEach((e) => {
+    const seg = (segments || []).find((g) => g.sid && e.t >= g.start && e.t < g.end);
+    if (!seg || !CL_KIND[seg.kind] || !CL_KIND[seg.kind].keep) return;
+    (by[seg.sid] = by[seg.sid] || []).push(e.text);
+  });
+  return by;
+}
+
+async function clMakeNote(text, student, units) {
+  const r = await fetch("/api/note", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, student, units }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "요청 실패");
+  return d.note;
+}
+
 function clDownload(name, text) {
   const b = new Blob(["﻿" + text], { type: "text/plain;charset=utf-8" });
   const a = document.createElement("a");
@@ -4151,6 +4175,7 @@ function LessonLogger({ cls, canEdit, meName }) {
   const [sug, setSug] = useState(null);
   const [autoSw, setAutoSw] = useState(false);
   const [srcPath, setSrcPath] = useState("");
+  const [noteState, setNoteState] = useState({});   // sid → {src,note,busy,saving,done,err}
   const [, tick] = useState(0);
 
   const date = todayStr;
@@ -4285,6 +4310,8 @@ function LessonLogger({ cls, canEdit, meName }) {
 
   const subjOf = (sid) => { const p = people.find((x) => x.id === sid); return p ? (p.books || []).join("+") : ""; };
   const groups = clGroup(segs, date, subjOf);
+  const savedTrans = (saved && saved.transcript) || trans;
+  const byStudent = clSplitTranscript(savedTrans, segs);
   const hasSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 
   if (!canEdit) return <div className="cm-empty">담당 선생님만 기록할 수 있어요</div>;
@@ -4448,6 +4475,79 @@ function LessonLogger({ cls, canEdit, meName }) {
               onClick={() => { const t = clFfmpeg(groups, srcPath); if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => alert("복사했습니다"), () => alert(t)); else alert(t); }}>ffmpeg 명령 복사</button>
           </div>
           <div className="cm-hint" style={{ marginTop: 8 }}>컷 리스트를 <code>split_by_log.py</code> 와 같은 폴더에 두고 실행하면 학생별 파일이 나옵니다.</div>
+        </div>
+      )}
+
+      {/* ── 수업기록 초안 ── 여기서 저장하면 학습관리 보고서에 그대로 실린다 */}
+      {!log && segs.some((g) => g.sid && CL_KIND[g.kind] && CL_KIND[g.kind].keep) && (
+        <div style={{ marginTop: 20 }}>
+          <h4 className="cm-h3" style={{ fontSize: 14 }}>수업기록 <span className="cm-h-hint">(저장하면 학습관리 보고서에 실려요)</span></h4>
+          {groups.map((g) => {
+            const heard = (byStudent[g.sid] || []).join(" ");
+            const st = noteState[g.sid] || {};
+            const srcText = (st.src != null ? st.src : heard);
+            return (
+              <div key={g.sid} className="cm-card" style={{ borderLeft: "4px solid " + colorOf(g.sid), padding: 12 }}>
+                <div className="row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <b style={{ color: colorOf(g.sid) }}>{g.name}</b>
+                  <span className="cm-day-sub">{g.units.join(", ")}</span>
+                  <span className="cm-day-sub" style={{ marginLeft: "auto" }}>
+                    {srcText ? srcText.length + "자" : "받아쓴 내용 없음"}
+                  </span>
+                </div>
+
+                {!srcText && (
+                  <div className="cm-hint" style={{ marginTop: 6 }}>
+                    마이크를 안 켜셨네요. PC에서 <code>split_by_log.py --transcribe</code> 로 받아쓴 뒤
+                    아래에 붙여넣으면 됩니다.
+                  </div>
+                )}
+
+                <textarea className="cm-input" rows={srcText ? 3 : 2} style={{ marginTop: 8, fontSize: 13 }}
+                  placeholder="받아쓴 원문 (붙여넣어도 됩니다)"
+                  value={srcText}
+                  onChange={(e) => setNoteState((s) => ({ ...s, [g.sid]: { ...s[g.sid], src: e.target.value } }))} />
+
+                {st.note != null && (
+                  <textarea className="cm-input" rows={4} style={{ marginTop: 8 }}
+                    value={st.note}
+                    onChange={(e) => setNoteState((s) => ({ ...s, [g.sid]: { ...s[g.sid], note: e.target.value } }))} />
+                )}
+                {st.err && <div className="cm-err">{st.err}</div>}
+
+                <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  <button className="cm-btn cm-btn-ghost" style={{ margin: 0, padding: "8px 12px" }}
+                    disabled={!srcText || srcText.length < 30 || st.busy}
+                    onClick={async () => {
+                      setNoteState((s) => ({ ...s, [g.sid]: { ...s[g.sid], busy: true, err: "" } }));
+                      try {
+                        const note = await clMakeNote(srcText, g.name, g.units);
+                        setNoteState((s) => ({ ...s, [g.sid]: { ...s[g.sid], busy: false, note } }));
+                      } catch (e) {
+                        setNoteState((s) => ({ ...s, [g.sid]: { ...s[g.sid], busy: false, err: String(e.message || e) } }));
+                      }
+                    }}>{st.busy ? "쓰는 중..." : "초안 만들기"}</button>
+
+                  {st.note != null && (
+                    <button className="cm-btn cm-btn-primary" style={{ margin: 0, padding: "8px 12px" }}
+                      disabled={st.saving}
+                      onClick={async () => {
+                        setNoteState((s) => ({ ...s, [g.sid]: { ...s[g.sid], saving: true } }));
+                        try {
+                          await saveDailyNote(cls.id, g.sid, g.name, date, st.note, meName);
+                          setNoteState((s) => ({ ...s, [g.sid]: { ...s[g.sid], saving: false, done: true } }));
+                        } catch (e) {
+                          setNoteState((s) => ({ ...s, [g.sid]: { ...s[g.sid], saving: false, err: String(e.message || e) } }));
+                        }
+                      }}>{st.saving ? "저장 중..." : st.done ? "저장됨 ✓ 다시 저장" : "수업기록으로 저장"}</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          <div className="cm-hint">
+            AI가 쓴 초안입니다. <b>저장 전에 반드시 읽고 고치세요</b> — 학부모에게 나가는 글입니다.
+          </div>
         </div>
       )}
 
