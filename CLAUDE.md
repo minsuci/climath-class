@@ -10,6 +10,7 @@ repo/
 ├── tools/check-jsx.mjs     # JSX 문법 검사 (배포 안 됨)
 ├── tools/test-detect.mjs   # 수업 로그 이름/단원 감지 테스트
 ├── tools/make-preview.mjs  # Firestore를 메모리 가짜로 바꾼 preview.html 생성
+├── tools/fix_sync.py       # 영상에서 표식음을 찾아 컷 리스트 시각을 맞춤 (PC에서 실행)
 └── CLAUDE.md               # 이 문서
 ```
 
@@ -105,6 +106,7 @@ classes/{cid}
   ├─ lessonLogs/{date}   { startedAt, endedAt, shift, marks[], segments[], transcript[], teacher }
   │                        segments = { sid, name, kind, unit, start, end }  start/end는 영상 기준 초
   │                        kind = lesson(남김) | qa | brk | mic | etc(버림)
+  │                        beeped = 시작 때 표식음을 냈는지, endBeepAt = 종료 표식음 시각
   ├─ config/lessonLog    { units:{sid:[단원]}, aliases:{sid:[자막 오인식 표기]} }
   └─ days/{date}
        ├─ attendance/{sid}  { name, time }   # 문서 존재 = 출석
@@ -166,6 +168,23 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
   `marks`가 남아 있으므로 shift는 나중에 몇 번이고 고칠 수 있다(`clReseg`).
   음수면(녹화를 늦게 켬) 그 앞은 영상에 없으므로 `clGroup`이 잘라낸다.
 
+  **소리 슬레이트**(`clBeep`): 손으로 맞추는 건 매주 반복되는 일이라, 신호를 아예 심어둔다.
+  시작·종료에 두겹 순음(1000Hz+1600Hz, 0.35초)을 낸다. 캠코더가 그걸 같이 녹음하므로
+  `tools/fix_sync.py`가 영상 오디오에서 찾아 **오프셋을 자동으로 채운다.** 선생님 손은 안 간다.
+  종료 표식음까지 찾으면 캠코더 시계 드리프트도 잰다(`--drift`로 적용).
+
+  순음을 **두 개 겹치는** 이유: 하나면 휘파람·벨소리에 걸린다. 1600/1000=1.6배라 배음 관계도
+  아니어서 서로의 하모닉으로 오인되지 않는다. 검출은 "전체 소리 중 몇 %"가 아니라
+  **제 이력 대비 + 이웃 주파수 대비** 두 조건을 함께 본다(비율만 보면 떠드는 교실에서 묻힌다).
+  합성 시험에서 배경잡음과 같은 크기(0dB)까지 잡았고, 휘파람(1000Hz·1600Hz 단음)·박수·
+  벨소리에 오검출 0. 못 찾으면 `--sens 0.5`.
+
+  > [!warning] 아이폰 무음 모드에서는 웹 오디오가 안 난다
+  > `navigator.audioSession.type = "playback"`(사파리 16.4+)으로 무음 스위치를 넘어가고,
+  > 안 되는 기기를 위해 소리를 `<video>`로 흘려보내는 우회로를 함께 둔다.
+  > **미디어 볼륨 0은 웹에서 못 올린다** — 그래서 "소리 시험" 단추가 있다.
+  > 눌러보고 안 들리면 볼륨을 올리거나, 표식음을 끄고 손으로 맞추면 된다.
+
   > [!warning] 저장은 blur가 아니라 디바운스로
   > 입력칸 `onBlur`에 저장을 걸었더니 **모드 알약을 누를 때 blur가 먼저 일어나**
   > 바뀌기 전 해석("3:12"을 시각으로 읽은 49800초)이 저장됐다. 800ms 디바운스로 바꿨다.
@@ -173,6 +192,7 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
   컷 리스트 JSON의 `shift`는 **항상 0**이다. `parts`·`segments` 시각에 이미 반영돼 있어서
   `split_by_log.py`가 또 더하면 안 된다. 실제 값은 기록용으로 `videoOffset`,
   절대시각은 `startedAt`/`startedAtIso`로 따로 싣는다(나중에 영상 메타데이터와 대조하려고).
+  `sync{tones,dur,startBeepLogT,endBeepLogT}`는 `fix_sync.py`가 무엇을 어디서 찾을지 보는 곳이다.
   `clDownload`는 BOM을 붙이지 않는다 — 파이썬 `json.load`가 BOM에서 죽는다.
   같이 나오는 것이 본체에 가깝다 — **학생별 배분 시간**(강의/질문 분리)과 **계획 대비 진도**.
   강의 구간이 20초 미만이면 오탭으로 보고 버린다(그래서 눌러보기만 하면 내보내기가 안 뜬다).

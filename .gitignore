@@ -4,3 +4,4 @@ tools/package-lock.json
 tools/appsrc.js
 .vercel/
 tools/preview.html
+tools/__pycache__/
