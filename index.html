@@ -4188,6 +4188,74 @@ async function clMakeNote(text, student, units) {
   return d.note;
 }
 
+/* ── 소리 슬레이트 ────────────────────────────────────────────────
+   시작·종료에 짧은 두겹 순음을 낸다. 캠코더가 그걸 같이 녹음하므로
+   PC에서 tools/fix_sync.py 가 그 지점을 찾아 "로그 0초 = 영상 몇 초"를
+   자동으로 채운다. 영화 촬영의 슬레이트와 같은 원리 —
+   영상과 로그가 공유하는 신호가 하나라도 있으면 사람이 맞출 일이 없어진다.
+
+   순음을 두 개 겹치는 이유: 말소리에는 이런 스펙트럼이 없어서 오검출이 거의 없다.
+   1000Hz와 1600Hz는 배음 관계가 아니라(1.6배) 서로의 하모닉으로 오인되지 않는다. */
+const CL_TONES = [1000, 1600], CL_TONE_DUR = 0.35;
+
+/* 아이폰이 무음 모드면 웹 오디오는 그냥 안 난다. 두 겹으로 뚫는다.
+   1) navigator.audioSession = "playback"  (사파리 16.4+). 이 페이지의 소리를
+      벨소리가 아니라 "음악·영상"으로 취급하게 해서 무음 스위치를 넘어간다.
+   2) 안 되는 기기: 소리를 <video>로 흘려보낸다. iOS는 video 재생을
+      무음 스위치와 무관하게 다루므로 옛 기기에서도 대개 난다.
+   미디어 볼륨이 0이면 어느 쪽도 소용없다 — 그건 웹에서 못 올린다.
+   그래서 "소리 시험" 단추가 있다. 수업 전에 한 번 눌러보면 끝난다. */
+function clAudioSession() {
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+}
+let clSinkEl = null;
+function clSink(ctx) {
+  if (!ctx.createMediaStreamDestination) return null;
+  try {
+    const dest = ctx.createMediaStreamDestination();
+    if (!clSinkEl) {
+      clSinkEl = document.createElement("video");
+      clSinkEl.setAttribute("playsinline", "");
+      clSinkEl.muted = false; clSinkEl.volume = 1;
+      clSinkEl.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none";
+      document.body.appendChild(clSinkEl);
+    }
+    clSinkEl.srcObject = dest.stream;
+    const p = clSinkEl.play();
+    if (p && p.catch) p.catch(() => {});
+    return dest;
+  } catch (e) { return null; }
+}
+function clBeep() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    clAudioSession();
+    const ctx = new AC();
+    if (ctx.state === "suspended") ctx.resume();
+    const t0 = ctx.currentTime + 0.08;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);                                  // 딸깍 소리 방지
+    g.gain.linearRampToValueAtTime(0.7, t0 + 0.02);
+    g.gain.setValueAtTime(0.7, t0 + CL_TONE_DUR - 0.03);
+    g.gain.linearRampToValueAtTime(0, t0 + CL_TONE_DUR);
+    g.connect(ctx.destination);
+    const sink = clSink(ctx);
+    if (sink) g.connect(sink);                                     // 무음 스위치 우회로
+    CL_TONES.forEach((f) => {
+      const o = ctx.createOscillator();
+      o.type = "sine"; o.frequency.value = f;
+      o.connect(g); o.start(t0); o.stop(t0 + CL_TONE_DUR + 0.05);
+    });
+    setTimeout(() => {
+      try { if (clSinkEl) { clSinkEl.pause(); clSinkEl.srcObject = null; } } catch (e) {}
+      try { ctx.close(); } catch (e) {}
+    }, 2000);
+    return true;
+  } catch (e) { return false; }
+}
+const clSoundOn = () => localStorage.getItem("cl-beep") !== "0";
+
 function clDownload(name, text) {
   // BOM을 붙이지 않는다 — 여기서 나가는 건 JSON뿐이고, 파이썬 json.load는 BOM에서 죽는다
   const b = new Blob([text], { type: "application/json;charset=utf-8" });
@@ -4240,6 +4308,8 @@ function LessonLogger({ cls, canEdit, meName }) {
   const [shiftTxt, setShiftTxt] = useState("");     // 영상 맞추기 입력값 (원문 그대로)
   const [shiftMode, setShiftMode] = useState("");   // "" 자동판별 / "vid" / "clk"
   const [shiftSaved, setShiftSaved] = useState(false);
+  const [sound, setSound] = useState(clSoundOn());
+  const [beepAsk, setBeepAsk] = useState(false);
   const [noteState, setNoteState] = useState({});   // sid → {src,note,busy,saving,done,err}
   const [, tick] = useState(0);
 
@@ -4254,7 +4324,7 @@ function LessonLogger({ cls, canEdit, meName }) {
       if (!alive) return;
       setSaved(d);
       if (d && d.shift) { setShiftTxt(clHms(Math.abs(d.shift))); setShiftMode("vid"); }
-      if (d && d.marks && !d.endedAt) setLog({ startedAt: d.startedAt, marks: d.marks, shift: d.shift || 0 });
+      if (d && d.marks && !d.endedAt) setLog({ startedAt: d.startedAt, marks: d.marks, shift: d.shift || 0, beeped: !!d.beeped });
     });
     listLessonLogs(cls.id).then((a) => alive && setHist(a));
     classDoc(cls.id).collection("config").doc("lessonLog").get()
@@ -4301,8 +4371,10 @@ function LessonLogger({ cls, canEdit, meName }) {
   }
 
   function clStart() {
-    const next = { startedAt: Date.now(), marks: [], shift: 0 };
-    setLog(next); setSaved(null); setTrans([]); persist(next, { endedAt: null, segments: [] });
+    const beeped = sound ? clBeep() : false;          // 소리가 먼저다 — 이 순간이 영상에서 찾을 지점
+    const next = { startedAt: Date.now(), marks: [], shift: 0, beeped };
+    setLog(next); setSaved(null); setTrans([]);
+    persist(next, { endedAt: null, segments: [], beeped, endBeepAt: null });
   }
   // 상태 갱신 함수 안에서 Firestore를 부르지 않는다 — 업데이터는 두 번 호출될 수 있다
   function clMark(sid, kind) {
@@ -4356,8 +4428,10 @@ function LessonLogger({ cls, canEdit, meName }) {
   async function clEnd() {
     if (!log) return;
     if (!log.marks.length) { if (!confirm("기록된 구간이 없습니다. 그냥 버릴까요?")) return; setLog(null); setMicOn(false); return; }
+    const endBeeped = sound ? clBeep() : false;
+    const endBeepAt = endBeeped ? Date.now() : null;
     const segs = clSegments(log.marks, log.startedAt, Date.now(), log.shift || 0);
-    const doc = { startedAt: log.startedAt, endedAt: Date.now(), shift: log.shift || 0, marks: log.marks, segments: segs, transcript: trans.slice(-400), teacher: meName, date };
+    const doc = { startedAt: log.startedAt, endedAt: Date.now(), shift: log.shift || 0, marks: log.marks, segments: segs, transcript: trans.slice(-400), teacher: meName, date, endBeepAt, beeped: !!log.beeped };
     await saveLessonLog(cls.id, date, doc);
     setSaved(doc); setLog(null); setMicOn(false);
     listLessonLogs(cls.id).then(setHist);
@@ -4414,10 +4488,33 @@ function LessonLogger({ cls, canEdit, meName }) {
         <div style={{ textAlign: "center", padding: "18px 6px" }}>
           {saved && saved.endedAt
             ? <div className="cm-hint" style={{ marginBottom: 14 }}>오늘({date}) 수업은 기록이 끝났어요. 아래에서 내보낼 수 있어요.</div>
-            : <div className="cm-hint" style={{ marginBottom: 14 }}>녹화를 먼저 켜고, 켜지면 아래를 누르세요.<br />누른 순간이 <b>영상 00:00</b>이 됩니다.<br />늦게 누르셨어도 괜찮아요 — 끝나고 <b>영상 맞추기</b>로 밀 수 있습니다.</div>}
+            : <div className="cm-hint" style={{ marginBottom: 14 }}>녹화를 먼저 켜고, 켜지면 아래를 누르세요.<br />
+                {sound
+                  ? <>누를 때 짧게 <b>삐</b> 소리가 납니다. 그 소리가 영상에 녹음되면<br />PC에서 <b>자동으로</b> 맞춰집니다 — 시각을 적어둘 필요 없어요.</>
+                  : <>누른 순간이 <b>영상 00:00</b>이 됩니다. 늦게 누르셨어도<br />끝나고 <b>영상 맞추기</b>로 밀 수 있습니다.</>}
+              </div>}
           <button className="cm-btn cm-btn-primary" style={{ maxWidth: 280, margin: "0 auto" }} onClick={clStart}>
             {saved && saved.endedAt ? "다시 기록 시작" : "수업 시작"}
           </button>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", marginTop: 12, flexWrap: "wrap" }}>
+            <label style={{ fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 5 }}>
+              <input type="checkbox" checked={sound}
+                onChange={(e) => { setSound(e.target.checked); localStorage.setItem("cl-beep", e.target.checked ? "1" : "0"); }} />
+              표식음 내기
+            </label>
+            <button className="cm-link" style={{ padding: 0 }}
+              onClick={() => { if (!clBeep()) alert("이 브라우저는 소리를 낼 수 없어요"); else setTimeout(() => setBeepAsk(true), 700); }}>소리 시험</button>
+          </div>
+          {sound && !beepAsk && <div className="cm-hint" style={{ marginTop: 6, fontSize: 11 }}>캠코더가 이 소리를 담을 만큼 가까운지 한 번 시험해 보세요.</div>}
+          {beepAsk && (
+            <div className="cm-hint" style={{ marginTop: 8, textAlign: "left", background: "var(--cream)", padding: "10px 12px", borderRadius: 10 }}>
+              <b>들리셨나요?</b> 안 들렸다면 <b>볼륨(미디어) 버튼을 올려주세요</b> — 무음 모드는 넘어가지만
+              볼륨 0은 웹에서 못 올립니다. 그래도 안 나면 표식음을 끄고 <b>영상 맞추기</b>로 손으로 맞추면 됩니다.
+              <div style={{ marginTop: 6 }}>
+                <button className="cm-link" style={{ padding: 0 }} onClick={() => setBeepAsk(false)}>알겠어요</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -4531,7 +4628,9 @@ function LessonLogger({ cls, canEdit, meName }) {
             value={shiftTxt} placeholder="3:12 (영상 지점) 또는 16:58 (녹화 켠 시각)"
             onChange={(e) => setShiftTxt(e.target.value)} />
           <div className="cm-hint" style={{ marginTop: 6, color: shInfo.ok ? null : "#d6453f" }}>
-            {shInfo.label || "비워두면 누른 순간이 영상 00:00입니다. 영상을 열어 첫 강의가 시작되는 지점을 찾아 적으면 아래 시각이 전부 그만큼 밀려요."}
+            {shInfo.label || ((saved && saved.beeped)
+              ? "표식음을 냈으니 손으로 적을 필요 없어요 — PC에서 fix_sync.py 가 영상에서 찾아 채웁니다. 소리를 못 찾았을 때만 여기에 적으세요."
+              : "비워두면 누른 순간이 영상 00:00입니다. 영상을 열어 첫 강의가 시작되는 지점을 찾아 적으면 아래 시각이 전부 그만큼 밀려요.")}
           </div>
           {shInfo.ok && shift < 0 && (
             <div className="cm-hint" style={{ color: "#c2703f" }}>
@@ -4588,6 +4687,14 @@ function LessonLogger({ cls, canEdit, meName }) {
                 videoOffset: Math.round(shift), // 로그 0초가 영상 몇 초였는지 (기록용)
                 startedAt: anchorAt || null,
                 startedAtIso: anchorAt ? new Date(anchorAt).toISOString() : null,
+                // 소리 슬레이트. fix_sync.py 가 이걸 보고 영상에서 표식음을 찾는다
+                sync: {
+                  beeped: !!(saved && saved.beeped),
+                  tones: CL_TONES, dur: CL_TONE_DUR,
+                  startBeepLogT: 0,
+                  endBeepLogT: saved && saved.endBeepAt && saved.startedAt
+                    ? Math.round((saved.endBeepAt - saved.startedAt) / 10) / 100 : null,
+                },
                 outputs: groups.map((g) => ({ student: g.name, subject: g.subject, units: g.units, filename: g.filename, parts: g.parts.map((p) => ({ start: Math.round(p.start), end: Math.round(p.end), unit: p.unit })) })),
                 segments: segs.map((g) => ({ student: g.sid ? nameOf(g.sid) : null, kind: g.kind, keep: !!CL_KIND[g.kind].keep, unit: g.unit, start: Math.round(g.start), end: Math.round(g.end) })),
                 transcript: (saved && saved.transcript) || trans,
@@ -4595,7 +4702,12 @@ function LessonLogger({ cls, canEdit, meName }) {
             <button className="cm-btn cm-btn-ghost" style={{ margin: 0, padding: "9px 14px" }}
               onClick={() => { const t = clFfmpeg(groups, srcPath); if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => alert("복사했습니다"), () => alert(t)); else alert(t); }}>ffmpeg 명령 복사</button>
           </div>
-          <div className="cm-hint" style={{ marginTop: 8 }}>컷 리스트를 <code>split_by_log.py</code> 와 같은 폴더에 두고 실행하면 학생별 파일이 나옵니다.</div>
+          <div className="cm-hint" style={{ marginTop: 8 }}>
+            {(saved && saved.beeped)
+              ? <>PC에서 <code>python fix_sync.py 컷리스트.json 영상.mp4</code> 를 먼저 돌리세요 —
+                 표식음을 찾아 시각을 맞춰줍니다. 그 다음 <code>split_by_log.py</code>.</>
+              : <>컷 리스트를 <code>split_by_log.py</code> 와 같은 폴더에 두고 실행하면 학생별 파일이 나옵니다.</>}
+          </div>
         </div>
       )}
 
