@@ -289,6 +289,53 @@ details[open] .cm-resolved-summary::before { content: "▼ "; }
 .cm-notice-preview{background:#f0f4ff; border-left:3px solid var(--navy2); border-radius:0 9px 9px 0; padding:10px 14px; font-size:13px; color:var(--navy); margin-bottom:14px; line-height:1.5;}
 .cm-notice-dot{color:var(--clay); margin-right:4px;}
 .cm-notice-ta{resize:vertical; min-height:80px; line-height:1.55;}
+
+/* ===== 수업 로그 (개별진도반) ===== */
+.cl-now{border-radius:14px; padding:16px; color:#fff; margin-bottom:12px;}
+.cl-now .cl-who{font-size:24px; font-weight:800; letter-spacing:-.02em; line-height:1.2;}
+.cl-now .cl-sub{opacity:.85; font-size:13px; margin-top:3px;}
+.cl-now .cl-clk{font-size:40px; font-weight:800; letter-spacing:-.03em; margin-top:6px; font-variant-numeric:tabular-nums;}
+.cl-now.idle{background:var(--cream); color:var(--ink); border:1px dashed var(--line);}
+
+.cl-grid{display:grid; gap:10px; grid-template-columns:1fr;}
+@media(min-width:560px){.cl-grid{grid-template-columns:1fr 1fr;}}
+.cl-card{position:relative; border-radius:12px; border:2px solid var(--line); background:var(--paper); overflow:hidden;}
+.cl-card .cl-main{display:block; width:100%; text-align:left; padding:13px 92px 13px 13px; background:none; border:none; cursor:pointer; font:inherit; color:inherit;}
+.cl-card .cl-nm{font-size:19px; font-weight:800; letter-spacing:-.02em;}
+.cl-card .cl-un{font-size:12px; color:var(--muted); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.cl-card .cl-tm{font-size:12px; color:var(--muted); margin-top:6px; font-variant-numeric:tabular-nums;}
+.cl-card .cl-qa{position:absolute; top:9px; right:9px; padding:6px 10px; border-radius:999px; border:1px solid var(--line); font-size:11px; font-weight:700; color:var(--muted); background:var(--cream); cursor:pointer;}
+.cl-card .cl-pen{position:absolute; bottom:9px; right:9px; padding:5px 9px; border-radius:8px; font-size:11px; color:var(--muted); border:1px solid var(--line); background:var(--cream); cursor:pointer;}
+.cl-card.on{border-color:var(--c);}
+.cl-card.on .cl-nm{color:var(--c);}
+.cl-bar{height:4px; background:var(--line);}
+.cl-bar>i{display:block; height:100%; background:var(--c);}
+
+.cl-other{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px;}
+.cl-other button{border:1px solid var(--line); border-radius:10px; padding:11px 4px; font-size:12px; font-weight:600; color:var(--muted); background:var(--paper); cursor:pointer;}
+.cl-other button.on{border-color:var(--muted); color:var(--ink); background:var(--cream);}
+
+.cl-mic{display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 12px; border-radius:10px; background:var(--cream); border:1px solid var(--line); margin-bottom:12px;}
+.cl-dot{width:9px; height:9px; border-radius:50%; background:var(--muted); flex:none;}
+.cl-dot.live{background:#d6453f; animation:clpulse 1.4s infinite;}
+@keyframes clpulse{0%,100%{opacity:1}50%{opacity:.25}}
+.cl-heard{font-size:12px; color:var(--muted); flex:1 1 100%; min-height:17px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
+.cl-sug{border-radius:12px; padding:12px 14px; margin-bottom:12px; background:#fff6ec; border:1px solid var(--clay);}
+.cl-sug b{color:var(--clay);}
+.cl-sug .cl-quote{font-size:12px; color:var(--muted); margin:5px 0 9px; line-height:1.5;}
+
+.cl-meter{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:10px;}
+.cl-meter div{background:var(--cream); border-radius:10px; padding:9px 10px; text-align:center;}
+.cl-meter .cl-v{font-size:19px; font-weight:800; color:var(--navy); font-variant-numeric:tabular-nums;}
+.cl-meter .cl-l{font-size:11px; color:var(--muted); margin-top:1px;}
+
+.cl-tbl{width:100%; border-collapse:collapse; font-size:13px;}
+.cl-tbl td{padding:6px 5px; border-bottom:1px solid var(--line); vertical-align:top;}
+.cl-tbl td.n{text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums;}
+.cl-tag{display:inline-block; padding:1px 6px; border-radius:999px; font-size:10px; font-weight:700; border:1px solid var(--line); color:var(--muted);}
+.cl-tag.keep{color:var(--green); border-color:var(--green);}
+.cl-pre{background:var(--cream); border:1px solid var(--line); border-radius:9px; padding:9px; overflow:auto; font-size:11px; font-family:ui-monospace,Consolas,monospace; white-space:pre; margin:0;}
 </style>
 </head>
 <body>
@@ -492,6 +539,23 @@ async function listDays(cid) {
   if (!arr.includes(todayStr)) arr.push(todayStr);
   return arr.sort().reverse();
 }
+// ----- 수업 로그 (개별진도반: 누구와 몇 분을 했는지) -----
+// classes/{cid}/lessonLogs/{date}
+//   { date, startedAt, endedAt, shift, teacher, segments:[{sid,name,kind,unit,start,end}], transcript:[{t,text}] }
+const lessonLogCol = (cid) => classDoc(cid).collection("lessonLogs");
+async function saveLessonLog(cid, date, data) {
+  await lessonLogCol(cid).doc(date).set({ ...data, date, time: Date.now() }, { merge: true });
+}
+async function getLessonLog(cid, date) {
+  const d = await lessonLogCol(cid).doc(date).get();
+  return d.exists ? d.data() : null;
+}
+async function listLessonLogs(cid) {
+  const s = await lessonLogCol(cid).orderBy("date", "desc").limit(60).get();
+  return s.docs.map((d) => d.data());
+}
+async function removeLessonLog(cid, date) { await lessonLogCol(cid).doc(date).delete(); }
+
 const studentsCol = (cid) => classDoc(cid).collection("students");
 async function getStudentPin(cid, sid) {
   try { const d = await studentsCol(cid).doc(sid).get(); return d.exists ? (d.data().pin || null) : null; }
@@ -2476,6 +2540,7 @@ function AdminView() {
           { sep: true },
           { group: cls.name },
           { key: "c:days", ico: "▤", label: "날짜별" },
+          ...(isIndividual(cls) ? [{ key: "c:live", ico: "◐", label: "수업 로그" }] : []),
           { key: "c:book", ico: "▦", label: "월간 출석부" },
           { key: "c:notice", ico: "◑", label: "공지" },
           { key: "c:progress", ico: "◈", label: "진도표" },
@@ -3475,6 +3540,13 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
         </div>
       )}
 
+      {activeView === "live" && isIndividual(cls) && (
+        <div className="cm-card">
+          <h3 className="cm-h3">수업 로그 <span className="cm-h-hint">(누구와 몇 분을 했는지)</span></h3>
+          <LessonLogger cls={cls} canEdit={canEdit} meName={meName} />
+        </div>
+      )}
+
       {activeView === "progress" && (
         <div className="cm-card">
           <h3 className="cm-h3">진도계획표 {isIndividual(cls) && <span className="cm-h-hint">(학생별 게시)</span>}</h3>
@@ -3864,6 +3936,540 @@ function QuestionQueue({ questions, clsId, date, canEdit, books, merged }) {
             </div>
           )}
         </details>
+      )}
+    </div>
+  );
+}
+
+/* ==================== 수업 로그 (개별진도반) ====================
+   개진반은 한 교실에서 학생마다 다른 단원을 한다. 녹화본을 학생별로 가르려면
+   "몇 분부터 몇 분까지가 누구 것인지"가 필요한데, 그건 수업이 끝나면 사라진다.
+   여기서 그 자리에 적는다. 마이크는 그걸 대신 눌러주는 게 아니라 제안만 한다.
+   ── 이유: 자동자막은 이름을 자주 틀린다(지오→지옥, 승훈→성훈·승우).
+      틀린 자동 전환은 나중에 영상을 다 잘라놓고 나서야 발견된다.       */
+
+const CL_PALETTE = ["#27406e", "#c2703f", "#3f7d5e", "#7c3aed", "#be123c", "#0e7490"];
+const CL_KIND = {
+  lesson: { label: "강의", keep: true },
+  qa:     { label: "질문응대", keep: false },
+  brk:    { label: "쉬는시간", keep: false },
+  mic:    { label: "마이크꺼짐", keep: false },
+  etc:    { label: "기타", keep: false },
+};
+// 내 수업 계량 지표 — 볼트 [[내 수업 분석]]의 "확인은 많고 요구는 없다" 두 축
+// 전역(/g) 플래그를 쓰지 않는다. 발화 하나에 여러 패턴이 걸려도 한 번으로 센다
+// ("왜 그런지 말해봐"는 요구 하나지 둘이 아니다). 부풀리느니 모자라게 세는 쪽이 낫다 —
+// 본인은 늘 "물어봤다"고 느낀다는 게 원래 문제였다.
+const CL_CLOSED = /알겠(어|지|죠|나|니)|알았(어|지|죠)|맞(죠|지|나요)|이해(했|됐|되)|됐(죠|지)|그렇(죠|지)|오케이|알지\?/;
+const CL_OPEN = /왜\s*(그런|이렇|저렇|그렇)|말해\s*(봐|볼)|설명해\s*(봐|볼)|어디(서|가)?\s*(막|헷)|어떻게\s*(하면|되|풀)|어떤\s*(생각|방법)|뭐라고\s*생각|써\s*(봐|보세)|풀어\s*(봐|볼)|해\s*볼래/;
+// 발화 단위로 센다. entries = [{t,text}]
+function clCountUtt(entries, re) { return (entries || []).filter((e) => re.test(e.text || "")).length; }
+
+function clHms(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const p = (n) => String(n).padStart(2, "0");
+  return h > 0 ? h + ":" + p(m) + ":" + p(s) : p(m) + ":" + p(s);
+}
+function clMins(sec) { return Math.round(sec / 60) + "분"; }
+
+// ---- 한글 자모 분해: 자동자막이 틀린 이름을 잡아내려면 글자 단위로는 부족하다 ----
+const CL_CHO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ".split("");
+const CL_JUNG = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ".split("");
+const CL_JONG = ["", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ", "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"];
+function clJamo(str) {
+  let out = "";
+  for (const ch of String(str || "")) {
+    const c = ch.charCodeAt(0) - 0xac00;
+    if (c >= 0 && c <= 11171) {
+      out += CL_CHO[Math.floor(c / 588)] + CL_JUNG[Math.floor((c % 588) / 28)] + CL_JONG[c % 28];
+    } else out += ch;
+  }
+  return out;
+}
+function clEdit(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+function clSim(a, b) {
+  const x = clJamo(a), y = clJamo(b);
+  const L = Math.max(x.length, y.length);
+  return L ? 1 - clEdit(x, y) / L : 0;
+}
+
+/* 들린 말에서 학생 이름을 찾는다.
+   people = [{ sid, name, aliases:[], units:[] }]
+   이름은 자모 유사도로, 단원은 그냥 포함 여부로 본다.
+   단원 쪽이 훨씬 믿을 만하다 — 수학 용어는 자동자막이 잘 받아쓴다. */
+function clDetect(text, people) {
+  const flat = String(text || "").replace(/\s+/g, "");
+  let best = null;
+  for (const p of people) {
+    let score = 0, why = "";
+    const cands = [p.name, ...(p.aliases || [])].filter(Boolean);
+    for (const cand of cands) {
+      const c = cand.replace(/\s+/g, "");
+      if (!c) continue;
+      const w = c.length;
+      for (let i = 0; i + w - 1 <= flat.length; i++) {
+        for (const len of [w, w + 1]) {          // "지오"가 "지오야"로 붙어 나오는 경우
+          const piece = flat.slice(i, i + len);
+          if (piece.length < 2) continue;
+          const s = clSim(c, piece);
+          if (s > score) { score = s; why = piece; }
+        }
+      }
+    }
+    let nameHit = score >= 0.72 ? score : 0;
+    let unitHit = 0, unitWhy = "";
+    for (const u of (p.units || [])) {
+      const uu = String(u).replace(/\s+/g, "");
+      if (uu.length >= 2 && flat.includes(uu)) { unitHit = 1; unitWhy = u; break; }
+    }
+    const total = Math.max(nameHit, unitHit ? 0.9 : 0);
+    if (total > 0 && (!best || total > best.score)) {
+      best = { sid: p.sid, name: p.name, score: total, why: unitHit ? unitWhy : why, kind: unitHit ? "단원" : "이름" };
+    }
+  }
+  return best;
+}
+
+function clSegments(marks, startedAt, endAt, shift) {
+  const end = endAt != null ? endAt : Date.now();
+  const sh = shift || 0;
+  return (marks || []).map((mk, i) => {
+    const nx = i + 1 < marks.length ? marks[i + 1].t : end;
+    return {
+      sid: mk.sid || null, name: mk.name || "", kind: mk.kind, unit: mk.unit || "",
+      start: (mk.t - startedAt) / 1000 + sh, end: (nx - startedAt) / 1000 + sh,
+    };
+  });
+}
+function clSafeName(t) { return String(t).replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim(); }
+
+// 학생별로 남길 조각을 모은다. 붙어 있는 것은 합치고, 20초 미만은 오탭으로 본다.
+// subjOf(sid) → 과목명. 파일명을 "날짜 이름 과목 단원"으로 맞추기 위한 것
+function clGroup(segments, date, subjOf) {
+  const by = {};
+  (segments || []).forEach((g) => {
+    if (!g.sid || !CL_KIND[g.kind] || !CL_KIND[g.kind].keep) return;
+    if (g.end - g.start < 20) return;
+    (by[g.sid] = by[g.sid] || []).push({ start: g.start, end: g.end, unit: g.unit || "", name: g.name });
+  });
+  return Object.keys(by).map((sid) => {
+    const raw = by[sid].sort((a, b) => a.start - b.start), parts = [];
+    raw.forEach((p) => {
+      const last = parts[parts.length - 1];
+      if (last && p.start - last.end < 2) { last.end = p.end; if (p.unit && !last.unit) last.unit = p.unit; }
+      else parts.push({ ...p });
+    });
+    const units = [];
+    parts.forEach((p) => { if (p.unit && units.indexOf(p.unit) < 0) units.push(p.unit); });
+    const total = parts.reduce((a, p) => a + (p.end - p.start), 0);
+    const nm = raw[0].name || "학생";
+    const subj = subjOf ? subjOf(sid) : "";
+    return { sid, name: nm, subject: subj, units, parts, total,
+      filename: clSafeName([date, nm, subj, units.join("+")].filter(Boolean).join(" ")) + ".mp4" };
+  }).sort((a, b) => b.total - a.total);
+}
+
+function clFfmpeg(groups, src) {
+  if (!groups.length) return "(남길 구간이 없습니다)";
+  const s = src || "원본.mp4", L = [];
+  L.push("# 조각을 TS로 뜬 뒤 이어붙인다 (fps·타임베이스가 섞여도 버틴다)");
+  L.push("# 시각은 초 단위 정수 — 00:60:30 표기는 ffmpeg가 거부한다");
+  groups.forEach((g, gi) => {
+    L.push("");
+    L.push("# ── " + g.name + " ── " + g.filename + "  (" + clHms(g.total) + ")");
+    g.parts.forEach((p, i) => {
+      L.push('ffmpeg -y -ss ' + Math.round(p.start) + ' -to ' + Math.round(p.end) + ' -i "' + s + '"' +
+        ' -c copy -bsf:v h264_mp4toannexb -f mpegts p' + gi + '_' + i + '.ts   # ' + clHms(p.start) + '–' + clHms(p.end));
+    });
+    L.push('ffmpeg -y -i "concat:' + g.parts.map((_, i) => 'p' + gi + '_' + i + '.ts').join("|") +
+      '" -c copy -bsf:a aac_adtstoasc -movflags +faststart "' + g.filename + '"');
+  });
+  L.push("");
+  L.push("# 붙인 뒤 이음매 직후 프레임을 꼭 확인할 것. split_by_log.py 를 쓰면 자동으로 한다.");
+  return L.join("\n");
+}
+
+function clDownload(name, text) {
+  const b = new Blob(["﻿" + text], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(b); a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+/* ---- 마이크 ----
+   Web Speech API는 조용하면 알아서 끊긴다. 두 시간을 버티려면 onend에서 되살려야 한다.
+   Chrome 전용이고 데스크톱에서는 음성이 구글 서버를 거친다.                */
+function useLessonMic(on, cbRef) {
+  const liveRef = useRef(on);
+  liveRef.current = on;
+  useEffect(() => {
+    if (!on) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    let dead = false;
+    let rec;
+    try { rec = new SR(); } catch (e) { return; }
+    rec.lang = "ko-KR"; rec.continuous = true; rec.interimResults = true;
+    rec.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i], t = (r[0] && r[0].transcript || "").trim();
+        if (!t) continue;
+        if (r.isFinal) cbRef.current.final(t); else cbRef.current.interim(t);
+      }
+    };
+    rec.onend = () => { if (!dead && liveRef.current) { try { rec.start(); } catch (e) {} } };
+    rec.onerror = (e) => { if (e.error === "not-allowed" || e.error === "service-not-allowed") cbRef.current.denied(); };
+    try { rec.start(); } catch (e) {}
+    return () => { dead = true; try { rec.abort(); } catch (e) {} };
+  }, [on]);
+}
+
+function LessonLogger({ cls, canEdit, meName }) {
+  const [log, setLog] = useState(null);          // 진행 중 { startedAt, marks, shift }
+  const [saved, setSaved] = useState(null);      // 오늘 저장본
+  const [hist, setHist] = useState([]);
+  const [cfg, setCfg] = useState({ aliases: {}, units: {} });
+  const [micOn, setMicOn] = useState(false);
+  const [micErr, setMicErr] = useState("");
+  const [heard, setHeard] = useState("");
+  const [trans, setTrans] = useState([]);
+  const [sug, setSug] = useState(null);
+  const [autoSw, setAutoSw] = useState(false);
+  const [srcPath, setSrcPath] = useState("");
+  const [, tick] = useState(0);
+
+  const date = todayStr;
+  const people = (cls.roster || []).filter((r) => !r.teacher && isActiveOn(r, date));
+  const colorOf = (sid) => CL_PALETTE[Math.max(0, people.findIndex((p) => p.id === sid)) % CL_PALETTE.length];
+  const nameOf = (sid) => { const p = people.find((x) => x.id === sid); return p ? p.name : "학생"; };
+
+  useEffect(() => {
+    let alive = true;
+    getLessonLog(cls.id, date).then((d) => { if (alive) { setSaved(d); if (d && d.marks && !d.endedAt) setLog({ startedAt: d.startedAt, marks: d.marks, shift: d.shift || 0 }); } });
+    listLessonLogs(cls.id).then((a) => alive && setHist(a));
+    classDoc(cls.id).collection("config").doc("lessonLog").get()
+      .then((d) => { if (alive && d.exists) setCfg({ aliases: {}, units: {}, ...d.data() }); });
+    return () => { alive = false; };
+  }, [cls.id]);
+
+  useEffect(() => { if (!log) return; const h = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(h); }, [!!log]);
+
+  const detectPeople = people.map((p) => ({
+    sid: p.id, name: p.name,
+    aliases: cfg.aliases[p.id] || [],
+    units: (cfg.units[p.id] || []).concat(p.books || []),
+  }));
+
+  const cur = log && log.marks.length ? log.marks[log.marks.length - 1] : null;
+
+  const cbRef = useRef({});
+  cbRef.current = {
+    interim: (t) => setHeard(t),
+    denied: () => { setMicOn(false); setMicErr("마이크 권한이 거부됐습니다. 주소창 자물쇠 → 마이크 허용."); },
+    final: (t) => {
+      setHeard("");
+      if (!log) return;
+      const at = (Date.now() - log.startedAt) / 1000;
+      setTrans((L) => [...L, { t: Math.round(at), text: t }]);
+      const hit = clDetect(t, detectPeople);
+      if (!hit) return;
+      if (cur && cur.sid === hit.sid && cur.kind === "lesson") return;   // 이미 그 학생
+      if (autoSw) clMark(hit.sid, "lesson");
+      else setSug({ ...hit, text: t, at: Date.now() });
+    },
+  };
+  useLessonMic(micOn && !!log, cbRef);
+
+  useEffect(() => { if (!sug) return; const h = setTimeout(() => setSug(null), 25000); return () => clearTimeout(h); }, [sug]);
+
+  function persist(next, extra) {
+    if (!next) return;
+    saveLessonLog(cls.id, date, {
+      startedAt: next.startedAt, shift: next.shift || 0, marks: next.marks,
+      teacher: meName, transcript: trans.slice(-400), ...(extra || {}),
+    }).catch(() => {});
+  }
+
+  function clStart() {
+    const next = { startedAt: Date.now(), marks: [], shift: 0 };
+    setLog(next); setSaved(null); setTrans([]); persist(next, { endedAt: null, segments: [] });
+  }
+  // 상태 갱신 함수 안에서 Firestore를 부르지 않는다 — 업데이터는 두 번 호출될 수 있다
+  function clMark(sid, kind) {
+    setSug(null);
+    if (!log) return;
+    const last = log.marks[log.marks.length - 1];
+    if (last && last.sid === sid && last.kind === kind) return;
+    const unit = sid ? (cfg.units[sid] || [])[0] || "" : "";
+    const next = { ...log, marks: [...log.marks, { t: Date.now(), sid, name: sid ? nameOf(sid) : "", kind, unit }] };
+    setLog(next); persist(next);
+  }
+  function clUndo() {
+    if (!log || !log.marks.length) return;
+    const next = { ...log, marks: log.marks.slice(0, -1) };
+    setLog(next); persist(next);
+  }
+  function clSetUnit(sid) {
+    const list = cfg.units[sid] || [];
+    const msg = nameOf(sid) + " — 지금 하는 단원" + (list.length ? "\n\n" + list.map((u, i) => (i + 1) + ". " + u).join("\n") + "\n\n번호를 넣거나 새로 적으세요." : "");
+    const v = prompt(msg, list[0] || "");
+    if (v === null) return;
+    let unit = v.trim();
+    const n = parseInt(unit, 10);
+    if (String(n) === unit && n >= 1 && n <= list.length) unit = list[n - 1];
+    if (!unit) return;
+    const nextUnits = { ...cfg.units, [sid]: [unit, ...list.filter((u) => u !== unit)].slice(0, 8) };
+    setCfg((c) => ({ ...c, units: nextUnits }));
+    classDoc(cls.id).collection("config").doc("lessonLog").set({ units: nextUnits }, { merge: true }).catch(() => {});
+    if (!log || !log.marks.length) return;
+    const last = log.marks[log.marks.length - 1];
+    if (!last || last.sid !== sid) return;
+    const next = { ...log, marks: [...log.marks.slice(0, -1), { ...last, unit }] };
+    setLog(next); persist(next);
+  }
+  /* 자동자막은 이름을 자주 틀린다. 유사도만으로는 한계가 있어서
+     (승훈→승우 0.67은 태경→세경 0.60과 너무 가깝다. 문턱을 내리면 오탐이 산다)
+     실제로 틀리게 들리는 말을 직접 등록해 둔다. */
+  function clSetAlias(sid) {
+    const list = cfg.aliases[sid] || [];
+    const v = prompt(
+      nameOf(sid) + " — 자동자막이 이 학생을 뭐라고 잘못 받아쓰나요?\n쉼표로 구분해 적으세요. 예: 승우, 성훈",
+      list.join(", ")
+    );
+    if (v === null) return;
+    const arr = v.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 10);
+    const next = { ...cfg.aliases, [sid]: arr };
+    setCfg((c) => ({ ...c, aliases: next }));
+    classDoc(cls.id).collection("config").doc("lessonLog").set({ aliases: next }, { merge: true }).catch(() => {});
+  }
+
+  async function clEnd() {
+    if (!log) return;
+    if (!log.marks.length) { if (!confirm("기록된 구간이 없습니다. 그냥 버릴까요?")) return; setLog(null); setMicOn(false); return; }
+    const segs = clSegments(log.marks, log.startedAt, Date.now(), log.shift || 0);
+    const doc = { startedAt: log.startedAt, endedAt: Date.now(), shift: log.shift || 0, marks: log.marks, segments: segs, transcript: trans.slice(-400), teacher: meName, date };
+    await saveLessonLog(cls.id, date, doc);
+    setSaved(doc); setLog(null); setMicOn(false);
+    listLessonLogs(cls.id).then(setHist);
+  }
+
+  // ---- 집계 ----
+  const segs = log ? clSegments(log.marks, log.startedAt, null, log.shift || 0) : (saved && saved.segments) || [];
+  const tot = {}, qat = {};
+  segs.forEach((g) => {
+    if (!g.sid) return;
+    const d = g.end - g.start;
+    if (CL_KIND[g.kind] && CL_KIND[g.kind].keep) tot[g.sid] = (tot[g.sid] || 0) + d;
+    else if (g.kind === "qa") qat[g.sid] = (qat[g.sid] || 0) + d;
+  });
+  const maxT = Math.max(1, ...Object.values(tot));
+  const elapsed = log ? (Date.now() - log.startedAt) / 1000 : 0;
+  const nClosed = clCountUtt(trans, CL_CLOSED);
+  const nOpen = clCountUtt(trans, CL_OPEN);
+  const perH = (n) => (elapsed > 120 ? (n / (elapsed / 3600)).toFixed(1) : "–");
+
+  const subjOf = (sid) => { const p = people.find((x) => x.id === sid); return p ? (p.books || []).join("+") : ""; };
+  const groups = clGroup(segs, date, subjOf);
+  const hasSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  if (!canEdit) return <div className="cm-empty">담당 선생님만 기록할 수 있어요</div>;
+
+  return (
+    <div>
+      {/* ── 진행 중이 아닐 때 ── */}
+      {!log && (
+        <div style={{ textAlign: "center", padding: "18px 6px" }}>
+          {saved && saved.endedAt
+            ? <div className="cm-hint" style={{ marginBottom: 14 }}>오늘({date}) 수업은 기록이 끝났어요. 아래에서 내보낼 수 있어요.</div>
+            : <div className="cm-hint" style={{ marginBottom: 14 }}>녹화를 먼저 켜고, 켜지면 아래를 누르세요.<br />누른 순간이 <b>영상 00:00</b>이 됩니다.</div>}
+          <button className="cm-btn cm-btn-primary" style={{ maxWidth: 280, margin: "0 auto" }} onClick={clStart}>
+            {saved && saved.endedAt ? "다시 기록 시작" : "수업 시작"}
+          </button>
+        </div>
+      )}
+
+      {/* ── 진행 중 ── */}
+      {log && (<>
+        <div className={cur ? "cl-now" : "cl-now idle"}
+          style={cur ? { background: cur.sid ? colorOf(cur.sid) : "#7c8294" } : null}>
+          <div className="cl-who">{cur ? (cur.sid ? nameOf(cur.sid) : CL_KIND[cur.kind].label) : "누구부터 시작하나요?"}</div>
+          <div className="cl-sub">
+            {cur ? (cur.sid ? CL_KIND[cur.kind].label + (cur.unit ? " · " + cur.unit : "") : "이 구간은 잘라냅니다")
+                 : "아래에서 학생을 누르면 기록이 시작됩니다"}
+          </div>
+          {cur && <div className="cl-clk">{clHms((Date.now() - cur.t) / 1000)}</div>}
+        </div>
+
+        {/* 마이크 */}
+        <div className="cl-mic">
+          <span className={"cl-dot" + (micOn ? " live" : "")} />
+          <button className="cm-link" style={{ padding: 0 }} onClick={() => { setMicErr(""); setMicOn((v) => !v); }} disabled={!hasSR}>
+            {micOn ? "마이크 끄기" : "마이크 켜기"}
+          </button>
+          <label style={{ fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 4, marginLeft: "auto" }}>
+            <input type="checkbox" checked={autoSw} onChange={(e) => setAutoSw(e.target.checked)} /> 자동 전환
+          </label>
+          {!hasSR && <div className="cl-heard">이 브라우저는 음성 인식을 지원하지 않아요 (크롬에서 열어주세요)</div>}
+          {micErr && <div className="cl-heard" style={{ color: "#d6453f" }}>{micErr}</div>}
+          {micOn && !micErr && <div className="cl-heard">{heard || "듣는 중…"}</div>}
+          {micOn && (
+            <div style={{ flex: "1 1 100%", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: 7, marginTop: 1 }}>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>이름 보정</span>
+              {people.map((p) => (
+                <button key={p.id} className="cl-pen" style={{ position: "static" }} onClick={() => clSetAlias(p.id)}>
+                  {p.name}{(cfg.aliases[p.id] || []).length ? " ·" + (cfg.aliases[p.id] || []).length : ""}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 제안 */}
+        {sug && (
+          <div className="cl-sug">
+            <div><b>{sug.name}</b>{sug.kind === "단원" ? " 단원이 들렸어요" : " 이름이 들렸어요"} — 바꿀까요?</div>
+            <div className="cl-quote">“{sug.text}”</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="cm-btn cm-btn-primary" style={{ margin: 0, padding: "8px 14px" }} onClick={() => clMark(sug.sid, "lesson")}>{sug.name}(으)로 바꾸기</button>
+              <button className="cm-btn cm-btn-ghost" style={{ margin: 0, padding: "8px 14px" }} onClick={() => setSug(null)}>무시</button>
+            </div>
+          </div>
+        )}
+
+        {/* 학생 카드 */}
+        <div className="cl-grid">
+          {people.map((p) => {
+            const on = cur && cur.sid === p.id;
+            const t = tot[p.id] || 0, q = qat[p.id] || 0;
+            return (
+              <div key={p.id} className={"cl-card" + (on ? " on" : "")} style={{ "--c": colorOf(p.id) }}>
+                <button className="cl-main" onClick={() => clMark(p.id, "lesson")}>
+                  <div className="cl-nm">{p.name}</div>
+                  <div className="cl-un">{(cfg.units[p.id] || [])[0] || (p.books || []).join(", ") || "단원 미정"}</div>
+                  <div className="cl-tm">강의 {clHms(t)}{q ? "  질문 " + clHms(q) : ""}</div>
+                </button>
+                <button className="cl-qa" onClick={() => clMark(p.id, "qa")}>질문</button>
+                <button className="cl-pen" onClick={() => clSetUnit(p.id)}>단원</button>
+                <div className="cl-bar"><i style={{ width: Math.round((t / maxT) * 100) + "%" }} /></div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="cl-other">
+          {["brk", "mic", "etc"].map((k) => (
+            <button key={k} className={cur && !cur.sid && cur.kind === k ? "on" : ""} onClick={() => clMark(null, k)}>{CL_KIND[k].label}</button>
+          ))}
+        </div>
+
+        {/* 내 수업 계량 — 폐쇄형이 줄어든 자리를 개방형이 채우는지 그 자리에서 본다.
+            micOn이 아니라 받아쓴 게 있는지로 건다. 마이크는 조용하면 저 혼자 끊긴다 */}
+        {trans.length > 0 && (
+          <div className="cl-meter">
+            <div><div className="cl-v">{perH(nClosed)}</div><div className="cl-l">확인 /시간</div></div>
+            <div><div className="cl-v">{perH(nOpen)}</div><div className="cl-l">요구 /시간</div></div>
+            <div><div className="cl-v">{nOpen ? (nClosed / nOpen).toFixed(1) : "–"}</div><div className="cl-l">확인 : 요구</div></div>
+          </div>
+        )}
+        {trans.length > 0 && (
+          <div className="cm-hint" style={{ marginTop: 6, textAlign: "center" }}>
+            낱말로 세는 대략치입니다. 판서만 하는 구간은 안 잡혀요 · 받아쓴 발화 {trans.length}개
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14 }}>
+          <button className="cm-btn cm-btn-ghost" style={{ margin: 0, padding: "9px 14px" }} disabled={!log.marks.length} onClick={clUndo}>↶ 전환 취소</button>
+          <span className="cm-hint" style={{ marginLeft: "auto" }}>경과 {clHms(elapsed)} · {log.marks.length}구간</span>
+        </div>
+        <button className="cm-btn cm-btn-ghost" style={{ marginTop: 10, color: "#d6453f", borderColor: "#d6453f" }} onClick={clEnd}>수업 종료</button>
+      </>)}
+
+      {/* ── 구간 목록 ── */}
+      {segs.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <h4 className="cm-h3" style={{ fontSize: 14 }}>{log ? "오늘 기록" : date + " 기록"}</h4>
+          <table className="cl-tbl"><tbody>
+            {segs.slice().reverse().map((g, i) => (
+              <tr key={i}>
+                <td style={{ width: 66, color: "var(--muted)" }} className="n">{clHms(g.start)}</td>
+                <td><b style={{ color: g.sid ? colorOf(g.sid) : "var(--muted)" }}>{g.sid ? nameOf(g.sid) : "—"}</b>{" "}
+                  <span className={"cl-tag" + (CL_KIND[g.kind].keep ? " keep" : "")}>{CL_KIND[g.kind].label}</span>
+                  {g.unit ? <span className="cm-day-sub"> {g.unit}</span> : null}</td>
+                <td className="n">{clHms(g.end - g.start)}</td>
+              </tr>
+            ))}
+          </tbody></table>
+        </div>
+      )}
+
+      {/* ── 내보내기 ── */}
+      {!log && groups.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <h4 className="cm-h3" style={{ fontSize: 14 }}>영상 자르기</h4>
+          <label className="cm-label">원본 영상 경로 또는 유튜브 ID</label>
+          <input className="cm-input" value={srcPath} onChange={(e) => setSrcPath(e.target.value)} placeholder="8FRYFOc1850" />
+          {groups.map((g) => (
+            <div key={g.sid} className="cm-notice-preview" style={{ borderLeftColor: colorOf(g.sid) }}>
+              <b>{g.filename}</b><br />{g.parts.length}조각 · {clHms(g.total)}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+            <button className="cm-btn cm-btn-primary" style={{ margin: 0, padding: "9px 14px" }}
+              onClick={() => clDownload("컷리스트-" + date + ".json", JSON.stringify({
+                date, source: srcPath, shift: 0,
+                outputs: groups.map((g) => ({ student: g.name, subject: g.subject, units: g.units, filename: g.filename, parts: g.parts.map((p) => ({ start: Math.round(p.start), end: Math.round(p.end), unit: p.unit })) })),
+                segments: segs.map((g) => ({ student: g.sid ? nameOf(g.sid) : null, kind: g.kind, keep: !!CL_KIND[g.kind].keep, unit: g.unit, start: Math.round(g.start), end: Math.round(g.end) })),
+                transcript: (saved && saved.transcript) || trans,
+              }, null, 2))}>컷 리스트 (.json)</button>
+            <button className="cm-btn cm-btn-ghost" style={{ margin: 0, padding: "9px 14px" }}
+              onClick={() => { const t = clFfmpeg(groups, srcPath); if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => alert("복사했습니다"), () => alert(t)); else alert(t); }}>ffmpeg 명령 복사</button>
+          </div>
+          <div className="cm-hint" style={{ marginTop: 8 }}>컷 리스트를 <code>split_by_log.py</code> 와 같은 폴더에 두고 실행하면 학생별 파일이 나옵니다.</div>
+        </div>
+      )}
+
+      {/* ── 지난 기록 ── */}
+      {!log && hist.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <h4 className="cm-h3" style={{ fontSize: 14 }}>학생별 누적</h4>
+          <table className="cl-tbl"><tbody>
+            {people.map((p) => {
+              let L = 0, Q = 0, days = 0;
+              hist.forEach((h) => {
+                let any = false;
+                (h.segments || []).forEach((g) => {
+                  if (g.sid !== p.id) return;
+                  const d = g.end - g.start;
+                  if (CL_KIND[g.kind] && CL_KIND[g.kind].keep) { L += d; any = true; }
+                  else if (g.kind === "qa") { Q += d; any = true; }
+                });
+                if (any) days++;
+              });
+              return (
+                <tr key={p.id}>
+                  <td><b style={{ color: colorOf(p.id) }}>{p.name}</b></td>
+                  <td className="n" style={{ color: "var(--muted)" }}>{days}회</td>
+                  <td className="n">강의 {clMins(L)}{Q ? " · 질문 " + clMins(Q) : ""}</td>
+                </tr>
+              );
+            })}
+          </tbody></table>
+        </div>
       )}
     </div>
   );
