@@ -4,10 +4,12 @@ CLIMATH 학원(한민수 선생님)의 수업관리 앱. **빌드 없는 단일 
 
 ```
 repo/
-├── index.html            # 앱 전체 (CSS + React, 4,105줄)
-├── api/hint.js           # AI 힌트 중계 (Vercel serverless)
-├── tools/check-jsx.mjs   # JSX 문법 검사 (gitignore, 배포 안 됨)
-└── CLAUDE.md             # 이 문서
+├── index.html              # 앱 전체 (CSS + React, 4,786줄)
+├── api/hint.js             # AI 힌트 중계 (Vercel serverless)
+├── tools/check-jsx.mjs     # JSX 문법 검사 (배포 안 됨)
+├── tools/test-detect.mjs   # 수업 로그 이름/단원 감지 테스트
+├── tools/make-preview.mjs  # Firestore를 메모리 가짜로 바꾼 preview.html 생성
+└── CLAUDE.md               # 이 문서
 ```
 
 - 배포: https://climath-class.vercel.app  (관리자 `?admin=1`)
@@ -60,6 +62,15 @@ node tools/check-jsx.mjs
 스크립트는 커밋하고 `node_modules`·lock·추출본은 `.gitignore`. 새 PC에서는
 `cd tools && npm install` 한 번이면 된다.
 
+### 운영 DB를 건드리지 않고 화면 확인하기
+```bash
+node tools/make-preview.mjs      # tools/preview.html 생성 (Firestore를 메모리 가짜로 교체)
+node tools/test-detect.mjs       # 수업 로그 이름·단원 감지 테스트
+```
+`index.html`을 그대로 열면 **운영 Firestore에 바로 쓴다.** 클릭해 보며 확인할 때는
+`preview.html`을 쓴다. 여기엔 마이크 콜백을 `window.__mic`으로 노출하는 줄이 들어가는데
+**생성물에만** 들어가고 `index.html`은 손대지 않는다. `preview.html`은 gitignore.
+
 ### 코드 수정
 4,100줄짜리 단일 파일이라 통째로 재작성하지 말 것. 부분 치환으로 작업하고,
 앵커를 못 찾으면 즉시 실패하도록 할 것(엉뚱한 위치에 붙는 사고 방지).
@@ -90,6 +101,10 @@ classes/{cid}
   ├─ notice/current, dms/{sid}
   ├─ progress/{key}      key="class" 또는 sid → parts/{n} 에 base64 조각
   ├─ noteUnits/{uid}     { title } → files/{fid} → parts/{n}
+  ├─ lessonLogs/{date}   { startedAt, endedAt, shift, marks[], segments[], transcript[], teacher }
+  │                        segments = { sid, name, kind, unit, start, end }  start/end는 영상 기준 초
+  │                        kind = lesson(남김) | qa | brk | mic | etc(버림)
+  ├─ config/lessonLog    { units:{sid:[단원]}, aliases:{sid:[자막 오인식 표기]} }
   └─ days/{date}
        ├─ attendance/{sid}  { name, time }   # 문서 존재 = 출석
        ├─ questions/{qid}   { sid, name, book, num, memo, resolved, fromCid, fromClass }
@@ -136,6 +151,27 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
   종료일 지나면 자동으로 명단에서 빠짐(기록은 보존). 헬퍼: `isActiveOn` `isEnded` `attendsOn` `addMonths`
 - **보강**(`makeups`): 결석 예정 / 동영상 보강 완료. 월간 출석부 칸 클릭 시
   O → 예(결석예정) → 영(동영상완료) → / 순환. 전역 "보강 관리"에서 미래 날짜 예약(학생→날짜→수업 3단계)
+- **수업 로그**(`LessonLogger`, 사이드바 `c:live`): **개별진도반에서만** 보인다.
+  개진반은 한 교실에서 학생마다 다른 단원을 하므로 녹화본을 학생별로 갈라야 하는데,
+  "몇 분부터가 누구 것인지"는 수업이 끝나면 사라진다. 수업 중에 학생 카드를 눌러 그 자리에 적는다.
+  종료하면 컷 리스트(.json)와 ffmpeg 명령이 나오고 `split_by_log.py`가 실제로 자른다.
+  같이 나오는 것이 본체에 가깝다 — **학생별 배분 시간**(강의/질문 분리)과 **계획 대비 진도**.
+  강의 구간이 20초 미만이면 오탭으로 보고 버린다(그래서 눌러보기만 하면 내보내기가 안 뜬다).
+
+  > [!warning] 마이크는 제안만 한다. 자동으로 바꾸지 않는다
+  > `useLessonMic`이 Web Speech API(`ko-KR`)로 받아쓰고 `clDetect`가 이름·단원을 찾아
+  > **"바꿀까요?"를 띄운다.** 자동 전환은 체크박스를 켜야만 동작하고 기본값은 꺼짐이다.
+  > 자동자막은 이름을 자주 틀린다 — 지오→지옥, 승훈→성훈·승우, "세 개는"→세경에는.
+  > 틀린 자동 전환은 영상을 다 자르고 나서야 발견되므로 오탐 하나가 오탭 하나보다 훨씬 비싸다.
+  >
+  > 이름은 **자모 분해 후 편집거리**로 본다(글자 단위로는 지옥≈지오가 안 잡힌다). 문턱 0.72.
+  > 승훈↔승우는 0.667이라 안 잡히는데, 태경↔세경 0.600과 너무 가까워 **문턱을 못 내린다.**
+  > 대신 `config/lessonLog.aliases`에 실제로 틀리게 들리는 말을 등록한다(UI: 마이크 줄 "이름 보정").
+  > 단원 키워드는 이름보다 훨씬 잘 잡히지만 `units`를 채워둔 뒤에야 작동한다.
+  >
+  > 데스크톱 크롬에서 음성은 **구글 서버를 거친다.** 크롬 전용이고 iOS 사파리는 안 된다.
+  > 조용하면 저 혼자 끊기므로 `onend`에서 되살린다.
+
 - **위험신호**: 자동 집계 아님. 선생님이 상담에 표시한 `risk`(0~3) 기준 + "상담 공백"(마지막 상담 경과일) 두 축
 - **학습관리 보고서**: 출결 / 수업기록(dailyNotes) / 상담 / 종합코멘트. A4 인쇄·PDF.
   미리보기에서 수업기록 클릭 시 인라인 수정 가능. 인쇄 시 `.rp-noprint` 요소는 숨김.

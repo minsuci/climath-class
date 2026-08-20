@@ -4417,6 +4417,14 @@ function LessonLogger({ cls, canEdit, meName }) {
         </div>
       )}
 
+      {/* 남길 구간은 있는데 전부 20초 미만이면 조용히 사라진다. 왜 없는지는 말해줘야 한다 */}
+      {!log && groups.length === 0 && segs.some((g) => g.sid && CL_KIND[g.kind] && CL_KIND[g.kind].keep) && (
+        <div className="cm-hint" style={{ marginTop: 16 }}>
+          강의 구간이 전부 20초보다 짧아서 자를 영상이 없어요. 눌러보신 기록이라면 정상입니다 —
+          실제 수업에서는 <b>영상 자르기</b>가 여기에 나타납니다.
+        </div>
+      )}
+
       {/* ── 내보내기 ── */}
       {!log && groups.length > 0 && (
         <div style={{ marginTop: 18 }}>

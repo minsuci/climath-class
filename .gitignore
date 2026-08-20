@@ -3,3 +3,4 @@ tools/node_modules/
 tools/package-lock.json
 tools/appsrc.js
 .vercel/
+tools/preview.html
