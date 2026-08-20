@@ -176,6 +176,7 @@ def main():
     sync = doc.get("sync") or {}
     tones = [float(t) for t in (sync.get("tones") or DEFAULT_TONES)]
     dur = float(sync.get("dur") or DEFAULT_DUR)
+    start_log_t = float(sync.get("startBeepLogT") or 0)   # 로그 0초와 표식음 사이의 짧은 지연
     end_log_t = sync.get("endBeepLogT")
     old_off = float(doc.get("videoOffset") or 0)
 
@@ -205,15 +206,15 @@ def main():
         print("  표식음  %s  (평소보다 %.0f배 큼)%s" % (hms(r["start"]), r["score"], where))
     print()
 
-    new_off = runs[0]["start"]
+    new_off = runs[0]["start"] - start_log_t
     rate = 1.0
     if end_log_t and len(runs) > 1:
         want = new_off + float(end_log_t)
         cand = min(runs[1:], key=lambda r: abs(r["start"] - want))
         gap = cand["start"] - want
         if abs(gap) <= max(30.0, float(end_log_t) * 0.02):
-            measured = cand["start"] - new_off
-            rate = measured / float(end_log_t)
+            measured = cand["start"] - runs[0]["start"]
+            rate = measured / (float(end_log_t) - start_log_t)
             print("종료 표식음도 찾았습니다 — 예상보다 %+.1f초 (%.4f배)" % (gap, rate))
             if not a.drift:
                 print("  드리프트 보정은 --drift 를 붙이면 적용합니다\n")

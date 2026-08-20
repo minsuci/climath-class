@@ -4196,23 +4196,39 @@ async function clMakeNote(text, student, units) {
 
    순음을 두 개 겹치는 이유: 말소리에는 이런 스펙트럼이 없어서 오검출이 거의 없다.
    1000Hz와 1600Hz는 배음 관계가 아니라(1.6배) 서로의 하모닉으로 오인되지 않는다. */
-const CL_TONES = [1000, 1600], CL_TONE_DUR = 0.35;
+const CL_TONES = [1000, 1600], CL_TONE_DUR = 0.35, CL_BEEP_LEAD = 0.12;
 
-/* 아이폰이 무음 모드면 웹 오디오는 그냥 안 난다. 두 겹으로 뚫는다.
-   1) navigator.audioSession = "playback"  (사파리 16.4+). 이 페이지의 소리를
-      벨소리가 아니라 "음악·영상"으로 취급하게 해서 무음 스위치를 넘어간다.
-   2) 안 되는 기기: 소리를 <video>로 흘려보낸다. iOS는 video 재생을
-      무음 스위치와 무관하게 다루므로 옛 기기에서도 대개 난다.
-   미디어 볼륨이 0이면 어느 쪽도 소용없다 — 그건 웹에서 못 올린다.
-   그래서 "소리 시험" 단추가 있다. 수업 전에 한 번 눌러보면 끝난다. */
-function clAudioSession() {
-  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+/* ── 표식음을 실제로 나게 하기 ──────────────────────────────────
+   두 가지 장벽이 있고 둘 다 넘어야 한다.
+
+   1) 무음 모드. `navigator.audioSession = "playback"`(사파리 16.4+)으로
+      이 페이지의 소리를 벨소리가 아니라 "음악·영상"으로 취급하게 한다.
+      안 되는 기기를 위해 소리를 <video>로도 흘려보낸다 — iOS는 video 재생을
+      무음 스위치와 무관하게 다룬다.
+   2) 잠금 해제. iOS는 페이지가 **소리를 한 번 내본 뒤에야** 소리가 난다.
+      그 첫 한 번이 잠금 해제에 잡아먹혀 조용히 사라진다.
+      → 화면에 들어오면 첫 터치에 무음 버퍼를 흘려 미리 풀어둔다(clUnlock).
+      "수업 시작"의 첫 삐를 놓치면 **영상에도 안 남는다.** 그게 제일 중요한 한 번이다.
+
+   AudioContext는 하나만 만들어 계속 쓴다. 매번 새로 만들면 그때마다 첫 소리가
+   묻히고, iOS는 동시에 만들 수 있는 개수도 적다.
+   미디어 볼륨 0은 웹에서 못 올린다 — 그래서 "소리 시험" 단추가 있다. */
+let clCtx = null, clDest = null, clSinkEl = null, clUnlocked = false;
+
+function clAudioSession(type) {
+  try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (e) {}
 }
-let clSinkEl = null;
-function clSink(ctx) {
-  if (!ctx.createMediaStreamDestination) return null;
+function clCtxGet() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  if (!clCtx || clCtx.state === "closed") clCtx = new AC();
+  return clCtx;
+}
+function clSinkStart() {                       // 무음 스위치 우회로
+  const ctx = clCtxGet();
+  if (!ctx || !ctx.createMediaStreamDestination) return null;
   try {
-    const dest = ctx.createMediaStreamDestination();
+    if (!clDest) clDest = ctx.createMediaStreamDestination();
     if (!clSinkEl) {
       clSinkEl = document.createElement("video");
       clSinkEl.setAttribute("playsinline", "");
@@ -4220,37 +4236,56 @@ function clSink(ctx) {
       clSinkEl.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none";
       document.body.appendChild(clSinkEl);
     }
-    clSinkEl.srcObject = dest.stream;
-    const p = clSinkEl.play();
-    if (p && p.catch) p.catch(() => {});
-    return dest;
+    if (clSinkEl.srcObject !== clDest.stream) clSinkEl.srcObject = clDest.stream;
+    if (clSinkEl.paused) { const p = clSinkEl.play(); if (p && p.catch) p.catch(() => {}); }
+    return clDest;
   } catch (e) { return null; }
 }
-function clBeep() {
+function clSoundRelease() {                    // 화면을 떠나면 오디오 세션을 돌려준다
+  try { if (clSinkEl) { clSinkEl.pause(); clSinkEl.srcObject = null; } } catch (e) {}
+  clAudioSession("auto");
+}
+function clUnlock() {
+  if (clUnlocked) return;
+  const ctx = clCtxGet();
+  if (!ctx) return;
+  clUnlocked = true;
+  clAudioSession("playback");
+  try {                                        // 1샘플짜리 무음 — 이걸로 잠금이 풀린다
+    const src = ctx.createBufferSource();
+    src.buffer = ctx.createBuffer(1, 1, 22050);
+    src.connect(ctx.destination); src.start(0);
+  } catch (e) {}
+  try { const p = ctx.resume(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+  clSinkStart();
+}
+/* onFired(절대시각ms) — 톤이 실제로 울리는 시각. resume을 기다리느라
+   늦게 울릴 수 있으므로 그 자리에서 알려준다(로그 0초와의 차이가 곧 오차다). */
+function clBeep(onFired) {
   try {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return false;
-    clAudioSession();
-    const ctx = new AC();
-    if (ctx.state === "suspended") ctx.resume();
-    const t0 = ctx.currentTime + 0.08;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0, t0);                                  // 딸깍 소리 방지
-    g.gain.linearRampToValueAtTime(0.7, t0 + 0.02);
-    g.gain.setValueAtTime(0.7, t0 + CL_TONE_DUR - 0.03);
-    g.gain.linearRampToValueAtTime(0, t0 + CL_TONE_DUR);
-    g.connect(ctx.destination);
-    const sink = clSink(ctx);
-    if (sink) g.connect(sink);                                     // 무음 스위치 우회로
-    CL_TONES.forEach((f) => {
-      const o = ctx.createOscillator();
-      o.type = "sine"; o.frequency.value = f;
-      o.connect(g); o.start(t0); o.stop(t0 + CL_TONE_DUR + 0.05);
-    });
-    setTimeout(() => {
-      try { if (clSinkEl) { clSinkEl.pause(); clSinkEl.srcObject = null; } } catch (e) {}
-      try { ctx.close(); } catch (e) {}
-    }, 2000);
+    const ctx = clCtxGet();
+    if (!ctx) return false;
+    clAudioSession("playback");
+    clUnlock();
+    const dest = clSinkStart();
+    const fire = () => {
+      const t0 = ctx.currentTime + CL_BEEP_LEAD;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t0);                                // 딸깍 소리 방지
+      g.gain.linearRampToValueAtTime(0.7, t0 + 0.02);
+      g.gain.setValueAtTime(0.7, t0 + CL_TONE_DUR - 0.03);
+      g.gain.linearRampToValueAtTime(0, t0 + CL_TONE_DUR);
+      g.connect(ctx.destination);
+      if (dest) g.connect(dest);
+      CL_TONES.forEach((f) => {
+        const o = ctx.createOscillator();
+        o.type = "sine"; o.frequency.value = f;
+        o.connect(g); o.start(t0); o.stop(t0 + CL_TONE_DUR + 0.05);
+      });
+      if (onFired) onFired(Date.now() + Math.round(CL_BEEP_LEAD * 1000));
+    };
+    if (ctx.state === "running") fire();
+    else { const p = ctx.resume(); if (p && p.then) p.then(fire, fire); else fire(); }
     return true;
   } catch (e) { return false; }
 }
@@ -4334,6 +4369,20 @@ function LessonLogger({ cls, canEdit, meName }) {
 
   useEffect(() => { if (!log) return; const h = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(h); }, [!!log]);
 
+  /* iOS는 페이지가 소리를 한 번 내본 뒤에야 소리가 난다. 첫 삐가 그 잠금 해제에
+     잡아먹히면 영상에 표식이 안 남는다 — 화면에 들어오자마자 아무 터치에나 미리 푼다.
+     "수업 시작"을 누르는 터치도 pointerdown이 click보다 먼저라 그 전에 풀린다. */
+  useEffect(() => {
+    const h = () => clUnlock();
+    document.addEventListener("pointerdown", h, { once: true, capture: true });
+    document.addEventListener("touchend", h, { once: true, capture: true });
+    return () => {
+      document.removeEventListener("pointerdown", h, { capture: true });
+      document.removeEventListener("touchend", h, { capture: true });
+      clSoundRelease();
+    };
+  }, []);
+
   const detectPeople = people.map((p) => ({
     sid: p.id, name: p.name,
     aliases: cfg.aliases[p.id] || [],
@@ -4371,10 +4420,13 @@ function LessonLogger({ cls, canEdit, meName }) {
   }
 
   function clStart() {
-    const beeped = sound ? clBeep() : false;          // 소리가 먼저다 — 이 순간이 영상에서 찾을 지점
-    const next = { startedAt: Date.now(), marks: [], shift: 0, beeped };
+    const next = { startedAt: Date.now(), marks: [], shift: 0, beeped: !!sound };
     setLog(next); setSaved(null); setTrans([]);
-    persist(next, { endedAt: null, segments: [], beeped, endBeepAt: null });
+    // 문서를 먼저 쓴다 — 삐가 울린 시각을 그 뒤에 덮어써야 하므로 순서가 뒤집히면 안 된다
+    persist(next, { endedAt: null, segments: [], beeped: !!sound, beepAt: null, endBeepAt: null });
+    if (!sound) return;
+    const ok = clBeep((at) => saveLessonLog(cls.id, date, { beepAt: at }).catch(() => {}));
+    if (!ok) saveLessonLog(cls.id, date, { beeped: false }).catch(() => {});
   }
   // 상태 갱신 함수 안에서 Firestore를 부르지 않는다 — 업데이터는 두 번 호출될 수 있다
   function clMark(sid, kind) {
@@ -4428,12 +4480,15 @@ function LessonLogger({ cls, canEdit, meName }) {
   async function clEnd() {
     if (!log) return;
     if (!log.marks.length) { if (!confirm("기록된 구간이 없습니다. 그냥 버릴까요?")) return; setLog(null); setMicOn(false); return; }
-    const endBeeped = sound ? clBeep() : false;
-    const endBeepAt = endBeeped ? Date.now() : null;
     const segs = clSegments(log.marks, log.startedAt, Date.now(), log.shift || 0);
-    const doc = { startedAt: log.startedAt, endedAt: Date.now(), shift: log.shift || 0, marks: log.marks, segments: segs, transcript: trans.slice(-400), teacher: meName, date, endBeepAt, beeped: !!log.beeped };
+    const doc = { startedAt: log.startedAt, endedAt: Date.now(), shift: log.shift || 0, marks: log.marks, segments: segs, transcript: trans.slice(-400), teacher: meName, date, endBeepAt: null, beeped: !!log.beeped };
     await saveLessonLog(cls.id, date, doc);
     setSaved(doc); setLog(null); setMicOn(false);
+    // setSaved(doc) 뒤에 울려야 한다 — 먼저 울리면 아래 doc이 endBeepAt을 다시 지운다
+    if (sound) clBeep((at) => {
+      setSaved((d) => (d ? { ...d, endBeepAt: at } : d));
+      saveLessonLog(cls.id, date, { endBeepAt: at }).catch(() => {});
+    });
     listLessonLogs(cls.id).then(setHist);
   }
 
@@ -4691,7 +4746,8 @@ function LessonLogger({ cls, canEdit, meName }) {
                 sync: {
                   beeped: !!(saved && saved.beeped),
                   tones: CL_TONES, dur: CL_TONE_DUR,
-                  startBeepLogT: 0,
+                  startBeepLogT: saved && saved.beepAt && saved.startedAt
+                    ? Math.round((saved.beepAt - saved.startedAt) / 10) / 100 : 0,
                   endBeepLogT: saved && saved.endBeepAt && saved.startedAt
                     ? Math.round((saved.endBeepAt - saved.startedAt) / 10) / 100 : null,
                 },
