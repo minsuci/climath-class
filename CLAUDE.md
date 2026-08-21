@@ -92,7 +92,7 @@ CDN 캐시가 남으면 `?v=123` 붙여 우회하거나 "Use existing Build Cach
 
 ```
 classes/{cid}
-  name, classDays[], type("regular"|"individual"), books[], merge{partnerId,days[]}, order, time
+  name, classDays[], type("regular"|"individual"), books[], merge{partnerId,days[]}, order, time, endDate
   roster[]  ← 배열 필드. { id, name, days[], books[], startDate, endDate, teacher?, defaultPin? }
   ├─ students/{sid}      { pin }            # 구버전 반별 PIN (통합 PIN으로 자동 이전됨)
   ├─ homework/{sid}      { books: {교재명: [문항번호]} }
@@ -152,6 +152,24 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
   출석/과제/점수는 각 반에 저장하고 화면만 병합(`반id:학생id` 복합키). 학생 화면엔 노출 안 함
 - **개별진도반**(`type:"individual"`): 학생마다 `days`·`books`. 수강기간 `startDate`~`endDate`,
   종료일 지나면 자동으로 명단에서 빠짐(기록은 보존). 헬퍼: `isActiveOn` `isEnded` `attendsOn` `addMonths`
+- **반 종강**(`endDate`): 학생 수강종료와 **같은 문법을 반 단위로** 확장한 것.
+  `isClassEnded(cls)` = `todayStr > cls.endDate` (종강일 = 마지막 수업일, 그 다음 날부터 빠진다).
+  헬퍼 `activeClasses()` / `endedClasses()`로 목록을 가른다. 쓰기는 `saveClassEnd(cid, endDate)`.
+  종강한 반은 **내 수업 목록에서 접히고**(`종강한 반 N개`), 위험신호·보강 관리·합반 상대·
+  선생님 담당 반 선택·순서 편집·학생 로그인에서 **빠진다.** 반 안으로는 그대로 들어가지고
+  (배너로 알림) 학습관리 보고서에도 남는다 — 지난 학기 보고서를 뽑을 일이 있어서다.
+  개진반이라도 **수업 로그(`c:live`) 메뉴는 숨긴다.** endDate를 지우면 전부 되살아난다.
+
+  **종강하면 합반은 함께 푼다.** `mergePartner`는 `findClass`로 반을 찾을 뿐 종강 여부를
+  안 보기 때문에, 안 풀면 종강한 반 학생이 **상대 반 출석 화면에 계속 끌려온다.**
+  `saveClassEnd`가 `clearMerge`까지 호출하고 무엇을 풀었는지 이름을 돌려준다.
+
+  > [!warning] 종강한 반을 삭제로 치우면 안 된다
+  > `deleteClass`는 **반 문서 하나만** 지운다. Firestore는 문서를 지워도 하위 컬렉션이
+  > 남으므로 attendance·homework·dailyNotes·lessonLogs·progress·noteUnits가 전부 고아가 되고
+  > **앱에서 영영 못 본다.** 상담·월간보고서는 최상위라 문서는 살지만 반이 없어 열 길이 없다.
+  > 그래서 반 설정의 삭제 버튼 위에 "종강을 쓰라"는 안내를 붙여 뒀다. 삭제는 잘못 만든 반 전용.
+
 - **보강**(`makeups`): 결석 예정 / 동영상 보강 완료. 월간 출석부 칸 클릭 시
   O → 예(결석예정) → 영(동영상완료) → / 순환. 전역 "보강 관리"에서 미래 날짜 예약(학생→날짜→수업 3단계)
 - **수업 로그**(`LessonLogger`, 사이드바 `c:live`): **개별진도반에서만** 보인다.

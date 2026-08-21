@@ -410,6 +410,12 @@ function isActiveOn(st, date) {
   return true;
 }
 const isEnded = (st) => !!(st && st.endDate && todayStr > st.endDate);
+// ----- 반 종강: 학생 수강종료와 같은 문법을 반 단위로 -----
+// 종강일이 지난 반은 목록·집계·학생 화면에서 빠지고, 기록은 전부 그대로 남는다.
+// endDate를 지우면 그대로 되살아난다 (2학기 개강 등).
+const isClassEnded = (cls) => !!(cls && cls.endDate && todayStr > cls.endDate);
+const activeClasses = () => CLASSES.filter((c) => !isClassEnded(c));
+const endedClasses = () => CLASSES.filter(isClassEnded);
 // 기간 연장: 기준일(없거나 이미 지났으면 오늘)에서 n개월 뒤
 function addMonths(baseStr, n) {
   const base = (baseStr && baseStr >= todayStr) ? baseStr : todayStr;
@@ -865,7 +871,8 @@ async function computeRiskData() {
   const flagged = [];
   const gaps = [];
 
-  CLASSES.forEach((cls) => {
+  // 종강한 반은 위험신호에서 뺀다 — 이제 손쓸 수 있는 학생이 아니다
+  activeClasses().forEach((cls) => {
     (cls.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => {
       const key = cls.id + ":" + st.id;
       const arr = (byStudent[key] || []).sort(
@@ -927,6 +934,18 @@ async function clearMerge(cidA, cidB) {
   await classesCol().doc(cidA).update({ merge: del });
   if (cidB) await classesCol().doc(cidB).update({ merge: del });
   await loadClasses();
+}
+// 종강 처리 / 취소. endDate를 비우면 되살아난다. (전역은 set* 이름을 피한다 — useState 세터와 충돌)
+// 종강하면 합반은 함께 푼다. 안 그러면 종강한 반 학생이 상대 반 출석 화면에 계속 끌려온다
+// (mergePartner는 findClass로 반을 찾을 뿐 종강 여부를 안 본다). 되살릴 땐 다시 합반하면 된다.
+// 반환값: 합반을 풀었으면 상대 반 이름, 아니면 "".
+async function saveClassEnd(cid, endDate) {
+  const cls = findClass(cid);
+  const partnerId = endDate && cls && cls.merge ? cls.merge.partnerId : "";
+  const partnerName = partnerId ? ((findClass(partnerId) || {}).name || "") : "";
+  await classesCol().doc(cid).update({ endDate: endDate || "" });
+  if (partnerId) await clearMerge(cid, partnerId); else await loadClasses();
+  return partnerName;
 }
 async function deleteClass(cid) {
   await classesCol().doc(cid).delete();
@@ -1097,12 +1116,16 @@ function StudentGate({ onClsChange }) {
     if (pin.length !== 4) { setErr("PIN 4자리를 입력해주세요"); return; }
     setBusy(true); setErr("");
     // 이름이 있는 모든 반 = 같은 사람의 반들
-    const candidates = CLASSES
+    const found = CLASSES
       .map((c) => ({ cls: c, member: (c.roster || []).find((r) => norm(r.name) === nm) }))
       .filter((x) => x.member);
+    // 종강한 반은 학생 화면에 아예 안 보인다 (기록은 선생님 화면에 그대로 남아 있다)
+    const candidates = found.filter((x) => !isClassEnded(x.cls));
     if (candidates.length === 0) {
       setBusy(false);
-      setErr("명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해주세요.");
+      setErr(found.length
+        ? "수강이 종료된 반이에요. 기록은 보관되어 있으니 선생님께 문의해주세요."
+        : "명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해주세요.");
       return;
     }
     const okPin = await verifyPersonPin(nm, pin, candidates);
@@ -1971,8 +1994,11 @@ function ReportCenter({ onBack }) {
 
   const norm = (s) => (s || "").replace(/\s+/g, "");
   const everyone = [];
+  // 종강한 반도 남긴다 — 지난 학기 보고서를 뽑을 일이 있다. 다만 목록 아래로 내리고 표시를 붙인다
   CLASSES.forEach((c) => (c.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => everyone.push({ cls: c, st })));
-  everyone.sort((a, b) => a.st.name.localeCompare(b.st.name, "ko") || a.cls.name.localeCompare(b.cls.name, "ko"));
+  everyone.sort((a, b) =>
+    (isClassEnded(a.cls) ? 1 : 0) - (isClassEnded(b.cls) ? 1 : 0)
+    || a.st.name.localeCompare(b.st.name, "ko") || a.cls.name.localeCompare(b.cls.name, "ko"));
   const filtered = q ? everyone.filter((x) => norm(x.st.name).includes(norm(q))) : everyone;
 
   const monthOpts = [];
@@ -2056,10 +2082,11 @@ function ReportCenter({ onBack }) {
         <h3 className="cm-h3">학생 {filtered.length}명</h3>
         {filtered.length === 0 && <div className="cm-empty">검색 결과가 없어요</div>}
         {filtered.map(({ cls, st }) => (
-          <button key={cls.id + st.id} className="cm-day" onClick={() => { setPicked({ cls, st }); load(cls, st, ym); }}>
+          <button key={cls.id + st.id} className="cm-day" style={isClassEnded(cls) ? {opacity: .62} : undefined}
+            onClick={() => { setPicked({ cls, st }); load(cls, st, ym); }}>
             <div className="cm-day-left">
               <span className="cm-day-date">{st.name}</span>
-              <span className="cm-day-sub">{cls.name}</span>
+              <span className="cm-day-sub">{cls.name}{isClassEnded(cls) ? " · " + cls.endDate + " 종강" : ""}</span>
             </div>
             <span className="cm-day-arrow">›</span>
           </button>
@@ -2077,14 +2104,14 @@ function MakeupCenter({ onBack }) {
   const [weeks, setWeeks] = useState(8);
 
   useEffect(() => {
-    const unsubs = CLASSES.map((c) => listenMakeups(c.id, (m) => setMkByClass((p) => ({ ...p, [c.id]: m }))));
+    const unsubs = activeClasses().map((c) => listenMakeups(c.id, (m) => setMkByClass((p) => ({ ...p, [c.id]: m }))));
     return () => unsubs.forEach((u) => u && u());
   }, []);
 
   const norm = (s) => (s || "").replace(/\s+/g, "");
   // 이름 기준으로 통합 (같은 이름 = 같은 사람)
   const peopleMap = {};
-  CLASSES.forEach((c) => (c.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => {
+  activeClasses().forEach((c) => (c.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => {
     const key = norm(st.name);
     if (!peopleMap[key]) peopleMap[key] = { name: st.name, entries: [] };
     peopleMap[key].entries.push({ cls: c, st });
@@ -2095,7 +2122,7 @@ function MakeupCenter({ onBack }) {
   const mkOf = (cid, sid, date) => (mkByClass[cid] || {})[sid + "_" + date];
 
   const allPending = [];
-  CLASSES.forEach((c) => Object.values(mkByClass[c.id] || {}).forEach((mm) => {
+  activeClasses().forEach((c) => Object.values(mkByClass[c.id] || {}).forEach((mm) => {
     if (mm.planned && !mm.videoDone) allPending.push({ ...mm, cname: c.name, cid: c.id });
   }));
   allPending.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
@@ -2116,7 +2143,7 @@ function MakeupCenter({ onBack }) {
     });
     // 본인 반이 아니지만 그날 수업이 열리는 반 (보강 참석 등)
     const myCids = picked.entries.map((e) => e.cls.id);
-    const others = CLASSES.filter((c) => {
+    const others = activeClasses().filter((c) => {
       if (myCids.includes(c.id)) return false;
       if (isIndividual(c)) return false; // 개별진도반은 학생별 요일이라 제외
       return (c.classDays || []).includes(dow);
@@ -2451,6 +2478,7 @@ function AdminView() {
   const [editOrder, setEditOrder] = useState(false);
   const [orderList, setOrderList] = useState(null); // 편집 중 임시 순서
   const [orderBusy, setOrderBusy] = useState(false);
+  const [showEnded, setShowEnded] = useState(false); // 종강한 반 펼치기
   const [cls, setCls] = useState(null);
 
   async function refreshTeachers() {
@@ -2538,9 +2566,10 @@ function AdminView() {
         { key: "report", ico: "▣", label: "학습관리 보고서" },
         ...(cls ? [
           { sep: true },
-          { group: cls.name },
+          { group: cls.name + (isClassEnded(cls) ? " (종강)" : "") },
           { key: "c:days", ico: "▤", label: "날짜별" },
-          ...(isIndividual(cls) ? [{ key: "c:live", ico: "◐", label: "수업 로그" }] : []),
+          // 종강한 반에서는 수업 로그를 새로 찍을 일이 없다
+          ...(isIndividual(cls) && !isClassEnded(cls) ? [{ key: "c:live", ico: "◐", label: "수업 로그" }] : []),
           { key: "c:book", ico: "▦", label: "월간 출석부" },
           { key: "c:notice", ico: "◑", label: "공지" },
           { key: "c:progress", ico: "◈", label: "진도표" },
@@ -2583,17 +2612,37 @@ function AdminView() {
           {!editOrder && <button className="cm-link cm-home-back" onClick={logout}>로그아웃</button>}
         </div>
 
-        {!editOrder && (
+        {!editOrder && (<>
           <div className="cm-daylist">
-            {CLASSES.map((c) => (
+            {activeClasses().map((c) => (
               <button key={c.id} className="cm-day" onClick={() => { setCls(c); setClassView("days"); setDayPick(null); }}>
                 <div className="cm-day-left"><span className="cm-day-date">{c.name}</span>
                   <span className="cm-day-sub">{canEdit(c) ? "담당" : "열람 전용"}</span></div>
                 <span className="cm-day-arrow">›</span>
               </button>
             ))}
+            {activeClasses().length === 0 && <div className="cm-empty">진행 중인 반이 없어요.</div>}
           </div>
-        )}
+
+          {/* 종강한 반 — 접어두되 언제든 들어가서 볼 수 있다. 기록은 하나도 지워지지 않는다 */}
+          {endedClasses().length > 0 && (<>
+            <button className="cm-link" style={{marginTop: 10}} onClick={() => setShowEnded((v) => !v)}>
+              {showEnded ? "▾" : "▸"} 종강한 반 {endedClasses().length}개
+            </button>
+            {showEnded && (
+              <div className="cm-daylist" style={{marginTop: 6}}>
+                {endedClasses().map((c) => (
+                  <button key={c.id} className="cm-day" style={{opacity: .62}}
+                    onClick={() => { setCls(c); setClassView("days"); setDayPick(null); }}>
+                    <div className="cm-day-left"><span className="cm-day-date">{c.name}</span>
+                      <span className="cm-day-sub">{c.endDate} 종강</span></div>
+                    <span className="cm-day-arrow">›</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>)}
+        </>)}
 
         {editOrder && orderList && (<>
           <div className="cm-hint" style={{marginBottom: 10}}>▲▼로 순서를 바꾸세요. 자주 쓰는 반을 위로 올리면 편해요.</div>
@@ -2613,7 +2662,8 @@ function AdminView() {
           <div style={{display: "flex", gap: 10, marginTop: 12}}>
             <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={orderBusy} onClick={async () => {
               setOrderBusy(true);
-              try { await saveClassOrder(orderList.map((c) => c.id)); setEditOrder(false); setOrderList(null); }
+              // 종강한 반은 편집 대상이 아니므로 뒤에 붙여 order 값이 엇갈리지 않게 한다
+              try { await saveClassOrder(orderList.map((c) => c.id).concat(endedClasses().map((c) => c.id))); setEditOrder(false); setOrderList(null); }
               catch (e) { alert("저장 실패: " + e.message); }
               setOrderBusy(false);
             }}>{orderBusy ? "저장 중..." : "순서 저장"}</button>
@@ -2621,15 +2671,16 @@ function AdminView() {
           </div>
         </>)}
 
-        {!editOrder && CLASSES.length > 1 && (
-          <button className="cm-link" style={{marginTop: 10}} onClick={() => { setOrderList([...CLASSES]); setEditOrder(true); }}>↕ 순서 편집</button>
+        {!editOrder && activeClasses().length > 1 && (
+          <button className="cm-link" style={{marginTop: 10}} onClick={() => { setOrderList(activeClasses()); setEditOrder(true); }}>↕ 순서 편집</button>
         )}
       </div></div>
     </>);
   }
   return <><AdminDays cls={cls} canEdit={canEdit(cls)} isOwner={me.role === "owner"} meName={me.name}
     activeView={classView} setActiveView={setClassView} selected={dayPick} setSelected={setDayPick}
-    side={homeSide} onBack={() => { setCls(null); setClassView("days"); setDayPick(null); }} /></>;
+    side={homeSide} onBack={() => { setCls(null); setClassView("days"); setDayPick(null); }}
+    onClassChanged={() => setCls(findClass(cls.id) || cls)} /></>;
 }
 
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
@@ -3066,7 +3117,7 @@ function StudentConfig({ cls, canEdit }) {
 }
 
 function MergeManager({ cls, onSaved }) {
-  const others = CLASSES.filter((c) => c.id !== cls.id);
+  const others = activeClasses().filter((c) => c.id !== cls.id);
   const cur = cls.merge || null;
   const [partnerId, setPartnerId] = useState(cur ? cur.partnerId : (others[0] ? others[0].id : ""));
   const [days, setDays] = useState(cur ? [...(cur.days || [])] : []);
@@ -3119,7 +3170,22 @@ function ClassMetaEditor({ cls, onSaved, onDeleted }) {
   const [days, setDays] = useState([...(cls.classDays || [])]);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [endDate, setEndDate] = useState(cls.endDate || "");
+  const [endMsg, setEndMsg] = useState("");
   function toggleDay(d) { setDays((s) => s.includes(d) ? s.filter((x) => x !== d) : [...s, d].sort()); }
+  async function applyEnd(v) {
+    if (busy) return;
+    setBusy(true); setEndMsg("");
+    try {
+      const unmerged = await saveClassEnd(cls.id, v);
+      cls.endDate = v; setEndDate(v);
+      if (unmerged) cls.merge = null;
+      setEndMsg((v ? (v < todayStr ? "종강 처리됐어요 ✓" : v + "에 종강돼요 ✓") : "종강이 취소됐어요 ✓")
+        + (unmerged ? " (" + unmerged + "과의 합반은 해제했어요)" : ""));
+      onSaved();
+    } catch (e) { setEndMsg("저장 실패: " + e.message); }
+    setBusy(false);
+  }
   async function save() {
     if (busy) return;
     const nm = name.trim();
@@ -3151,9 +3217,42 @@ function ClassMetaEditor({ cls, onSaved, onDeleted }) {
       {isIndividual(cls) && <div className="cm-hint" style={{margin: "8px 0"}}>개별진도반의 등원요일·교재는 아래 <b>학생별 설정</b>에서 관리해요.</div>}
       {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
       <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중..." : "저장"}</button>
+
+      {/* ---- 종강 ---- 학생 수강종료(endDate)와 같은 문법. 기록은 하나도 지워지지 않는다 ---- */}
       <div style={{borderTop: "1px solid var(--line)", marginTop: 18, paddingTop: 14}}>
+        <label className="cm-label" style={{marginTop: 0}}>종강</label>
+        {isClassEnded(cls) ? (
+          <div className="cm-hint" style={{marginBottom: 8}}>
+            <b>{cls.endDate} 종강한 반이에요.</b> 내 수업 목록의 “종강한 반”에 접혀 있고,
+            위험신호·보강 관리·학생 로그인에서 빠져 있어요. 출석·과제·상담·보고서는 그대로 남아 있습니다.
+          </div>
+        ) : (
+          <div className="cm-hint" style={{marginBottom: 8}}>
+            마지막 수업 날짜를 넣으면 그 다음 날부터 목록에서 접히고 집계에서 빠져요.
+            <b>기록은 하나도 지워지지 않고</b>, 날짜를 지우면 그대로 되살아납니다.
+            {cls.merge && cls.merge.partnerId && <> 합반 중인 반이라 <b>합반은 함께 해제</b>돼요.</>}
+          </div>
+        )}
+        <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8}}>
+          <input className="cm-input" style={{margin: 0, maxWidth: 190}} type="date"
+            value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <button className="cm-btn cm-btn-ghost" style={{margin: 0}} disabled={busy || endDate === (cls.endDate || "")}
+            onClick={() => applyEnd(endDate)}>{busy ? "저장 중..." : "적용"}</button>
+        </div>
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+          <button className="cm-ab-tab" disabled={busy} onClick={() => applyEnd(todayStr)}>지금 종강 (오늘이 마지막)</button>
+          {cls.endDate && <button className="cm-ab-tab" disabled={busy} onClick={() => applyEnd("")}>종강 취소</button>}
+        </div>
+        {endMsg && <div className={endMsg.includes("✓") ? "cm-done" : "cm-err"}>{endMsg}</div>}
+      </div>
+
+      <div style={{borderTop: "1px solid var(--line)", marginTop: 18, paddingTop: 14}}>
+        <div className="cm-hint" style={{marginBottom: 8}}>
+          수업이 끝난 반이라면 <b>삭제 말고 위의 종강</b>을 쓰세요. 삭제는 잘못 만든 반을 치울 때만 씁니다 —
+          출석·과제·수업기록·강의노트를 <b>앱에서 다시 볼 수 없게</b> 됩니다.
+        </div>
         <button className="cm-link" style={{color: "#d6453f"}} disabled={busy} onClick={async () => {
-          const typed = prompt('정말 삭제하려면 반 이름("' + cls.name + '")을 똑같이 입력하세요.\n출석·과제·질문 기록이 화면에서 사라지며 되돌리기 어렵습니다.');
+          const typed = prompt('정말 삭제하려면 반 이름("' + cls.name + '")을 똑같이 입력하세요.\n출석·과제·질문 기록이 화면에서 사라지며 되돌리기 어렵습니다.\n\n수업이 끝난 것뿐이라면 취소하고 "종강"을 쓰세요.');
           if (typed === null) return;
           if (typed.trim() !== cls.name) { alert("이름이 일치하지 않아 취소했어요."); return; }
           setBusy(true);
@@ -3258,7 +3357,7 @@ function TeacherRegister({ onDone, onCancel }) {
       <input className="cm-input" type="password" inputMode="numeric" maxLength={4} value={p2} onChange={(e) => setP2(e.target.value.replace(/\D/g, ""))} />
       <label className="cm-label">담당 반 선택</label>
       <div className="cm-daylist">
-        {CLASSES.map((c) => (
+        {activeClasses().map((c) => (
           <button key={c.id} className="cm-day" onClick={() => toggleCls(c.id)}>
             <div className="cm-day-left"><span className="cm-day-date">{c.name}</span></div>
             <span className="cm-day-arrow">{sel.includes(c.id) ? "✓" : ""}</span>
@@ -3324,9 +3423,10 @@ function TeacherManage({ me, teachers, onRefresh, onBack }) {
             )}
             {t.role !== "owner" && (
               <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8}}>
-                {CLASSES.map((c) => {
+                {/* 종강한 반은 숨기되, 이미 담당으로 걸려 있으면 뺄 수 있도록 남겨둔다 */}
+                {CLASSES.filter((c) => !isClassEnded(c) || (t.classIds || []).includes(c.id)).map((c) => {
                   const on = (t.classIds || []).includes(c.id);
-                  return <button key={c.id} className={"cm-ab-tab" + (on ? " on" : "")} onClick={() => toggleCls(t, c.id)}>{c.name}</button>;
+                  return <button key={c.id} className={"cm-ab-tab" + (on ? " on" : "")} onClick={() => toggleCls(t, c.id)}>{c.name}{isClassEnded(c) ? " (종강)" : ""}</button>;
                 })}
               </div>
             )}
@@ -3402,7 +3502,7 @@ function useSwipeBack(onBack) {
   }, []);
 }
 
-function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, selected, setSelected, side, onBack }) {
+function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, selected, setSelected, side, onBack, onClassChanged }) {
   const [rosterVer, bumpVer] = useState(0);
   const [days, setDays] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -3441,6 +3541,16 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
         <button className="cm-back" onClick={onBack}>‹ 반 선택</button>
         <div className="cm-daybar-date">{cls.name}{!canEdit && <span className="cm-day-sub">열람 전용</span>}</div>
       </div>
+
+      {/* 종강한 반에 들어왔을 때 — 실수로 출석을 찍는 사고를 막는다 */}
+      {isClassEnded(cls) && (
+        <div className="cm-card" style={{background: "#f0ece5", borderColor: "#ded5c7"}}>
+          <div style={{color: "#7c6f5f", fontSize: 14, lineHeight: 1.6}}>
+            <b>{cls.endDate} 종강한 반</b>이에요. 기록 열람용으로 열려 있고, 학생 화면에는 보이지 않아요.
+            다시 열려면 <b>반 설정 → 종강 취소</b>.
+          </div>
+        </div>
+      )}
 
       {activeView === "notice" && (<>
       {/* 전체 공지 */}
@@ -3540,7 +3650,7 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
         </div>
       )}
 
-      {activeView === "live" && isIndividual(cls) && (
+      {activeView === "live" && isIndividual(cls) && !isClassEnded(cls) && (
         <div className="cm-card">
           <h3 className="cm-h3">수업 로그 <span className="cm-h-hint">(누구와 몇 분을 했는지)</span></h3>
           <LessonLogger cls={cls} canEdit={canEdit} meName={meName} />
@@ -3579,7 +3689,7 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
         {isOwner && (
           <div className="cm-card">
             <h3 className="cm-h3">반 정보 <span className="cm-h-hint">(관리자 전용)</span></h3>
-            <ClassMetaEditor cls={cls} onSaved={() => bumpVer((v) => v + 1)} onDeleted={onBack} />
+            <ClassMetaEditor cls={cls} onSaved={() => { bumpVer((v) => v + 1); onClassChanged && onClassChanged(); }} onDeleted={onBack} />
           </div>
         )}
         {isOwner && !isIndividual(cls) && (
