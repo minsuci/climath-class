@@ -2803,28 +2803,51 @@ function ProgressFileViewer({ cid, pkey, meta, height }) {
 function ProgressEditor({ cid, pkey, canEdit, title }) {
   const [meta, setMeta] = useState(undefined);
   const [msg, setMsg] = useState("");
+  const [msgOk, setMsgOk] = useState(false);   // 안내인가(회색) 실패인가(빨강)
   const [busy, setBusy] = useState(false);
   const fileRef = React.useRef(null);
   useEffect(() => progressDoc(cid, pkey).onSnapshot((d) => setMeta(d.exists ? d.data() : null)), [cid, pkey]);
-  async function onFile(e) {
-    const file = e.target.files && e.target.files[0];
-    e.target.value = "";
-    if (!file) return;
+  // doneMsg: 올리고 나서도 남겨야 하는 안내 (없으면 지운다).
+  // 진행 문구를 덮어쓰기 때문에 여기서 받지 않으면 안내가 그냥 사라진다.
+  async function upload(file, doneMsg) {
+    if (!file || busy) return;
     setBusy(true); setMsg("올리는 중... (파일 크기에 따라 잠시 걸려요)");
-    try { await saveProgressFile(cid, pkey, file); setMsg(""); }
-    catch (err) { setMsg(err.message); }
+    try { await saveProgressFile(cid, pkey, file); setMsgOk(true); setMsg(doneMsg || ""); }
+    catch (err) { setMsgOk(false); setMsg(err.message); }
     setBusy(false);
   }
+  function onFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    upload(file);
+  }
+  // 진도계획표는 한 장짜리라 드롭은 곧 "교체"다.
+  // 버튼은 두 단계(누르고 고르고)지만 드롭은 한 번에 끝나서 실수가 그대로 통과한다.
+  // 이미 게시된 게 있을 때만 한 번 묻는다.
+  function onDropFiles(list) {
+    const ok = list.filter(isNoteFile);
+    if (!ok.length) {
+      alert("HTML · PDF · 이미지만 올릴 수 있어요.\n\n뺀 파일: " + list.map((f) => f.name).join(", "));
+      return;
+    }
+    const file = ok[0];
+    const note = (ok.length > 1 || ok.length < list.length)
+      ? "진도계획표는 한 장만 올라가요 — “" + file.name + "”으로 올렸어요" : "";
+    if (meta && !confirm("이미 게시된 진도계획표를 “" + file.name + "”으로 바꿀까요?\n(이전 파일은 사라져요)")) return;
+    upload(file, note);
+  }
+  const drop = useFileDrop(onDropFiles, canEdit && !busy);
   async function remove() {
     if (!confirm((title || "이") + " 진도계획표를 삭제할까요?")) return;
     setBusy(true);
-    try { await deleteProgressFile(cid, pkey); } catch (e) { setMsg("삭제 실패: " + e.message); }
+    try { await deleteProgressFile(cid, pkey); } catch (e) { setMsgOk(false); setMsg("삭제 실패: " + e.message); }
     setBusy(false);
   }
   if (meta === undefined) return <div className="cm-empty">불러오는 중…</div>;
   return (
-    <div>
+    <div className={"cm-drop" + (drop.over ? " over" : "")} {...drop.handlers}>
       <input ref={fileRef} type="file" accept=".html,.htm,.pdf,image/*" style={{display: "none"}} onChange={onFile} />
+      {drop.over && <div className="cm-drop-hint">↓ 여기에 놓으면 {meta ? "지금 게시본을 바꿔요" : "게시돼요"}</div>}
       {meta && (<>
         <ProgressFileViewer cid={cid} pkey={pkey} meta={meta} />
         <div style={{display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap"}}>
@@ -2837,10 +2860,13 @@ function ProgressEditor({ cid, pkey, canEdit, title }) {
       </>)}
       {!meta && (
         canEdit
-          ? <button className="cm-btn cm-btn-ghost" disabled={busy} onClick={() => fileRef.current.click()}>+ 파일 올려서 게시하기 (HTML · PDF · 이미지)</button>
+          ? <>
+              <button className="cm-btn cm-btn-ghost" disabled={busy} onClick={() => fileRef.current.click()}>+ 파일 올려서 게시하기 (HTML · PDF · 이미지)</button>
+              {canDragDrop && !drop.over && <div className="cm-hint" style={{textAlign: "center", marginTop: 6}}>파일을 여기로 끌어다 놓아도 돼요</div>}
+            </>
           : <div className="cm-empty">아직 게시된 진도계획표가 없어요</div>
       )}
-      {msg && <div className={busy ? "cm-hint" : "cm-err"} style={{marginTop: 8}}>{msg}</div>}
+      {msg && <div className={(busy || msgOk) ? "cm-hint" : "cm-err"} style={{marginTop: 8}}>{msg}</div>}
     </div>
   );
 }

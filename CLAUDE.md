@@ -133,6 +133,11 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 드롭존 밖에 놓으면 브라우저가 그 파일로 이동해 앱이 통째로 사라지므로
 `useBlockStrayDrop()`이 window에서 막는다. **터치 기기엔 드래그가 없으니 버튼은 항상 남긴다.**
 
+진도계획표(`ProgressEditor`)도 같은 훅을 쓰는데 **한 장짜리라 드롭이 곧 교체**다.
+버튼은 두 단계(누르고 고르고)지만 드롭은 한 번에 끝나 실수가 그대로 통과하므로,
+**이미 게시본이 있을 때만 confirm을 띄운다.** 여러 개를 놓으면 첫 장만 올리고 그렇다고 알린다.
+`msg`는 진행/안내/실패를 겸하므로 `msgOk`로 색을 가른다 — 안 그러면 안내가 빨간 오류로 보인다.
+
 **파일 저장**: Firebase Storage 미사용. base64를 700KB씩 쪼개 `parts` 하위 컬렉션에 저장.
 공용 함수 `saveFileToDoc()` / `loadFileB64FromDoc()` / `deleteFileDoc()`. 파일당 최대 4.5MB.
 
