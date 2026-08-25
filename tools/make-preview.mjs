@@ -14,9 +14,12 @@ const STUB = `
 (function(){
   var store = {};                      // "경로/문서id" -> data
   window.__store = store;
+  function newId(){ return "x" + Math.random().toString(36).slice(2,8); }
   function snap(path){
     var d = store[path];
-    return { exists: !!d, id: path.split("/").pop(), data: function(){ return d; } };
+    // ref가 있어야 한다 — deleteFileDoc/deleteNoteUnit이 d.ref.delete()를 부른다
+    return { exists: !!d, id: path.split("/").pop(), data: function(){ return d; },
+             get ref(){ return docRef(path); } };
   }
   function docRef(path){
     return {
@@ -48,8 +51,8 @@ const STUB = `
       onSnapshot: function(cb){ var ds = docsUnder(); cb({ docs: ds, forEach: function(f){ ds.forEach(f); }, size: ds.length }); return function(){}; }
     };
     return Object.assign(q, {
-      doc: function(id){ return docRef(path + "/" + id); },
-      add: function(o){ var id = "x" + Math.random().toString(36).slice(2,8); store[path + "/" + id] = o; return Promise.resolve({ id: id }); }
+      doc: function(id){ return docRef(path + "/" + (id === undefined ? newId() : id)); },
+      add: function(o){ var id = newId(); store[path + "/" + id] = o; return Promise.resolve({ id: id }); }
     });
   }
   window.db = { collection: function(n){ return colRef(n); } };

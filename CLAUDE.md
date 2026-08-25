@@ -69,6 +69,11 @@ node tools/check-jsx.mjs
 node tools/make-preview.mjs      # tools/preview.html 생성 (Firestore를 메모리 가짜로 교체)
 node tools/test-detect.mjs       # 수업 로그 이름·단원 감지 테스트
 ```
+> [!warning] 메모리 Firestore는 진짜가 아니다
+> `onSnapshot`이 **한 번만 쏘고 갱신을 안 보낸다.** 새로 만든 항목이 화면에 안 나타나면
+> 앱 버그가 아니라 이것이다 — 화면을 나갔다 들어오면 보인다.
+> `.doc()`을 인자 없이 부를 때 id를 만들어 주는 것과 `snap().ref`는 2026-08-24에 채웠다.
+
 `index.html`을 그대로 열면 **운영 Firestore에 바로 쓴다.** 클릭해 보며 확인할 때는
 `preview.html`을 쓴다. 여기엔 마이크 콜백을 `window.__mic`으로 노출하는 줄이 들어가는데
 **생성물에만** 들어가고 `index.html`은 손대지 않는다. `preview.html`은 gitignore.
@@ -119,6 +124,14 @@ consultations/{id}   { cid, sid, sname, withWho, cat, date, content, risk(0~3),
                        needFollow, followNote, followDone, teacher, time }
 reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 ```
+
+**드래그 업로드**: 강의노트는 단원을 펼친 영역이 드롭존이다(`useFileDrop`).
+`dragenter`/`dragleave`는 자식 위를 지날 때마다 쌍으로 또 나므로 **카운터로 센다**
+(불리언이면 자식 하나 지날 때마다 꺼진다 — `hasSide`와 같은 함정).
+`dragover`에서 `preventDefault`를 안 하면 `drop`이 아예 안 난다.
+드래그로는 `accept`가 안 먹으므로 `isNoteFile()`로 손수 거른다.
+드롭존 밖에 놓으면 브라우저가 그 파일로 이동해 앱이 통째로 사라지므로
+`useBlockStrayDrop()`이 window에서 막는다. **터치 기기엔 드래그가 없으니 버튼은 항상 남긴다.**
 
 **파일 저장**: Firebase Storage 미사용. base64를 700KB씩 쪼개 `parts` 하위 컬렉션에 저장.
 공용 함수 `saveFileToDoc()` / `loadFileB64FromDoc()` / `deleteFileDoc()`. 파일당 최대 4.5MB.

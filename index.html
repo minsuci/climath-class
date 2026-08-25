@@ -202,6 +202,13 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-admin-top .cm-link{margin-left:auto;}
 
 .cm-empty{color:var(--muted); font-size:14px; text-align:center; padding:14px;}
+
+/* ===== 드래그 업로드 =====
+   평소에는 테두리를 안 그린다. 파일을 끌고 들어와야 자리가 드러난다.
+   터치 기기에는 드래그가 없으므로 버튼이 항상 같이 있어야 한다. */
+.cm-drop{border:1.5px dashed transparent; border-radius:12px; transition:border-color .15s, background-color .15s; padding:2px;}
+.cm-drop.over{border-color:var(--clay); background:rgba(194,112,63,.06);}
+.cm-drop-hint{display:flex; align-items:center; justify-content:center; gap:7px; color:var(--clay); font-size:13px; font-weight:500; padding:16px 10px; text-align:center;}
 .cm-q{display:flex; align-items:center; gap:12px; padding:13px 0; border-bottom:1px solid var(--line);}
 .cm-q:last-child{border-bottom:0;}
 .cm-q-main{flex:1; min-width:0;}
@@ -664,6 +671,15 @@ function guessMime(name) {
   if (ext === "pdf") return "application/pdf";
   if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return "image/" + (ext === "jpg" ? "jpeg" : ext);
   return "application/octet-stream";
+}
+// 강의노트로 받을 수 있는 파일인가 — 파일 선택창의 accept=".html,.htm,.pdf,image/*"와 같은 기준.
+// 드래그로는 accept가 안 먹으므로 손으로 한 번 더 걸러야 한다.
+// 확장자가 없거나 낯설어도 mime이 맞으면 받는다(캡처 이미지 등).
+function isNoteFile(file) {
+  const mime = file.type || guessMime(file.name);
+  if (mime.startsWith("image/") || mime === "application/pdf" || mime === "text/html") return true;
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  return ["html", "htm", "pdf", "png", "jpg", "jpeg", "gif", "webp", "heic", "heif"].includes(ext);
 }
 // 범용: 파일을 base64 조각으로 문서+parts에 저장
 async function saveFileToDoc(docRef, file) {
@@ -2864,18 +2880,30 @@ function NoteUnit({ cls, unit, canEdit }) {
       setFiles(arr);
     });
   }, [open, cls.id, unit.uid]);
-  async function onFile(e) {
-    const list = Array.from(e.target.files || []);
-    e.target.value = "";
-    if (!list.length) return;
+  async function uploadFiles(list) {
+    if (!list.length || busy) return;
+    // 드래그로는 아무 파일이나 들어온다. 파일 선택창의 accept와 같은 기준으로 먼저 거른다
+    const ok = list.filter(isNoteFile);
+    const bad = list.filter((f) => !isNoteFile(f));
+    if (bad.length) {
+      alert("이미지 · PDF · HTML만 올릴 수 있어요.\n\n뺀 파일: " + bad.map((f) => f.name).join(", "));
+    }
+    if (!ok.length) return;
     setBusy(true);
-    for (const f of list) {
-      setMsg('"' + f.name + '" 올리는 중...');
+    for (let i = 0; i < ok.length; i++) {
+      const f = ok[i];
+      setMsg((ok.length > 1 ? "(" + (i + 1) + "/" + ok.length + ") " : "") + '"' + f.name + '" 올리는 중...');
       try { await addNoteFile(cls.id, unit.uid, f); }
       catch (err) { alert(f.name + ": " + err.message); }
     }
     setMsg(""); setBusy(false);
   }
+  function onFile(e) {
+    const list = Array.from(e.target.files || []);
+    e.target.value = "";
+    uploadFiles(list);
+  }
+  const drop = useFileDrop(uploadFiles, canEdit && open && !busy);
   return (
     <div style={{borderBottom: "1px solid var(--line)", padding: "10px 0"}}>
       <input ref={fileRef} type="file" accept=".html,.htm,.pdf,image/*" multiple style={{display: "none"}} onChange={onFile} />
@@ -2897,10 +2925,11 @@ function NoteUnit({ cls, unit, canEdit }) {
         </span>
       </div>
       {open && (
-        <div style={{marginTop: 6}}>
+        <div style={{marginTop: 6}} className={"cm-drop" + (drop.over ? " over" : "")} {...drop.handlers}>
           {files === null && <div className="cm-empty">불러오는 중…</div>}
-          {files && files.length === 0 && <div className="cm-empty">아직 올라온 노트가 없어요</div>}
+          {files && files.length === 0 && !drop.over && <div className="cm-empty">아직 올라온 노트가 없어요{canEdit && canDragDrop && <><br/><span style={{fontSize: 12}}>파일을 여기로 끌어다 놓아도 돼요</span></>}</div>}
           {files && files.map((f) => <NoteFileRow key={f.fid} cls={cls} unit={unit} file={f} canEdit={canEdit} />)}
+          {drop.over && <div className="cm-drop-hint">↓ 여기에 놓으면 “{unit.title}”에 올라가요</div>}
           {canEdit && <button className="cm-btn cm-btn-ghost" disabled={busy} style={{marginTop: 10}} onClick={() => fileRef.current.click()}>+ 노트 올리기 (이미지 · PDF · HTML, 여러 장 가능)</button>}
           {msg && <div className="cm-hint" style={{marginTop: 6}}>{msg}</div>}
         </div>
@@ -3436,6 +3465,54 @@ function TeacherManage({ me, teachers, onRefresh, onBack }) {
       <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
     </div>
   );
+}
+
+// 터치 기기(아이폰·아이패드)에는 이 앱으로 파일을 끌어올 방법이 없다.
+// 안내 문구를 거기까지 띄우면 될 리 없는 걸 하라고 하는 셈이라 마우스가 있을 때만 말한다.
+const canDragDrop = typeof window !== "undefined" && window.matchMedia
+  ? window.matchMedia("(hover: hover) and (pointer: fine)").matches : false;
+
+// ----- 드래그해서 파일 올리기 -----
+// { over, handlers } 를 돌려준다. handlers를 감쌀 요소에 그대로 펼쳐 넣으면 된다.
+//
+// dragenter/dragleave는 자식 위로 지나갈 때마다 쌍으로 또 난다. 그래서 카운터로 센다
+// (사이드바 hasSide를 카운터로 바꾼 것과 같은 이유 — 불리언으로 두면 자식 하나 지날 때마다 꺼진다).
+// dragover에서 preventDefault를 안 하면 drop 자체가 안 나고 브라우저가 파일을 열어버린다.
+function useFileDrop(onFiles, enabled) {
+  const [over, setOver] = useState(false);
+  const depth = React.useRef(0);
+  // 파일을 끌 때만 반응한다. 글자 선택을 끌고 다녀도 켜지면 안 된다
+  const hasFiles = (e) => Array.from((e.dataTransfer && e.dataTransfer.types) || []).includes("Files");
+  if (!enabled) return { over: false, handlers: {} };
+  return {
+    over,
+    handlers: {
+      onDragEnter: (e) => { if (!hasFiles(e)) return; e.preventDefault(); depth.current++; setOver(true); },
+      onDragOver: (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; },
+      onDragLeave: (e) => { if (!hasFiles(e)) return; depth.current = Math.max(0, depth.current - 1); if (depth.current === 0) setOver(false); },
+      onDrop: (e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault(); depth.current = 0; setOver(false);
+        const list = Array.from(e.dataTransfer.files || []);
+        if (list.length) onFiles(list);
+      },
+    },
+  };
+}
+
+// 드롭존 밖에 떨어뜨렸을 때 브라우저가 그 파일로 이동해 버리는 것을 막는다.
+// 앱이 통째로 사라지고 쓰던 화면을 잃는다 — 실수 한 번의 대가가 너무 크다.
+function useBlockStrayDrop() {
+  useEffect(() => {
+    const stop = (e) => {
+      if (!Array.from((e.dataTransfer && e.dataTransfer.types) || []).includes("Files")) return;
+      e.preventDefault();
+      if (e.type === "drop" && e.dataTransfer) e.dataTransfer.dropEffect = "none";
+    };
+    window.addEventListener("dragover", stop);
+    window.addEventListener("drop", stop);
+    return () => { window.removeEventListener("dragover", stop); window.removeEventListener("drop", stop); };
+  }, []);
 }
 
 function useSwipeBack(onBack) {
@@ -5224,6 +5301,7 @@ function App() {
   const [gateCls, setGateCls] = useState(null);
   const [sideOpen, setSideOpen] = useState(false);
   const [hasSide, setHasSide] = useState(0);
+  useBlockStrayDrop();
 
   let sub, main;
   if (isAdmin) { sub = "수업 관리"; main = <AdminView />; }
