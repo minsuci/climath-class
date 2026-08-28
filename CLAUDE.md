@@ -159,11 +159,51 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 반 내부 상태(`classView`, `dayPick`)는 **AdminView가 보유**하고 AdminDays/AdminDay에 props로 내려준다.
 사이드바를 한 곳에서만 렌더하기 위한 구조이므로 되돌리지 말 것.
 
-### 인증
-- 학생: 이름+PIN → 본인이 속한 반만 표시. **이름이 같으면 같은 사람**(`userPins`).
-  검증 순서: 통합PIN → 반별 구PIN(성공 시 통합으로 자동 이전) → 기본값 1234
-- 선생님: `?admin=1` → 목록에서 선택 → 개인 PIN, sessionStorage 유지.
-  신규 등록은 `status:"pending"` → 관리자 승인 필요. owner=한민수(PIN 2030)
+### 인증 (2026-08-28 전면 교체)
+
+> [!warning] PIN을 이 문서나 코드에 적지 말 것
+> 저장소가 **공개(public)** 다. 예전에는 관리자 PIN이 `ADMIN_PIN` 상수로 소스에도
+> 이 문서에도 박혀 있었다. 개발자도구를 열 필요도 없이 GitHub에서 읽히는 상태였다.
+> 지금은 지웠지만 **git 이력에는 남아 있다** — 그 값은 이미 노출된 것으로 보고 바꿔야 한다.
+
+**검사는 전부 서버에서 한다.** 클라이언트에는 PIN이 내려가지 않는다.
+
+```
+브라우저 → POST /api/auth {action:"login", ...}
+             ↓ 서비스 계정으로 PIN 대조 (Firestore REST)
+           커스텀 토큰(JWT) 발급
+             ↓ signInWithCustomToken
+        보안 규칙이 토큰의 claims를 보고 서버에서 거절
+```
+
+- `api/_google.js` — 서비스 계정 JWT 서명 → 커스텀 토큰 + OAuth2 → Firestore REST.
+  **firebase-admin을 안 쓴다.** 루트에 `package.json`이 생기면 Vercel 빌드 동작이
+  바뀌는데(위 참고) 이 앱은 빌드 없는 단일 HTML이 전제다. node `crypto`로 충분하다.
+- `api/auth.js` — `teachers`(이름만) / `login`(teacher·student) / `register` / `changePin`.
+  **시도 8회 / 10분 제한**(`authAttempts`). 검사를 서버로 옮기면 4자리 PIN을 전부
+  넣어보는 게 가능해지므로 이게 없으면 오히려 전보다 나쁘다.
+- 환경변수 **`FIREBASE_SERVICE_ACCOUNT`** = 서비스 계정 JSON 전체.
+  Vercel 환경변수는 Production/Preview/Development **스코프가 따로**다. 셋 다 켜둘 것.
+
+**토큰 claims** — 보안 규칙이 이걸 본다.
+
+| | claims |
+|---|---|
+| 선생님 | `{ role: "teacher"\|"owner", tid }` |
+| 학생 | `{ role: "student", sname, cids: [반id…] }` |
+
+담당 반은 claims에 넣지 않는다. 반이 늘면 1000바이트 제한에 걸리고, 담당이 바뀌어도
+다시 로그인할 때까지 옛 값이 남는다. 규칙이 `teachers/{tid}`를 직접 읽는다.
+
+**보안 규칙은 `firestore.rules`** 에 있다. 저장소에서 관리하고 **콘솔에 붙여넣어 게시**한다
+(자동 배포되지 않는다). 함정은 그 파일 주석과 [[Firestore 보안 규칙 함정]] 참고.
+
+- 익명 로그인은 **꺼져 있다.** 켜면 안 된다 — 예전에 이것 때문에 `request.auth != null`
+  규칙이 무의미했다(방문자 전원이 자동 로그인됐다).
+- 로그인 유지는 Firebase 세션이 한다. 새로고침하면 claims로 신분을 복구하고
+  담당 반은 본인 `teachers/{tid}` 문서에서 읽는다. `sessionStorage`는 더 쓰지 않는다.
+- **화면도 규칙과 같이 좁혀야 한다.** `MY_SCOPE`/`inScope`가 일반 선생님을 담당 반으로
+  제한한다. 안 맞추면 목록에는 뜨는데 들어가면 아무것도 안 나오는 상태가 된다.
 
 ### 주요 도메인 로직
 - **합반**(`merge`): 특정 요일에 두 반을 한 화면에서. 질문은 대표 반 한 곳에 통합 저장,
