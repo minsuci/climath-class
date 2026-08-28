@@ -385,16 +385,16 @@ const SEED_CLASSES = [
   { id: "s-mongeum", name: "고1S 월금반", classDays: [1, 5], roster: [
     { id: "s1", name: "김서진" }, { id: "s2", name: "임서윤" }, { id: "s3", name: "김태윤" },
     { id: "s4", name: "박성준" }, { id: "s5", name: "양성은" }, { id: "s6", name: "안성빈" },
-    { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
+    { id: "t1", name: "한민수", teacher: true },
   ]},
   { id: "s-hwamok", name: "고1S 화목반", classDays: [2, 4], roster: [
     { id: "s1", name: "박범의" }, { id: "s2", name: "민우영" }, { id: "s3", name: "윤지섭" }, { id: "s4", name: "안현준" },
-    { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
+    { id: "t1", name: "한민수", teacher: true },
   ]},
   { id: "jasago", name: "고1자사고반", classDays: [6], roster: [
     { id: "s1", name: "마서준" }, { id: "s2", name: "김하준" }, { id: "s3", name: "김중원" },
     { id: "s4", name: "진현겸" }, { id: "s5", name: "공하빈" },
-    { id: "t1", name: "한민수", defaultPin: "2030", teacher: true },
+    { id: "t1", name: "한민수", teacher: true },
   ]},
 ];
 let CLASSES = []; // Firestore에서 로드됨
@@ -448,8 +448,7 @@ function getClassAllBooks(cls) {
   });
   return out;
 }
-const DEFAULT_PIN = "1234";
-const ADMIN_PIN = "2030";
+// 기본 PIN·관리자 PIN 상수는 서버(/api/auth)로 옮겼다. 소스에 박아두면 소스 보기로 노출된다.
 
 function ymd(d) {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
@@ -569,42 +568,55 @@ async function listLessonLogs(cid) {
 }
 async function removeLessonLog(cid, date) { await lessonLogCol(cid).doc(date).delete(); }
 
-const studentsCol = (cid) => classDoc(cid).collection("students");
-async function getStudentPin(cid, sid) {
-  try { const d = await studentsCol(cid).doc(sid).get(); return d.exists ? (d.data().pin || null) : null; }
-  catch (e) { return null; }
-}
-async function saveStudentPin(cid, sid, p) { await studentsCol(cid).doc(sid).set({ pin: p }, { merge: true }); }
-
-// ----- 사람(이름) 단위 통합 PIN: 이름이 같으면 같은 사람, 모든 반에 하나의 PIN -----
+// ----- 로그인: 검사는 전부 서버(/api/auth)에서 한다 -----
+// 예전에는 여기서 PIN을 읽어와 브라우저 안에서 비교했다. 검사하는 코드도 정답도
+// 사용자 손 안에 있어서 아무 의미가 없었다. 이제 PIN은 브라우저로 내려오지 않고,
+// 통과하면 위조 불가능한 커스텀 토큰만 받는다. 보안 규칙이 그 토큰을 보고 막는다.
 const normName = (s) => (s || "").replace(/\s+/g, "");
-const personPinDoc = (name) => db.collection("userPins").doc(normName(name));
-async function getPersonPin(name) {
-  try { const d = await personPinDoc(name).get(); return d.exists ? d.data().pin : null; }
-  catch (e) { return null; }
-}
-async function savePersonPin(name, pin) { await personPinDoc(name).set({ pin, time: Date.now() }); }
 
-// 이름으로 로그인 검증: 통합 PIN → (없으면) 반별 개별 PIN → 기본 PIN 순서로 확인.
-// 반별 개별 PIN으로 성공하면 통합 PIN으로 자동 이전(마이그레이션).
-async function verifyPersonPin(name, pin, candidates) {
-  const gpin = await getPersonPin(name);
-  if (gpin) return pin === gpin;
-  // 반별 커스텀 PIN 확인 (있는 것만)
-  for (const x of candidates) {
-    let custom = null;
-    try { custom = await getStudentPin(x.cls.id, x.member.id); } catch (e) {}
-    if (custom && pin === custom) {
-      try { await savePersonPin(name, pin); } catch (e) {} // 통합 PIN으로 이전
-      return true;
-    }
-  }
-  // 기본 PIN (초기비번은 통합 저장 안 함 - 나중에 바꾼 비번이 기준이 되도록)
-  for (const x of candidates) {
-    const def = x.member.defaultPin || DEFAULT_PIN;
-    if (pin === def) return true;
-  }
-  return false;
+async function authApi(body) {
+  const r = await fetch("/api/auth", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let j = null;
+  try { j = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error((j && j.error) || ("요청 실패 (" + r.status + ")"));
+  return j || {};
+}
+
+// 토큰으로 로그인하고 반 목록을 불러온다.
+// 로그인 전에는 규칙이 막으므로 CLASSES는 이 시점에야 채워진다.
+// 토큰에 실린 신분(role/tid/sname/cids). 규칙이 보는 것과 같은 값이다.
+let AUTH = null;
+async function authClaims(force) {
+  const u = firebase.auth().currentUser;
+  if (!u) { AUTH = null; return null; }
+  if (AUTH && !force) return AUTH;
+  try {
+    const r = await u.getIdTokenResult();
+    AUTH = r.claims && r.claims.role ? r.claims : null;
+  } catch (e) { AUTH = null; }
+  return AUTH;
+}
+
+async function signInWithToken(token) {
+  await firebase.auth().signInWithCustomToken(token);
+  await authClaims(true);
+  await loadClasses();
+}
+// 방금 로그인에 쓴 PIN을 세션 동안만 메모리에 둔다. 비밀번호를 바꿀 때
+// "지금 PIN"으로 서버에 다시 내밀어야 하는데, 학생에게 두 번 치게 하지 않으려는 것.
+// 저장하지 않는다 - 새로고침하면 사라지고, 그때는 직접 입력받는다.
+let SESSION_PIN = "";
+const setPinKept = (p) => { SESSION_PIN = p || ""; };
+
+async function signOutAll() {
+  try { await firebase.auth().signOut(); } catch (e) {}
+  CLASSES = [];
+  AUTH = null;
+  SESSION_PIN = "";
 }
 
 // ----- 선생님 계정 -----
@@ -623,16 +635,23 @@ async function deleteTeacher(tid) { await teachersCol().doc(tid).delete(); }
 
 // ----- 반 관리 -----
 const classesCol = () => db.collection("classes");
+// 로그인한 사람에 따라 다르게 부른다.
+//  - 학생: 토큰에 적힌 자기 반만 하나씩. 반 전체를 나열하면 규칙이 거부한다
+//          (조건 없는 쿼리는 "안전하다"를 증명할 수 없다)
+//  - 선생님: 전체 목록. 담당이 아닌 반은 화면에서 "열람 전용"으로 표시된다
+// 시드 생성은 없앴다 - 이제 반 생성은 관리자만 할 수 있고, 실제 반은 이미 다 있다.
 async function loadClasses() {
-  let s = await classesCol().orderBy("time").get();
-  if (s.empty) {
-    let t = Date.now();
-    for (const c of SEED_CLASSES) {
-      await classesCol().doc(c.id).set({ name: c.name, classDays: c.classDays, roster: c.roster, books: DEFAULT_BOOKS, time: t++ });
-    }
-    s = await classesCol().orderBy("time").get();
+  const claims = await authClaims();
+  if (!claims) { CLASSES = []; return CLASSES; }
+  const arr = [];
+  if (claims.role === "student") {
+    const ids = claims.cids || [];
+    const docs = await Promise.all(ids.map((id) => classesCol().doc(id).get().catch(() => null)));
+    docs.forEach((d) => { if (d && d.exists) arr.push({ id: d.id, ...d.data() }); });
+  } else {
+    const s = await classesCol().orderBy("time").get();
+    s.forEach((d) => arr.push({ id: d.id, ...d.data() }));
   }
-  const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() }));
   // 표시 순서: order 필드 우선 (없으면 생성순)
   arr.sort((a, b) => {
     const ao = a.order, bo = b.order;
@@ -641,14 +660,6 @@ async function loadClasses() {
     if (bo != null) return 1;
     return (a.time || 0) - (b.time || 0);
   });
-  // 마이그레이션: books 필드가 없는 기존 반에 채워넣기
-  for (const c of arr) {
-    if (c.books === undefined) {
-      const isSeed = SEED_CLASSES.some((sc) => sc.id === c.id);
-      c.books = isSeed ? DEFAULT_BOOKS : [];
-      await classesCol().doc(c.id).update({ books: c.books });
-    }
-  }
   CLASSES = arr;
   return arr;
 }
@@ -874,9 +885,13 @@ function daysSince(dateStr) {
 
 // 전 반 상담을 훑어 ① 표시된 위험신호 ② 상담 공백(오래됨) 집계
 async function computeRiskData() {
-  const s = await consultCol().get();
+  // 반별로 나눠 부른다. 상담 전체를 한 번에 긁으면 보안 규칙이 거부한다 —
+  // 규칙이 문서의 cid를 보고 판단하는데, 조건 없는 쿼리는 "안전하다"를 증명할 수 없어서다.
+  // 겸사겸사 담당하지 않는 반의 상담은 애초에 가져오지 않게 된다.
+  const targets = activeClasses();
+  const snaps = await Promise.all(targets.map((c) => consultCol().where("cid", "==", c.id).get().catch(() => null)));
   const all = [];
-  s.forEach((d) => all.push({ id: d.id, ...d.data() }));
+  snaps.forEach((s) => { if (s) s.forEach((d) => all.push({ id: d.id, ...d.data() })); });
 
   const byStudent = {};
   all.forEach((c) => {
@@ -1131,24 +1146,22 @@ function StudentGate({ onClsChange }) {
     if (!nm) { setErr("이름을 입력해주세요"); return; }
     if (pin.length !== 4) { setErr("PIN 4자리를 입력해주세요"); return; }
     setBusy(true); setErr("");
-    // 이름이 있는 모든 반 = 같은 사람의 반들
-    const found = CLASSES
-      .map((c) => ({ cls: c, member: (c.roster || []).find((r) => norm(r.name) === nm) }))
-      .filter((x) => x.member);
-    // 종강한 반은 학생 화면에 아예 안 보인다 (기록은 선생님 화면에 그대로 남아 있다)
-    const candidates = found.filter((x) => !isClassEnded(x.cls));
-    if (candidates.length === 0) {
+    // 이름·PIN·종강 여부 판단을 전부 서버가 한다. 여기서는 결과만 받는다.
+    try {
+      const r = await authApi({ action: "login", kind: "student", name: nm, pin });
+      await signInWithToken(r.token);
+      setPinKept(pin);   // 비밀번호 변경 때 "지금 PIN"으로 다시 쓴다
+      const mine = CLASSES
+        .map((c) => ({ cls: c, member: (c.roster || []).find((x) => norm(x.name) === nm) }))
+        .filter((x) => x.member && !isClassEnded(x.cls));
       setBusy(false);
-      setErr(found.length
-        ? "수강이 종료된 반이에요. 기록은 보관되어 있으니 선생님께 문의해주세요."
-        : "명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해주세요.");
-      return;
+      if (mine.length === 0) { setErr("반 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요."); return; }
+      setMatches(mine);
+      if (mine.length === 1) setCls(mine[0].cls);
+    } catch (e) {
+      setBusy(false);
+      setErr(e.message);
     }
-    const okPin = await verifyPersonPin(nm, pin, candidates);
-    setBusy(false);
-    if (!okPin) { setErr("PIN이 올바르지 않아요."); return; }
-    setMatches(candidates);
-    if (candidates.length === 1) setCls(candidates[0].cls);
   }
   function fullLogout() { setMatches(null); setCls(null); setPin(""); setErr(""); }
   const gatePickRef = useSwipeBack(fullLogout);
@@ -1207,9 +1220,11 @@ function StudentView({ cls, onBack }) {
   async function login() {
     const u = cls.roster.find((r) => norm(r.name) === norm(name));
     if (!u) { setErr("명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해줘."); return; }
-    const okPin = await verifyPersonPin(norm(name), pin, [{ cls, member: u }]);
-    if (!okPin) { setErr("PIN이 올바르지 않습니다"); return; }
-    setErr(""); setPin(""); setName(""); setMe(u);
+    try {
+      const r = await authApi({ action: "login", kind: "student", name: norm(name), pin });
+      await signInWithToken(r.token);
+      setErr(""); setPin(""); setName(""); setPinKept(pin); setMe(u);
+    } catch (e) { setErr(e.message); }
   }
 
   if (!me) {
@@ -1697,16 +1712,31 @@ function StudentHome({ cls, me, onLogout }) {
 function ChangePin({ cls, me, onDone }) {
   const [p1, setP1] = useState("");
   const [p2, setP2] = useState("");
+  const [cur, setCur] = useState("");
   const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const needCur = !SESSION_PIN;   // 새로고침 뒤라 세션에 없으면 직접 받는다
   async function save() {
+    if (busy) return;
+    if (needCur && cur.length !== 4) { setMsg("지금 쓰는 PIN을 입력해줘"); return; }
     if (p1.length !== 4) { setMsg("PIN은 4자리로 입력해줘"); return; }
     if (p1 !== p2) { setMsg("두 번 입력한 PIN이 달라"); return; }
-    try { await savePersonPin(me.name, p1); setMsg("비밀번호가 변경됐어요"); setTimeout(onDone, 800); }
-    catch (e) { setMsg("저장에 실패했어요. 잠시 후 다시 시도해줘"); }
+    setBusy(true);
+    try {
+      await authApi({ action: "changePin", name: me.name, oldPin: needCur ? cur : SESSION_PIN, newPin: p1 });
+      setPinKept(p1);
+      setMsg("비밀번호가 변경됐어요"); setTimeout(onDone, 800);
+    } catch (e) { setMsg(e.message); }
+    setBusy(false);
   }
   return (
     <div className="cm-card">
       <h3 className="cm-h3">비밀번호 변경</h3>
+      {needCur && (<>
+        <label className="cm-label">지금 쓰는 PIN</label>
+        <input className="cm-input" type="password" inputMode="numeric" maxLength={4} value={cur}
+          onChange={(e) => setCur(e.target.value.replace(/\D/g, ""))} />
+      </>)}
       <label className="cm-label">새 PIN (숫자 4자리)</label>
       <input className="cm-input" type="password" inputMode="numeric" maxLength={4} value={p1} onChange={(e) => setP1(e.target.value.replace(/\D/g, ""))} />
       <label className="cm-label">새 PIN 다시 입력</label>
@@ -2496,35 +2526,50 @@ function AdminView() {
   const [orderBusy, setOrderBusy] = useState(false);
   const [showEnded, setShowEnded] = useState(false); // 종강한 반 펼치기
   const [cls, setCls] = useState(null);
+  const [busyLogin, setBusyLogin] = useState(false);
 
+  // 로그인 화면 목록은 서버에서 받는다 — 이름/역할/승인상태만 오고 PIN은 안 온다.
+  // (예전에는 teachers 문서를 통째로 받아 PIN이 브라우저에 다 있었다)
   async function refreshTeachers() {
-    let arr = await listTeachers();
-    if (arr.length === 0) {
-      await addTeacher("한민수", ADMIN_PIN, CLASSES.map((c) => c.id), "owner");
-      arr = await listTeachers();
-    }
-    setTeachers(arr);
-    return arr;
+    const r = await authApi({ action: "teachers" });
+    setTeachers(r.teachers || []);
+    return r.teachers || [];
   }
   useEffect(() => {
-    refreshTeachers().then((arr) => {
+    refreshTeachers().catch(() => setTeachers([]));
+    // 새로고침해도 로그인이 유지되도록 복구한다. 신분은 토큰이 증명하고,
+    // 담당 반 정보는 본인 문서에서 읽는다(규칙이 본인 것만 열어준다).
+    (async () => {
       try {
-        const tid = sessionStorage.getItem("climath_teacher");
-        const t = arr.find((x) => x.tid === tid);
-        if (t && !isPending(t)) setMe(t);
-      } catch (e) {}
-    });
+        const u = firebase.auth().currentUser;
+        if (!u) return;
+        const claims = (await u.getIdTokenResult()).claims;
+        if (claims.role !== "teacher" && claims.role !== "owner") return;
+        if (!CLASSES.length) await loadClasses();
+        const d = await teachersCol().doc(claims.tid).get();
+        if (d.exists) setMe({ tid: claims.tid, ...d.data() });
+      } catch (e) { /* 복구 실패하면 그냥 로그인 화면 */ }
+    })();
   }, []);
 
-  function tryLogin() {
+  async function tryLogin() {
+    if (busyLogin) return;
     if (isPending(picked)) { setErr("관리자 승인 대기 중입니다. 승인 후 로그인할 수 있어요."); return; }
-    if (pin !== picked.pin) { setErr("PIN이 올바르지 않습니다"); return; }
-    try { sessionStorage.setItem("climath_teacher", picked.tid); } catch (e) {}
-    setMe(picked); setPicked(null); setPin(""); setErr("");
+    if (pin.length !== 4) { setErr("PIN 4자리를 입력해주세요"); return; }
+    setBusyLogin(true); setErr("");
+    try {
+      const r = await authApi({ action: "login", kind: "teacher", tid: picked.tid, pin });
+      await signInWithToken(r.token);
+      const d = await teachersCol().doc(picked.tid).get();
+      setMe(d.exists ? { tid: picked.tid, ...d.data() } : { tid: picked.tid, name: r.name, role: r.role, classIds: [] });
+      setPicked(null); setPin("");
+    } catch (e) { setErr(e.message); }
+    setBusyLogin(false);
   }
-  function logout() {
-    try { sessionStorage.removeItem("climath_teacher"); } catch (e) {}
-    setMe(null); setCls(null); setMode("login");
+  async function logout() {
+    await signOutAll();
+    setMe(null); setCls(null); setMode("login"); setTeachers(null);
+    refreshTeachers().catch(() => setTeachers([]));
   }
   const canEdit = (c) => me && (me.role === "owner" || (me.classIds || []).includes(c.id));
 
@@ -2541,7 +2586,7 @@ function AdminView() {
           <input className="cm-input" type="password" inputMode="numeric" autoFocus value={pin}
             onChange={(e) => setPin(e.target.value)} onKeyDown={(e) => e.key === "Enter" && tryLogin()} />
           {err && <div className="cm-err">{err}</div>}
-          <button className="cm-btn cm-btn-primary" onClick={tryLogin}>들어가기</button>
+          <button className="cm-btn cm-btn-primary" disabled={busyLogin} onClick={tryLogin}>{busyLogin ? "확인 중..." : "들어가기"}</button>
           <button className="cm-link" onClick={() => { setPicked(null); setPin(""); setErr(""); }}>← 다른 선생님</button>
         </div>
       );
@@ -3343,7 +3388,8 @@ function ClassCreate({ me, onDone, onCancel }) {
       cleanBooks = v.books;
     }
     const roster = names.map((n, i) => ({ id: "s" + (i + 1), name: n }));
-    roster.push({ id: "t1", name: me.name, defaultPin: me.pin, teacher: true });
+    // 선생님 PIN을 명단에 넣지 않는다 - 반 문서는 학생도 읽는다
+    roster.push({ id: "t1", name: me.name, teacher: true });
     setBusy(true);
     try {
       const newId = await createClass(nm, type === "individual" ? [] : days, roster, type === "individual" ? [] : cleanBooks, type);
@@ -3395,10 +3441,10 @@ function TeacherRegister({ onDone, onCancel }) {
     if (!name.trim()) { setMsg("이름을 입력해주세요"); return; }
     if (p1.length !== 4) { setMsg("PIN은 숫자 4자리입니다"); return; }
     if (p1 !== p2) { setMsg("두 번 입력한 PIN이 다릅니다"); return; }
-    const existing = await listTeachers();
-    if (existing.some((t) => t.name === name.trim())) { setMsg("이미 등록된 이름입니다"); return; }
-    await addTeacher(name.trim(), p1, sel, "teacher", "pending");
-    onDone();
+    // 로그인 전이라 Firestore에 직접 못 쓴다(규칙이 막는다). 서버가 대신 만든다.
+    // 담당 반은 여기서 못 고른다 - 승인하면서 관리자가 정한다.
+    try { await authApi({ action: "register", name: name.trim(), pin: p1 }); onDone(); }
+    catch (e) { setMsg(e.message); }
   }
   const trBackRef = useSwipeBack(onCancel);
   return (
@@ -5345,16 +5391,22 @@ function App() {
   );
 }
 
-// ===== 익명 로그인 후 앱 시작 =====
+// ===== 앱 시작 =====
+// 익명 로그인을 하지 않는다. 예전에는 방문자 전원을 자동 로그인시켰고 규칙이
+// `request.auth != null`이라, 주소를 연 누구나 전체 DB를 읽고 쓸 수 있었다.
+// 이제 /api/auth 가 발급한 토큰으로만 들어오고, 그 전에는 아무것도 못 읽는다.
+// 로그인 화면은 반 목록이 필요 없으므로 바로 렌더한다.
 const rootEl = document.getElementById("root");
 let rendered = false;
 function renderApp() { if (rendered) return; rendered = true; ReactDOM.createRoot(rootEl).render(<App />); }
-function loadAndRender() { loadClasses().then(renderApp).catch((e) => { console.error("반 목록 로드 실패", e); renderApp(); }); }
 try {
-  firebase.auth().signInAnonymously().catch(() => {});
-  firebase.auth().onAuthStateChanged((u) => { if (u) loadAndRender(); });
-} catch (e) { /* auth 미설정 */ }
-setTimeout(loadAndRender, 4000);
+  // 이미 로그인돼 있으면(새로고침) 반 목록을 먼저 채우고 그린다
+  firebase.auth().onAuthStateChanged((u) => {
+    if (u && !rendered) { loadClasses().catch(() => {}).then(renderApp); }
+    else renderApp();
+  });
+} catch (e) { renderApp(); }
+setTimeout(renderApp, 4000);
 
 </script>
 

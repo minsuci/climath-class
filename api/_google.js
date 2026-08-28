@@ -1,0 +1,180 @@
+// Google 서비스 계정으로 (1) Firebase 커스텀 토큰 발급 (2) Firestore REST 접근.
+//
+// firebase-admin을 안 쓴다. 루트에 package.json이 생기면 Vercel 빌드 동작이 바뀌는데
+// (CLAUDE.md 참고) 이 앱은 "빌드 없는 단일 HTML"이 전제라 그 위험을 지지 않는다.
+// 커스텀 토큰은 규격이 공개된 JWT일 뿐이고 Firestore에는 REST가 있어서, node 기본
+// crypto만으로 전부 된다.
+//
+// 필요한 환경변수 (Vercel → Settings → Environment Variables):
+//   FIREBASE_SERVICE_ACCOUNT = 서비스 계정 JSON 전체를 한 줄로 붙여넣은 것
+//   (Firebase 콘솔 → 프로젝트 설정 → 서비스 계정 → 새 비공개 키 생성)
+
+import crypto from "crypto";
+
+const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const IDENTITY_AUD =
+  "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit";
+
+let _sa = null;
+export function serviceAccount() {
+  if (_sa) return _sa;
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) throw new Error("FIREBASE_SERVICE_ACCOUNT 환경변수가 없습니다");
+  let j;
+  try { j = JSON.parse(raw); }
+  catch (e) { throw new Error("FIREBASE_SERVICE_ACCOUNT가 올바른 JSON이 아닙니다"); }
+  // Vercel 환경변수에 넣을 때 줄바꿈이 \n 두 글자로 들어가는 경우가 많다
+  if (j.private_key && j.private_key.indexOf("\\n") >= 0) {
+    j.private_key = j.private_key.replace(/\\n/g, "\n");
+  }
+  if (!j.client_email || !j.private_key || !j.project_id) {
+    throw new Error("서비스 계정 JSON에 client_email/private_key/project_id가 필요합니다");
+  }
+  _sa = j;
+  return _sa;
+}
+
+const b64url = (buf) =>
+  Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+function signJwt(payload) {
+  const sa = serviceAccount();
+  const header = { alg: "RS256", typ: "JWT" };
+  const body = b64url(JSON.stringify(header)) + "." + b64url(JSON.stringify(payload));
+  const sig = crypto.createSign("RSA-SHA256").update(body).sign(sa.private_key);
+  return body + "." + b64url(sig);
+}
+
+// ---- (1) 커스텀 토큰: 클라이언트가 signInWithCustomToken()으로 받는다 ----
+// claims는 그대로 request.auth.token 에 실려 보안 규칙에서 읽힌다.
+// 규격상 claims 전체가 1000바이트를 넘으면 안 되므로 작게 유지할 것.
+export function createCustomToken(uid, claims) {
+  const sa = serviceAccount();
+  const now = Math.floor(Date.now() / 1000);
+  return signJwt({
+    iss: sa.client_email,
+    sub: sa.client_email,
+    aud: IDENTITY_AUD,
+    iat: now,
+    exp: now + 3600,
+    uid: String(uid),
+    claims: claims || {},
+  });
+}
+
+// ---- (2) Firestore REST ----
+let _tok = null; // { value, exp }
+async function accessToken() {
+  const now = Math.floor(Date.now() / 1000);
+  if (_tok && _tok.exp > now + 60) return _tok.value;
+  const sa = serviceAccount();
+  const assertion = signJwt({
+    iss: sa.client_email,
+    scope: "https://www.googleapis.com/auth/datastore",
+    aud: TOKEN_URL,
+    iat: now,
+    exp: now + 3600,
+  });
+  const r = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    }).toString(),
+  });
+  const j = await r.json();
+  if (!r.ok || !j.access_token) {
+    throw new Error("구글 토큰 발급 실패: " + (j.error_description || j.error || r.status));
+  }
+  _tok = { value: j.access_token, exp: now + (j.expires_in || 3600) };
+  return _tok.value;
+}
+
+const docBase = () => {
+  const sa = serviceAccount();
+  return "https://firestore.googleapis.com/v1/projects/" + sa.project_id +
+         "/databases/(default)/documents";
+};
+
+// Firestore REST는 값에 타입이 붙어 온다 ({stringValue:"..."}). 평범한 JS 값으로 되돌린다.
+function fromValue(v) {
+  if (v == null) return null;
+  if ("stringValue" in v) return v.stringValue;
+  if ("integerValue" in v) return Number(v.integerValue);
+  if ("doubleValue" in v) return v.doubleValue;
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("nullValue" in v) return null;
+  if ("timestampValue" in v) return v.timestampValue;
+  if ("arrayValue" in v) return (v.arrayValue.values || []).map(fromValue);
+  if ("mapValue" in v) return fromFields(v.mapValue.fields || {});
+  return null;
+}
+function fromFields(fields) {
+  const out = {};
+  for (const k of Object.keys(fields || {})) out[k] = fromValue(fields[k]);
+  return out;
+}
+function toValue(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === "string") return { stringValue: v };
+  if (typeof v === "boolean") return { booleanValue: v };
+  if (typeof v === "number") {
+    return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  }
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(toValue) } };
+  if (typeof v === "object") return { mapValue: { fields: toFields(v) } };
+  return { nullValue: null };
+}
+function toFields(obj) {
+  const out = {};
+  for (const k of Object.keys(obj || {})) out[k] = toValue(obj[k]);
+  return out;
+}
+
+async function call(path, init) {
+  const t = await accessToken();
+  const r = await fetch(path, {
+    ...init,
+    headers: { Authorization: "Bearer " + t, "Content-Type": "application/json", ...(init && init.headers) },
+  });
+  if (r.status === 404) return null;
+  const j = await r.json().catch(() => null);
+  if (!r.ok) {
+    const msg = (j && j.error && j.error.message) || r.status;
+    throw new Error("Firestore: " + msg);
+  }
+  return j;
+}
+
+// 문서 하나 읽기. 없으면 null. path 예: "teachers/abc123"
+export async function getDoc(path) {
+  const j = await call(docBase() + "/" + path, { method: "GET" });
+  if (!j) return null;
+  return { id: path.split("/").pop(), ...fromFields(j.fields || {}) };
+}
+
+// 컬렉션 전체 읽기. path 예: "teachers"
+export async function listDocs(path) {
+  const out = [];
+  let pageToken = "";
+  do {
+    const url = docBase() + "/" + path + "?pageSize=300" + (pageToken ? "&pageToken=" + pageToken : "");
+    const j = await call(url, { method: "GET" });
+    if (!j) break;
+    for (const d of j.documents || []) {
+      out.push({ id: d.name.split("/").pop(), ...fromFields(d.fields || {}) });
+    }
+    pageToken = j.nextPageToken || "";
+  } while (pageToken);
+  return out;
+}
+
+// 문서 쓰기(부분 갱신). 넘긴 필드만 바꾼다.
+export async function patchDoc(path, data) {
+  const mask = Object.keys(data).map((k) => "updateMask.fieldPaths=" + encodeURIComponent(k)).join("&");
+  await call(docBase() + "/" + path + "?" + mask, {
+    method: "PATCH",
+    body: JSON.stringify({ fields: toFields(data) }),
+  });
+}
