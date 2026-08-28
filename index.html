@@ -421,8 +421,13 @@ const isEnded = (st) => !!(st && st.endDate && todayStr > st.endDate);
 // 종강일이 지난 반은 목록·집계·학생 화면에서 빠지고, 기록은 전부 그대로 남는다.
 // endDate를 지우면 그대로 되살아난다 (2학기 개강 등).
 const isClassEnded = (cls) => !!(cls && cls.endDate && todayStr > cls.endDate);
-const activeClasses = () => CLASSES.filter((c) => !isClassEnded(c));
-const endedClasses = () => CLASSES.filter(isClassEnded);
+// 담당 범위. 관리자와 학생은 null(제한 없음 - 학생 CLASSES는 이미 자기 반뿐이다).
+// 일반 선생님은 담당 반 id 배열. 보안 규칙이 담당 반 밖을 막으므로 화면도 같이 맞춘다 —
+// 안 맞추면 목록에는 보이는데 들어가면 아무것도 안 뜨는 상태가 된다.
+let MY_SCOPE = null;
+const inScope = (c) => !MY_SCOPE || MY_SCOPE.indexOf(c.id) >= 0;
+const activeClasses = () => CLASSES.filter((c) => !isClassEnded(c) && inScope(c));
+const endedClasses = () => CLASSES.filter((c) => isClassEnded(c) && inScope(c));
 // 기간 연장: 기준일(없거나 이미 지났으면 오늘)에서 n개월 뒤
 function addMonths(baseStr, n) {
   const base = (baseStr && baseStr >= todayStr) ? baseStr : todayStr;
@@ -612,10 +617,16 @@ async function signInWithToken(token) {
 let SESSION_PIN = "";
 const setPinKept = (p) => { SESSION_PIN = p || ""; };
 
+// 관리자는 전체, 일반 선생님은 담당 반만
+function applyScope(t) {
+  MY_SCOPE = (t && t.role === "owner") ? null : ((t && t.classIds) || []);
+}
+
 async function signOutAll() {
   try { await firebase.auth().signOut(); } catch (e) {}
   CLASSES = [];
   AUTH = null;
+  MY_SCOPE = null;
   SESSION_PIN = "";
 }
 
@@ -2547,7 +2558,7 @@ function AdminView() {
         if (claims.role !== "teacher" && claims.role !== "owner") return;
         if (!CLASSES.length) await loadClasses();
         const d = await teachersCol().doc(claims.tid).get();
-        if (d.exists) setMe({ tid: claims.tid, ...d.data() });
+        if (d.exists) { const t = { tid: claims.tid, ...d.data() }; applyScope(t); setMe(t); }
       } catch (e) { /* 복구 실패하면 그냥 로그인 화면 */ }
     })();
   }, []);
@@ -2561,7 +2572,8 @@ function AdminView() {
       const r = await authApi({ action: "login", kind: "teacher", tid: picked.tid, pin });
       await signInWithToken(r.token);
       const d = await teachersCol().doc(picked.tid).get();
-      setMe(d.exists ? { tid: picked.tid, ...d.data() } : { tid: picked.tid, name: r.name, role: r.role, classIds: [] });
+      const t = d.exists ? { tid: picked.tid, ...d.data() } : { tid: picked.tid, name: r.name, role: r.role, classIds: [] };
+      applyScope(t); setMe(t);
       setPicked(null); setPin("");
     } catch (e) { setErr(e.message); }
     setBusyLogin(false);

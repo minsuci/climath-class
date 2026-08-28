@@ -25,11 +25,16 @@ service cloud.firestore {
     // 담당 반은 토큰이 아니라 teachers 문서에서 읽는다.
     // claims에 넣으면 (1) 반이 늘수록 1000바이트 제한에 걸리고
     // (2) 담당이 바뀌어도 다시 로그인할 때까지 옛 값이 남는다.
+    function teacherPath() {
+      return /databases/$(database)/documents/teachers/$(request.auth.token.tid);
+    }
+    // classIds가 없거나 문서가 사라진 선생님이 있어도 규칙이 통째로 터지지 않게 한다.
+    // 규칙 평가 중 오류가 나면 그 요청은 거부되는데, 원인을 찾기가 매우 어렵다.
     function myClassIds() {
-      return get(/databases/$(database)/documents/teachers/$(request.auth.token.tid)).data.classIds;
+      return exists(teacherPath()) ? get(teacherPath()).data.get('classIds', []) : [];
     }
     function teaches(cid) {
-      return isOwner() || (isTeacher() && cid in myClassIds());
+      return isOwner() || (isTeacher() && request.auth.token.tid != null && cid in myClassIds());
     }
     // 학생은 자기가 속한 반 안에서만 움직인다
     function enrolled(cid) {
