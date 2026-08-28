@@ -1,0 +1,119 @@
+rules_version = '2';
+
+// CLIMATH 수업관리 앱 - Firestore 보안 규칙
+//
+// 이 파일은 저장소에 두고 관리한다. 실제 적용은 Firebase 콘솔에 붙여넣기:
+//   콘솔 → Firestore Database → 규칙 → 전체 교체 → 게시
+//
+// 전제: 익명 로그인을 끄고, /api/auth 가 발급한 커스텀 토큰으로만 들어온다.
+//   선생님 토큰 claims: { role: "teacher"|"owner", tid }
+//   학생   토큰 claims: { role: "student", sname, cids: [반id...] }
+//
+// 이전 규칙(`allow read, write: if request.auth != null`)은 앱이 방문자 전원을
+// 익명 로그인시켰기 때문에 사실상 전체 공개였다.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- 공통 판별 ----------
+    function signedIn()  { return request.auth != null && request.auth.token.role != null; }
+    function role()      { return request.auth.token.role; }
+    function isOwner()   { return signedIn() && role() == "owner"; }
+    function isTeacher() { return signedIn() && (role() == "teacher" || role() == "owner"); }
+    function isStudent() { return signedIn() && role() == "student"; }
+
+    // 담당 반은 토큰이 아니라 teachers 문서에서 읽는다.
+    // claims에 넣으면 (1) 반이 늘수록 1000바이트 제한에 걸리고
+    // (2) 담당이 바뀌어도 다시 로그인할 때까지 옛 값이 남는다.
+    function teacherPath() {
+      return /databases/$(database)/documents/teachers/$(request.auth.token.tid);
+    }
+    // classIds가 없거나 문서가 사라진 선생님이 있어도 규칙이 통째로 터지지 않게 한다.
+    // 규칙 평가 중 오류가 나면 그 요청은 거부되는데, 원인을 찾기가 매우 어렵다.
+    function myClassIds() {
+      return exists(teacherPath()) ? get(teacherPath()).data.get('classIds', []) : [];
+    }
+    function teaches(cid) {
+      return isOwner() || (isTeacher() && request.auth.token.tid != null && cid in myClassIds());
+    }
+    // 학생은 자기가 속한 반 안에서만 움직인다
+    function enrolled(cid) {
+      return isStudent() && cid in request.auth.token.cids;
+    }
+    function inClass(cid) { return teaches(cid) || enrolled(cid); }
+
+    // ---------- 서버 전용 ----------
+    // PIN이 들어 있는 곳. 클라이언트는 아무도 못 본다.
+    // /api/auth 는 서비스 계정으로 REST를 쓰므로 규칙을 거치지 않는다.
+    // teachers 는 관리자 화면(승인·담당배정·PIN 초기화) 때문에 owner에게만 열어둔다.
+    // 본인 문서는 읽을 수 있다 — 새로고침 후 담당 반을 복구하는 데 쓴다.
+    // (자기 PIN이 같이 보이지만 본인이 아는 값이라 새로 새는 것이 없다)
+    // 다른 선생님 문서는 관리자만. 승인·담당배정·PIN 초기화 화면이 그걸 쓴다.
+    match /teachers/{tid} {
+      allow read:  if isOwner() || (isTeacher() && tid == request.auth.token.tid);
+      allow write: if isOwner();
+    }
+    match /userPins/{name}   { allow read, write: if false; }  // PIN 변경은 /api/auth 로
+    match /authAttempts/{k}  { allow read, write: if false; }  // 시도 횟수. 손대면 제한이 무의미
+
+    // ---------- 반 ----------
+    match /classes/{cid} {
+      // get(문서 하나)과 list(목록 쿼리)를 나눈다.
+      // 규칙이 문서 내용을 봐야 하는 조건은 목록 쿼리에서 증명이 안 되기 때문에,
+      // 학생은 목록을 못 부르고 자기 반 문서를 하나씩 가져간다(앱의 loadClasses가 그렇게 한다).
+      allow get:    if inClass(cid);
+      allow list:   if isTeacher();
+      allow update: if teaches(cid);
+      allow create, delete: if isOwner();     // 반 생성/삭제는 관리자만
+
+      // ⚠ 하위 컬렉션을 하나씩 적는다. `match /{sub=**}` 로 한 번에 열면 안 된다 —
+      // Firestore는 매칭되는 규칙을 OR로 합치므로, 넓은 허용이 좁은 거부를 덮어쓴다.
+      // 즉 "다 열고 students만 막기"가 성립하지 않는다. 여기 없는 것은 맨 아래에서 거절된다.
+      //
+      // classes/{cid}/students (구버전 반별 PIN)는 일부러 뺐다. 아무도 못 읽는다.
+
+      // 출결·질문·점수 — 학생이 직접 쓴다(출석 체크, 질문 등록)
+      match /days/{date} {
+        allow read:  if inClass(cid);
+        allow write: if teaches(cid) || enrolled(cid);
+        match /{rest=**} {
+          allow read:  if inClass(cid);
+          allow write: if teaches(cid) || enrolled(cid);
+        }
+      }
+      // 과제·질문표시·보강·공지·개인메시지·진도표·강의노트
+      match /homework/{x}   { allow read: if inClass(cid); allow write: if teaches(cid) || enrolled(cid); }
+      match /questioned/{x} { allow read: if inClass(cid); allow write: if teaches(cid) || enrolled(cid); }
+      match /makeups/{x}    { allow read: if inClass(cid); allow write: if teaches(cid); }
+      match /config/{x}     { allow read: if inClass(cid); allow write: if teaches(cid); }
+      match /dms/{sid}      { allow read: if inClass(cid); allow write: if teaches(cid); }
+      match /aiLogs/{x}     { allow read: if inClass(cid); allow write: if teaches(cid) || enrolled(cid); }
+      match /progress/{k}   {
+        allow read: if inClass(cid); allow write: if teaches(cid);
+        match /{rest=**} { allow read: if inClass(cid); allow write: if teaches(cid); }
+      }
+      match /noteUnits/{u}  {
+        allow read: if inClass(cid); allow write: if teaches(cid);
+        match /{rest=**} { allow read: if inClass(cid); allow write: if teaches(cid); }
+      }
+
+      // 수업기록·수업로그는 학부모에게 나가는 글과 녹취 구간이다. 학생에겐 안 보인다.
+      match /dailyNotes/{x} { allow read, write: if teaches(cid); }
+      match /lessonLogs/{x} { allow read, write: if teaches(cid); }
+    }
+
+    // ---------- 상담 · 보고서 ----------
+    // 학생·학부모에 대한 민감한 기록. 학생 토큰으로는 어떤 경우에도 안 열린다.
+    match /consultations/{id} {
+      allow read, delete: if isTeacher() && teaches(resource.data.cid);
+      allow create:       if isTeacher() && teaches(request.resource.data.cid);
+      allow update:       if isTeacher() && teaches(resource.data.cid);
+    }
+    match /reports/{id} {
+      allow read, write: if isTeacher();
+    }
+
+    // 위에서 안 잡힌 것은 전부 거절
+    match /{document=**} { allow read, write: if false; }
+  }
+}
