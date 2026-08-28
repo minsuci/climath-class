@@ -616,6 +616,9 @@ async function signInWithToken(token) {
 // 저장하지 않는다 - 새로고침하면 사라지고, 그때는 직접 입력받는다.
 let SESSION_PIN = "";
 const setPinKept = (p) => { SESSION_PIN = p || ""; };
+// 초기 비번(1234)으로 들어왔는가. 서버가 알려준다. 바꾸기 전엔 화면을 안 넘긴다 —
+// 이름만 알면 들어가지는 계정이 남아 있는 게 지금 가장 큰 구멍이라 여기서 줄인다.
+let MUST_CHANGE_PIN = false;
 
 // 관리자는 전체, 일반 선생님은 담당 반만
 function applyScope(t) {
@@ -628,6 +631,7 @@ async function signOutAll() {
   AUTH = null;
   MY_SCOPE = null;
   SESSION_PIN = "";
+  MUST_CHANGE_PIN = false;
 }
 
 // ----- 선생님 계정 -----
@@ -1162,6 +1166,7 @@ function StudentGate({ onClsChange }) {
       const r = await authApi({ action: "login", kind: "student", name: nm, pin });
       await signInWithToken(r.token);
       setPinKept(pin);   // 비밀번호 변경 때 "지금 PIN"으로 다시 쓴다
+      MUST_CHANGE_PIN = !!r.mustChangePin;
       const mine = CLASSES
         .map((c) => ({ cls: c, member: (c.roster || []).find((x) => norm(x.name) === nm) }))
         .filter((x) => x.member && !isClassEnded(x.cls));
@@ -1234,6 +1239,7 @@ function StudentView({ cls, onBack }) {
     try {
       const r = await authApi({ action: "login", kind: "student", name: norm(name), pin });
       await signInWithToken(r.token);
+      MUST_CHANGE_PIN = !!r.mustChangePin;
       setErr(""); setPin(""); setName(""); setPinKept(pin); setMe(u);
     } catch (e) { setErr(e.message); }
   }
@@ -1606,6 +1612,7 @@ function StudentHome({ cls, me, onLogout }) {
   const [tab, setTab] = useState(me.teacher ? "q" : "att");
   const [att, setAtt] = useState(null);
   const [showPin, setShowPin] = useState(false);
+  const [mustPin, setMustPin] = useState(MUST_CHANGE_PIN);
   const [notice, setNotice] = useState(null);
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const [dmNotice, setDmNotice] = useState(null);
@@ -1690,6 +1697,15 @@ function StudentHome({ cls, me, onLogout }) {
         </div>
       </div>
       {showPin && <ChangePin cls={cls} me={me} onDone={() => setShowPin(false)} />}
+      {mustPin && !showPin && (
+        <div className="cm-card" style={{background: "#f6e7df", borderColor: "#e6cbb9"}}>
+          <div style={{color: "#a8562c", fontSize: 14, lineHeight: 1.6, marginBottom: 10}}>
+            <b>초기 비밀번호를 그대로 쓰고 있어요.</b><br/>
+            이름만 알면 누구나 들어올 수 있어요. 나만 아는 번호로 바꿔주세요.
+          </div>
+          <ChangePin cls={cls} me={me} onDone={() => setMustPin(false)} />
+        </div>
+      )}
 
 
       {activeTab === "att" && (
@@ -2687,6 +2703,7 @@ function AdminView() {
           {!editOrder && <button className="cm-link cm-home-back" onClick={logout}>로그아웃</button>}
         </div>
 
+        {!editOrder && <DefaultPinNotice />}
         {!editOrder && (<>
           <div className="cm-daylist">
             {activeClasses().map((c) => (
@@ -3446,6 +3463,46 @@ function ClassCreate({ me, onDone, onCancel }) {
 
 // 선생님이 자기 PIN을 바꾼다. 관리자 화면의 PIN 초기화는 "다른" 선생님용이라
 // 본인 것을 바꿀 길이 없었다. 검사와 저장은 서버(/api/auth)가 한다.
+// 초기 비번(1234)을 그대로 쓰는 학생 현황. 목록 자체가 "이 이름들은 1234로 들어간다"는
+// 지도라서 서버가 ID 토큰으로 선생님인지 확인한 뒤에만 준다.
+function DefaultPinNotice() {
+  const [data, setData] = useState(null);   // null=로딩, {total,groups}
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const u = firebase.auth().currentUser;
+        if (!u) return;
+        const idToken = await u.getIdToken();
+        const r = await authApi({ action: "defaultPinReport", idToken });
+        if (alive) setData(r);
+      } catch (e) { if (alive) setData({ total: 0, groups: [], err: e.message }); }
+    })();
+    return () => { alive = false; };
+  }, []);
+  if (!data || !data.total) return null;
+  return (
+    <div style={{background: "#f6e7df", border: "1px solid #e6cbb9", borderRadius: 12,
+                 padding: "12px 14px", marginBottom: 12}}>
+      <button className="cm-link" style={{color: "#a8562c", textDecoration: "none", padding: 0}}
+        onClick={() => setOpen((v) => !v)}>
+        {open ? "▾" : "▸"} <b>초기 비번을 그대로 쓰는 학생 {data.total}명</b>
+      </button>
+      <div style={{fontSize: 12, color: "#a8562c", marginTop: 4, lineHeight: 1.5}}>
+        이름만 알면 누구나 그 학생으로 들어갈 수 있어요. 다음 수업에 바꾸라고 알려주세요.
+        (학생이 로그인하면 바꾸라는 안내가 자동으로 떠요)
+      </div>
+      {open && data.groups.map((g) => (
+        <div key={g.cid} style={{marginTop: 10}}>
+          <div style={{fontSize: 12, color: "var(--muted)", fontWeight: 600}}>{g.cname}</div>
+          <div style={{fontSize: 14, lineHeight: 1.7}}>{g.names.join(" · ")}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TeacherPinChange({ me, onBack }) {
   const [cur, setCur] = useState("");
   const [p1, setP1] = useState("");

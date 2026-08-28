@@ -12,7 +12,7 @@
 //   { action:"login", kind:"student", name, pin }→ { token, name }
 //   { action:"register", name, pin }             → 선생님 가입 신청 (status:"pending")
 
-import { createCustomToken, getDoc, listDocs, patchDoc } from "./_google.js";
+import { createCustomToken, verifyIdToken, getDoc, listDocs, patchDoc } from "./_google.js";
 
 const norm = (s) => String(s || "").replace(/\s+/g, "");
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -63,6 +63,7 @@ export default async function handler(req, res) {
     if (body.action === "register") return await register(res, body);
     if (body.action === "changePin") return await changePin(res, body);
     if (body.action === "changeTeacherPin") return await changeTeacherPin(res, body);
+    if (body.action === "defaultPinReport") return await defaultPinReport(res, body);
     if (body.action === "login" && body.kind === "teacher") return await loginTeacher(res, body);
     if (body.action === "login" && body.kind === "student") return await loginStudent(res, body);
     res.status(400).json({ error: "알 수 없는 요청입니다" });
@@ -135,7 +136,8 @@ async function loginStudent(res, { name, pin }) {
     return;
   }
 
-  const ok = await verifyStudentPin(nm, String(pin), live);
+  const how = await verifyStudentPin(nm, String(pin), live);
+  const ok = !!how;
   if (!ok) {
     await noteFail(key, rate);
     const left = MAX_TRIES - (rate.n + 1);
@@ -145,25 +147,61 @@ async function loginStudent(res, { name, pin }) {
   await clearFails(key);
   const cids = live.map((x) => x.cls.id);
   const token = createCustomToken("s_" + nm, { role: "student", sname: nm, cids });
-  res.status(200).json({ token, name: nm, cids });
+  // 초기 비번으로 들어왔으면 앱이 비밀번호 변경을 먼저 시킨다.
+  // 이름만 알면 1234로 들어가지는 계정이 남아 있는 게 지금 가장 큰 구멍이다.
+  res.status(200).json({ token, name: nm, cids, mustChangePin: how === "default" });
 }
 
 // 앱의 verifyPersonPin과 같은 순서: 통합 PIN → 반별 구 PIN(성공 시 이전) → 기본값
+// 통과하면 어느 경로였는지를 문자열로, 실패하면 "" 를 준다.
+// "default" 면 초기 비번을 그대로 쓰는 중이라는 뜻이다.
 async function verifyStudentPin(nm, pin, live) {
   const g = await getDoc("userPins/" + encodeURIComponent(nm));
-  if (g && g.pin) return pin === String(g.pin);
+  if (g && g.pin) return pin === String(g.pin) ? "personal" : "";
 
   for (const x of live) {
     const sp = await getDoc("classes/" + x.cls.id + "/students/" + x.member.id);
     if (sp && sp.pin && pin === String(sp.pin)) {
       try { await patchDoc("userPins/" + encodeURIComponent(nm), { pin }); } catch (e) {}
-      return true;
+      return "legacy";
     }
   }
   for (const x of live) {
-    if (pin === String(x.member.defaultPin || DEFAULT_PIN)) return true;
+    if (pin === String(x.member.defaultPin || DEFAULT_PIN)) return "default";
   }
-  return false;
+  return "";
+}
+
+// 초기 비번을 그대로 쓰는 학생 목록. 선생님만 부를 수 있다 —
+// 아무나 받아가면 "이 이름들은 1234로 들어간다"는 지도가 되어버린다.
+async function defaultPinReport(res, { idToken }) {
+  const claims = await verifyIdToken(idToken);
+  if (!claims || (claims.role !== "teacher" && claims.role !== "owner")) {
+    res.status(403).json({ error: "권한이 없습니다" }); return;
+  }
+  let allowed = null; // null = 전체(관리자)
+  if (claims.role !== "owner") {
+    const t = await getDoc("teachers/" + claims.tid);
+    allowed = (t && t.classIds) || [];
+  }
+  const classes = (await listDocs("classes")).filter(
+    (c) => !classEnded(c) && (allowed === null || allowed.indexOf(c.id) >= 0));
+
+  // 통합 PIN을 가진 이름들을 한 번에 받아온다 (학생마다 따로 읽으면 읽기 수가 폭증한다)
+  const personal = new Set((await listDocs("userPins")).filter((d) => d.pin).map((d) => norm(d.id)));
+
+  const out = [];
+  for (const c of classes) {
+    const legacy = {};
+    try { (await listDocs("classes/" + c.id + "/students")).forEach((d) => { if (d.pin) legacy[d.id] = 1; }); }
+    catch (e) {}
+    const names = (c.roster || [])
+      .filter((r) => !r.teacher && !personal.has(norm(r.name)) && !legacy[r.id])
+      .map((r) => r.name);
+    if (names.length) out.push({ cid: c.id, cname: c.name, names });
+  }
+  const total = out.reduce((n, g) => n + g.names.length, 0);
+  res.status(200).json({ total, groups: out });
 }
 
 // 학생 비밀번호 변경. userPins는 클라이언트가 못 쓰므로 여기를 거친다.

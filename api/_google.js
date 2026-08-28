@@ -62,6 +62,52 @@ export function createCustomToken(uid, claims) {
   });
 }
 
+// ---- (1-b) 클라이언트가 보낸 ID 토큰 검증 ----
+// 선생님 전용 엔드포인트를 만들려면 "누가 부르는지"를 서버가 알아야 한다.
+// 구글 공개키로 서명을 확인하므로 위조할 수 없다. 클라이언트가 보낸 role을
+// 그냥 믿으면 안 된다 — 그건 다시 클라이언트를 믿는 것이다.
+const CERT_URL =
+  "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com";
+let _certs = null; // { at, map }
+
+async function googleCerts() {
+  if (_certs && Date.now() - _certs.at < 60 * 60 * 1000) return _certs.map;
+  const r = await fetch(CERT_URL);
+  if (!r.ok) throw new Error("구글 공개키를 못 받았습니다");
+  const map = await r.json();
+  _certs = { at: Date.now(), map };
+  return map;
+}
+
+// 통과하면 claims를, 아니면 null을 준다 (던지지 않는다 — 호출부에서 403으로 처리)
+export async function verifyIdToken(idToken) {
+  try {
+    const sa = serviceAccount();
+    const parts = String(idToken || "").split(".");
+    if (parts.length !== 3) return null;
+    const dec = (x) => JSON.parse(Buffer.from(x.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+    const header = dec(parts[0]);
+    const payload = dec(parts[1]);
+    if (header.alg !== "RS256" || !header.kid) return null;
+
+    const certs = await googleCerts();
+    const cert = certs[header.kid];
+    if (!cert) return null;
+
+    const sig = Buffer.from(parts[2].replace(/-/g, "+").replace(/_/g, "/"), "base64");
+    const ok = crypto.createVerify("RSA-SHA256").update(parts[0] + "." + parts[1]).verify(cert, sig);
+    if (!ok) return null;
+
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.aud !== sa.project_id) return null;
+    if (payload.iss !== "https://securetoken.google.com/" + sa.project_id) return null;
+    if (!payload.exp || payload.exp < now) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
 // ---- (2) Firestore REST ----
 let _tok = null; // { value, exp }
 async function accessToken() {
