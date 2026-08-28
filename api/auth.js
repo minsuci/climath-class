@@ -62,6 +62,7 @@ export default async function handler(req, res) {
     if (body.action === "teachers") return await listTeacherNames(res);
     if (body.action === "register") return await register(res, body);
     if (body.action === "changePin") return await changePin(res, body);
+    if (body.action === "changeTeacherPin") return await changeTeacherPin(res, body);
     if (body.action === "login" && body.kind === "teacher") return await loginTeacher(res, body);
     if (body.action === "login" && body.kind === "student") return await loginStudent(res, body);
     res.status(400).json({ error: "알 수 없는 요청입니다" });
@@ -191,6 +192,31 @@ async function changePin(res, { name, oldPin, newPin }) {
   }
   await clearFails(key);
   await patchDoc("userPins/" + encodeURIComponent(nm), { pin: String(newPin), time: Date.now() });
+  res.status(200).json({ ok: true });
+}
+
+// 선생님이 자기 PIN을 바꾼다. 관리자도 자기 것은 여기서만 바꿀 수 있다
+// (선생님 관리 화면의 PIN 초기화는 "다른" 선생님용이라 본인은 대상이 아니다).
+// 지금 PIN을 반드시 함께 받는다 — 로그인된 화면을 잠깐 빌린 사람이 못 바꾸게.
+async function changeTeacherPin(res, { tid, oldPin, newPin }) {
+  if (!tid || !/^\d{4}$/.test(String(newPin || ""))) {
+    res.status(400).json({ error: "새 PIN 4자리를 입력해주세요" }); return;
+  }
+  if (String(oldPin || "") === String(newPin)) {
+    res.status(400).json({ error: "지금 쓰는 PIN과 다른 값으로 정해주세요" }); return;
+  }
+  const key = "tc:" + tid;
+  const rate = await checkRate(key);
+  if (!rate.ok) { res.status(429).json({ error: "시도가 너무 많아요. 10분 뒤에 다시 해주세요." }); return; }
+
+  const t = await getDoc("teachers/" + tid);
+  if (!t) { res.status(404).json({ error: "없는 선생님입니다" }); return; }
+  if (String(t.pin || "") !== String(oldPin || "")) {
+    await noteFail(key, rate);
+    res.status(401).json({ error: "지금 쓰는 PIN이 올바르지 않습니다" }); return;
+  }
+  await clearFails(key);
+  await patchDoc("teachers/" + tid, { pin: String(newPin) });
   res.status(200).json({ ok: true });
 }
 

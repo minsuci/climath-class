@@ -179,7 +179,9 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - `api/_google.js` — 서비스 계정 JWT 서명 → 커스텀 토큰 + OAuth2 → Firestore REST.
   **firebase-admin을 안 쓴다.** 루트에 `package.json`이 생기면 Vercel 빌드 동작이
   바뀌는데(위 참고) 이 앱은 빌드 없는 단일 HTML이 전제다. node `crypto`로 충분하다.
-- `api/auth.js` — `teachers`(이름만) / `login`(teacher·student) / `register` / `changePin`.
+- `api/auth.js` — `teachers`(이름만) / `login`(teacher·student) / `register` /
+  `changePin`(학생) / `changeTeacherPin`(선생님 본인. 사이드바 "내 PIN 변경").
+  선생님 관리 화면의 PIN 초기화는 **다른** 선생님용이라 본인 것은 여기서만 바꾼다.
   **시도 8회 / 10분 제한**(`authAttempts`). 검사를 서버로 옮기면 4자리 PIN을 전부
   넣어보는 게 가능해지므로 이게 없으면 오히려 전보다 나쁘다.
 - 환경변수 **`FIREBASE_SERVICE_ACCOUNT`** = 서비스 계정 JSON 전체.

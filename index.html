@@ -2654,6 +2654,7 @@ function AdminView() {
         { sep: true },
         { key: "newclass", ico: "+", label: "새 반 만들기" },
         ...(me.role === "owner" ? [{ key: "manage", ico: "⚙", label: "선생님 관리" }] : []),
+        { key: "mypin", ico: "✧", label: "내 PIN 변경" },
         { key: "logout", ico: "→", label: "로그아웃" },
       ]} />
   );
@@ -2671,6 +2672,7 @@ function AdminView() {
   if (mode === "manage") return <>{homeSide}<TeacherManage me={me} teachers={teachers} onRefresh={refreshTeachers} onBack={() => setMode("login")} /></>;
 
   // ---- 위험신호 / 보강 / 보고서 ----
+  if (mode === "mypin") return <>{homeSide}<TeacherPinChange me={me} onBack={() => setMode("login")} /></>;
   if (mode === "risk") return <>{homeSide}<RiskDashboard onBack={() => setMode("login")} /></>;
   if (mode === "makeup") return <>{homeSide}<MakeupCenter onBack={() => setMode("login")} /></>;
   if (mode === "report") return <>{homeSide}<ReportCenter onBack={() => setMode("login")} /></>;
@@ -3438,6 +3440,55 @@ function ClassCreate({ me, onDone, onCancel }) {
       {msg && <div className="cm-err">{msg}</div>}
       <button className="cm-btn cm-btn-primary" disabled={busy} onClick={submit}>{busy ? "만드는 중..." : "반 만들기"}</button>
       <button className="cm-link" onClick={onCancel}>← 돌아가기</button>
+    </div>
+  );
+}
+
+// 선생님이 자기 PIN을 바꾼다. 관리자 화면의 PIN 초기화는 "다른" 선생님용이라
+// 본인 것을 바꿀 길이 없었다. 검사와 저장은 서버(/api/auth)가 한다.
+function TeacherPinChange({ me, onBack }) {
+  const [cur, setCur] = useState("");
+  const [p1, setP1] = useState("");
+  const [p2, setP2] = useState("");
+  const [msg, setMsg] = useState("");
+  const [ok, setOk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const backRef = useSwipeBack(onBack);
+  const only4 = (v) => v.replace(/\D/g, "").slice(0, 4);
+  async function save() {
+    if (busy) return;
+    if (cur.length !== 4) { setOk(false); setMsg("지금 쓰는 PIN을 입력해주세요"); return; }
+    if (p1.length !== 4) { setOk(false); setMsg("새 PIN은 숫자 4자리입니다"); return; }
+    if (p1 !== p2) { setOk(false); setMsg("두 번 입력한 새 PIN이 다릅니다"); return; }
+    setBusy(true);
+    try {
+      await authApi({ action: "changeTeacherPin", tid: me.tid, oldPin: cur, newPin: p1 });
+      setOk(true); setMsg("PIN이 바뀌었어요. 다음 로그인부터 새 PIN을 쓰세요.");
+      setCur(""); setP1(""); setP2("");
+    } catch (e) { setOk(false); setMsg(e.message); }
+    setBusy(false);
+  }
+  return (
+    <div ref={backRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <div className="cm-card">
+        <h2 className="cm-h2">내 PIN 변경</h2>
+        <div className="cm-hint" style={{marginBottom: 10}}>
+          {me.name} 선생님 계정의 PIN을 바꿉니다. 다른 사람에게 알려주지 마세요.
+        </div>
+        <label className="cm-label">지금 쓰는 PIN</label>
+        <input className="cm-input" type="password" inputMode="numeric" maxLength={4}
+          value={cur} onChange={(e) => setCur(only4(e.target.value))} />
+        <label className="cm-label">새 PIN (숫자 4자리)</label>
+        <input className="cm-input" type="password" inputMode="numeric" maxLength={4}
+          value={p1} onChange={(e) => setP1(only4(e.target.value))} />
+        <label className="cm-label">새 PIN 다시 입력</label>
+        <input className="cm-input" type="password" inputMode="numeric" maxLength={4}
+          value={p2} onChange={(e) => setP2(only4(e.target.value))}
+          onKeyDown={(e) => e.key === "Enter" && save()} />
+        {msg && <div className={ok ? "cm-done" : "cm-err"}>{msg}</div>}
+        <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "바꾸는 중..." : "PIN 바꾸기"}</button>
+        <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
+      </div>
     </div>
   );
 }
