@@ -180,8 +180,21 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
   **firebase-admin을 안 쓴다.** 루트에 `package.json`이 생기면 Vercel 빌드 동작이
   바뀌는데(위 참고) 이 앱은 빌드 없는 단일 HTML이 전제다. node `crypto`로 충분하다.
 - `api/auth.js` — `teachers`(이름만) / `login`(teacher·student) / `register` /
-  `changePin`(학생) / `changeTeacherPin`(선생님 본인. 사이드바 "내 PIN 변경").
+  `changePin`(학생) / `changeTeacherPin`(선생님 본인. 사이드바 "내 PIN 변경") /
+  `defaultPinReport`(초기 비번 학생 현황).
   선생님 관리 화면의 PIN 초기화는 **다른** 선생님용이라 본인 것은 여기서만 바꾼다.
+
+**초기 비번(`1234`) 대책.** 무차별 대입은 시도 제한으로 막았지만 기본 PIN은 대입이
+필요 없다 — 이름만 알면 한 번에 들어간다. 제한은 이름 하나당이라 여러 이름에
+1234를 한 번씩 넣는 건 걸리지도 않는다. 그래서 두 가지를 건다.
+  - 학생이 기본 PIN으로 들어오면 서버가 `mustChangePin`을 내려주고 앱이 변경 화면을 먼저 띄운다
+    (`verifyStudentPin`이 통과 경로를 `personal`/`legacy`/`default`로 알려준다)
+  - 선생님 홈에 `DefaultPinNotice` — 초기 비번 학생 수와 반별 이름
+
+> [!warning] `defaultPinReport`는 반드시 인증을 확인한다
+> 그 목록은 **"이 이름들은 1234로 들어간다"는 지도**다. `_google.js`의
+> `verifyIdToken()`이 구글 공개키로 서명·aud·iss·exp를 검증한 뒤 선생님일 때만 응답한다.
+> 클라이언트가 보낸 role을 그냥 믿으면 다시 클라이언트를 믿는 것이 된다.
   **시도 8회 / 10분 제한**(`authAttempts`). 검사를 서버로 옮기면 4자리 PIN을 전부
   넣어보는 게 가능해지므로 이게 없으면 오히려 전보다 나쁘다.
 - 환경변수 **`FIREBASE_SERVICE_ACCOUNT`** = 서비스 계정 JSON 전체.
