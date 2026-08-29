@@ -39,6 +39,17 @@ html,body{margin:0; padding:0;}
 .cm-shell > .cm-main > .cm-side ~ *{flex:1; min-width:0; max-width:560px; padding-top:22px;}
 .cm-shell > .cm-main > .cm-stack{flex:1; min-width:0; max-width:560px; padding-top:22px;}
 .cm-shell > .cm-main > *:not(.cm-side):not(.cm-backdrop){flex:1; min-width:0; padding-top:22px;}
+
+/* 안내문 편집처럼 좌우 두 판이 필요한 화면은 560px 컬럼에 가두지 않는다.
+   .cm-shell-wide 는 그 화면이 떠 있는 동안에만 붙는다 (FlyerEditor가 붙였다 뗀다). */
+@media (min-width: 1000px){
+  .cm-shell.cm-shell-wide > .cm-main{max-width:1560px;}
+  .cm-shell.cm-shell-wide > .cm-main > .cm-stack,
+  .cm-shell.cm-shell-wide > .cm-main > .cm-side ~ *{max-width:none;}
+}
+/* 안내문 위쪽 버튼 줄 — 세로로 쌓이지 않게 폭을 내용에 맞춘다 */
+.cm-fly-bar{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;}
+.cm-fly-bar .cm-btn{width:auto; margin-top:0; padding:9px 16px; font-size:14px;}
 .cm-side{
   flex:none; width:190px; padding:22px 12px 40px; margin-right:6px;
   position:sticky; top:69px; align-self:flex-start; max-height:calc(100vh - 69px); overflow-y:auto;
@@ -3117,6 +3128,20 @@ function FlyerEditor({ cls, canEdit }) {
   draftRef.current = draft;
 
   useEffect(() => { loadFlyer(cls.id).then((d) => setDraft(d || null)).catch(() => setDraft(null)); }, [cls.id]);
+  // 이 화면에 있는 동안만 좌우 폭 제한을 푼다 (편집 패널 440px + 미리보기가 들어가야 한다)
+  useEffect(() => {
+    const el = document.querySelector(".cm-shell");
+    if (!el) return;
+    el.classList.add("cm-shell-wide");
+    return () => el.classList.remove("cm-shell-wide");
+  }, []);
+  // 화면 높이에 맞춰 늘린다. 창 크기가 바뀌면 따라간다
+  const [vh, setVh] = useState(window.innerHeight);
+  useEffect(() => {
+    const on = () => setVh(window.innerHeight);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
   useEffect(() => listenFlyerPub(cls.id, setPub), [cls.id]);
 
   // iframe이 준비됐다고 알리면 데이터를 내려보낸다
@@ -3170,10 +3195,10 @@ function FlyerEditor({ cls, canEdit }) {
         왼쪽을 채우면 오른쪽 안내문이 바뀌어요. 다 만들면 <b>저장</b>하고, 학생에게 보여줄 땐 <b>게시</b>하세요.
         인쇄는 <b>새 창에서 열기</b>가 편해요.
       </div>
-      <div style={{display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10}}>
-        {canEdit && <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy}
+      <div className="cm-fly-bar">
+        {canEdit && <button className="cm-btn cm-btn-primary" disabled={busy}
           onClick={doSave}>{busy ? "…" : (dirty ? "저장 •" : "저장")}</button>}
-        {canEdit && <button className="cm-btn cm-btn-ghost" style={{margin: 0}} disabled={busy}
+        {canEdit && <button className="cm-btn cm-btn-ghost" disabled={busy}
           onClick={doPublish}>학생에게 게시</button>}
         <button className="cm-link" onClick={() => window.open(url, "_blank")}>새 창에서 열기 (인쇄)</button>
         {live && canEdit && <button className="cm-link" style={{color: "#d6453f"}} onClick={doUnpublish}>게시 내리기</button>}
@@ -3186,7 +3211,7 @@ function FlyerEditor({ cls, canEdit }) {
       </div>
       {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"} style={{marginBottom: 8}}>{msg}</div>}
       <iframe ref={ref} src={url} title="안내문 편집"
-        style={{width: "100%", height: Math.max(520, Math.round(window.innerHeight * 0.72)),
+        style={{width: "100%", height: Math.max(560, vh - 300),
                 border: "1px solid var(--line)", borderRadius: 12, background: "#fff"}} />
     </div>
   );
