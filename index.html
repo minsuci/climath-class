@@ -2341,7 +2341,6 @@ function ExamBoard({ onBack }) {
   const [fixing, setFixing] = useState("");
   const [shared, setShared] = useState([]);
   const [entry, setEntry] = useState(null);   // 대신 입력 중인 {cid, st, cur}
-  const [month, setMonth] = useState(todayStr.slice(0, 7));
   const backRef = useSwipeBack(onBack);
   // 참여표는 PC로 본다. 560px 컬럼에 가두면 달력이 못 들어간다 (안내문과 같은 처리)
   useEffect(() => {
@@ -2433,13 +2432,33 @@ function ExamBoard({ onBack }) {
     setFixing("");
   }
 
-  // 날짜 띠 = 고른 달 전체 (1일부터 말일까지).
-  // 제출한 날짜만 감싸면 달마다 폭이 들쭉날쭉해서 "이 달에 몇 번 오나"를 셀 수가 없다.
+  // 날짜 띠 = **시험이 있는 달 1일 ~ 가장 늦은 복귀일**.
+  // 시험 전 상황도 봐야 해서 1일부터 열고, 복귀까지 봐야 끝이 난다.
+  // 복귀가 다음 달로 넘어가면 띠도 같이 넘어간다.
+  const startsAll = [];
+  const endsAll = [];
+  inGrade.forEach((x) => {
+    if (x.v.start) startsAll.push(x.v.start);
+    if (x.v.back) endsAll.push(x.v.back);
+    else if (x.v.end) endsAll.push(x.v.end);
+  });
+  startsAll.sort(); endsAll.sort();
+  const examMonth = startsAll.length ? startsAll[0].slice(0, 7) : "";   // 회차 달 = 등원 회차를 세는 달
   const strip = [];
-  {
-    const [yy, mm] = month.split("-").map(Number);
+  if (startsAll.length) {
+    const from = examMonth + "-01";
+    const to = endsAll.length ? endsAll[endsAll.length - 1] : startsAll[startsAll.length - 1];
+    const d = new Date(from + "T00:00:00");
+    while (ymd(d) <= to && strip.length < 120) { strip.push(ymd(new Date(d))); d.setDate(d.getDate() + 1); }
+  }
+
+  // 등원 회차는 **그 달 전체**로 센다. 띠는 복귀일에서 끝나지만 그 뒤에도
+  // 그 달 수업일이 남아 있으면 수강료에는 들어가야 한다.
+  const monthDays = [];
+  if (examMonth) {
+    const yy = Number(examMonth.slice(0, 4)), mm = Number(examMonth.slice(5, 7));
     const last = new Date(yy, mm, 0).getDate();
-    for (let d = 1; d <= last; d++) strip.push(ymd(new Date(yy, mm - 1, d)));
+    for (let i = 1; i <= last; i++) monthDays.push(ymd(new Date(yy, mm - 1, i)));
   }
 
   // 그 달의 등원 회차 — 수강료 산정에 쓴다.
@@ -2473,16 +2492,17 @@ function ExamBoard({ onBack }) {
     const isOut = (d) => isOutOn(v, d);
     const come = {};              // 실제로 오는 날의 집합 (중복으로 안 세려고 집합으로 둔다)
     let total = 0, skip = 0;
-    strip.forEach((d) => {
+    monthDays.forEach((d) => {
       if (!isClassDay(cls, st, d)) return;
       total++;
       if (isOut(d)) { skip++; return; }
       come[d] = 1;
     });
     // 직보와 복귀는 오는 날이다. 수업 요일이 아니어도 센다 — 수강료에 들어간다.
+    // 그 달 안에 있을 때만 (다음 달로 넘어간 복귀는 그 달 회차가 아니다)
     let extra = 0;
     [(v && v.prep) || "", (v && v.back) || ""].forEach((d) => {
-      if (!d || d < strip[0] || d > strip[strip.length - 1] || come[d]) return;
+      if (!d || d.slice(0, 7) !== examMonth || come[d]) return;
       come[d] = 1; extra++;
     });
     return { total: total, skip: skip, extra: extra, come: Object.keys(come).length };
@@ -2574,15 +2594,6 @@ function ExamBoard({ onBack }) {
               cur={entry.cur} schoolOpts={schoolOpts} onDone={() => setEntry(null)} />
           )}
 
-          <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 10}}>
-            <span style={{fontSize: 12, color: "var(--muted)"}}>달력</span>
-            <select className="cm-ab-month-sel" style={{marginBottom: 0, fontWeight: 600}}
-              value={month} onChange={(e) => setMonth(e.target.value)}>
-              {examMonths().map((m) => <option key={m} value={m}>{Number(m.slice(5)) + "월" + (m.slice(0,4) !== todayStr.slice(0,4) ? " (" + m.slice(0,4) + ")" : "")}</option>)}
-            </select>
-            <span style={{fontSize: 12, color: "var(--muted)"}}>1일부터 말일까지 보여줘요</span>
-          </div>
-
           <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, marginTop: 10}}>
             {GRADES.map((g) => {
               const n = got.filter((x) => (x.v.grade || "") === g).length;
@@ -2590,6 +2601,12 @@ function ExamBoard({ onBack }) {
             })}
           </div>
 
+          {strip.length > 0 && (
+            <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 6}}>
+              {Number(examMonth.slice(5))}월 1일 ~ {fmtDate(strip[strip.length - 1])} (마지막 복귀일까지)
+              · <b>등원 회차는 {Number(examMonth.slice(5))}월 전체</b> 기준이에요
+            </div>
+          )}
           {strip.length > 0 ? (
             <div className="cm-ab-wrap" data-no-swipe>
               <table className="cm-ab-table">
@@ -2603,7 +2620,7 @@ function ExamBoard({ onBack }) {
                         {day === 1 ? Number(d.slice(5, 7)) + "/1" : day}
                       </th>;
                     })}
-                    <th rowSpan={2} style={{minWidth: 54}}>등원</th>
+                    <th rowSpan={2} style={{minWidth: 54}}>{examMonth ? Number(examMonth.slice(5)) + "월" : ""}<br/>등원</th>
                   </tr>
                   <tr>
                     <th className="cm-ab-name"></th>
