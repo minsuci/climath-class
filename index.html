@@ -688,6 +688,19 @@ const KNOWN_SCHOOLS = [
   "효성고", "휘문고",
 ];
 // 학교·학년이 같으면 이 셋은 같아야 한다. 직보·복귀는 학생마다 달라도 이상하지 않다.
+// 달력에 칠할 때 고르는 것
+const PAINT_MODES = [
+  { key: "exam", label: "시험기간", bg: "#f0ece5", fg: "#7c6f5f" },
+  { key: "math", label: "수학시험", bg: "#fae3e2", fg: "#d6453f" },
+  { key: "prep", label: "직보", bg: "#f6e7df", fg: "#c2703f" },
+  { key: "back", label: "복귀", bg: "#e3edf5", fg: "#2b5f8a" },
+  { key: "erase", label: "지우개", bg: "#fff", fg: "#8a7f72" },
+];
+function shiftMonthStr(ym, delta) {
+  const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  const d = new Date(y, m - 1 + delta, 1);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+}
 const examSig = (v) => [v.start || "", v.end || "", v.math || ""].join("~");
 
 // 참여표에 찍는 표식 (시트의 범례와 같은 뜻)
@@ -2229,7 +2242,7 @@ function ExamForm({ cls, me }) {
 
 // 선생님이 학생 대신 넣는 칸. 전화로 받아적거나 학생이 안 내면 여기서 채운다.
 // 학생 폼과 같은 곳(exams/{회차}__{sid})에 쓰므로 나중에 학생이 내면 그 위에 덮인다.
-function ExamEntry({ cid, term, st, cur, schoolOpts, onDone }) {
+function ExamEntry({ cls, term, st, cur, schoolOpts, onDone }) {
   const [f, setF] = useState({
     school: (cur && cur.school) || "", grade: (cur && cur.grade) || "",
     start: (cur && cur.start) || "", end: (cur && cur.end) || "",
@@ -2241,6 +2254,67 @@ function ExamEntry({ cid, term, st, cur, schoolOpts, onDone }) {
   const [etcName, setEtcName] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState("exam");
+  const [anchor, setAnchor] = useState("");
+  const [pmonth, setPmonth] = useState(((cur && cur.start) || todayStr).slice(0, 7));
+  const [days, setDays] = useState(
+    (cur && cur.days && cur.days.length) ? cur.days
+      : (isIndividual(cls) ? ((st.days || []).slice()) : ((cls.classDays || []).slice())));
+
+  // 칠할 달의 날짜들
+  const paintDays = [];
+  {
+    const yy = Number(pmonth.slice(0, 4)), mm = Number(pmonth.slice(5, 7));
+    const last = new Date(yy, mm, 0).getDate();
+    for (let i = 1; i <= last; i++) paintDays.push(ymd(new Date(yy, mm - 1, i)));
+  }
+  function paintMark(d) {
+    if (f.math && d === f.math) return EXAM_MARKS.math;
+    if (f.prep && d === f.prep) return EXAM_MARKS.prep;
+    if (f.back && d === f.back) return EXAM_MARKS.back;
+    if (anchor && d === anchor) return EXAM_MARKS.exam;
+    if (f.start && f.end && d >= f.start && d <= f.end) return EXAM_MARKS.exam;
+    return null;
+  }
+  function paint(d) {
+    if (mode === "erase") {
+      setF((p) => {
+        const n = { ...p };
+        if (p.math === d) n.math = "";
+        if (p.prep === d) n.prep = "";
+        if (p.back === d) n.back = "";
+        if (p.start && p.end && d >= p.start && d <= p.end) { n.start = ""; n.end = ""; }
+        return n;
+      });
+      setAnchor("");
+      return;
+    }
+    if (mode === "exam") {
+      if (!anchor) { setAnchor(d); setF((p) => ({ ...p, start: d, end: d })); return; }
+      const a = anchor < d ? anchor : d, b = anchor < d ? d : anchor;
+      setF((p) => ({ ...p, start: a, end: b }));
+      setAnchor("");
+      return;
+    }
+    // math / prep / back — 한 날짜. 같은 날 다시 누르면 지운다
+    set(mode, f[mode] === d ? "" : d);
+  }
+
+  // 이 달 등원 회차 (선생님이 칠하면서 바로 확인할 수 있게)
+  const liveCount = (() => {
+    const outS = f.prep ? dayAfter(f.prep) : f.start;
+    const outE = f.back ? dayBefore(f.back) : f.end;
+    const come = {};
+    paintDays.forEach((d) => {
+      if (days.indexOf(new Date(d + "T00:00:00").getDay()) < 0) return;
+      if (!isActiveOn(st, d)) return;
+      if (outS && outE && d >= outS && d <= outE) return;
+      come[d] = 1;
+    });
+    [f.prep, f.back].forEach((d) => { if (d && d.slice(0, 7) === pmonth) come[d] = 1; });
+    return Object.keys(come).length;
+  })();
+
   function set(k, v) {
     setF((p) => {
       const n = { ...p, [k]: v };
@@ -2256,9 +2330,9 @@ function ExamEntry({ cid, term, st, cur, schoolOpts, onDone }) {
     if (f.end < f.start) { setMsg("종료일이 시작일보다 빠를 수 없어요"); return; }
     setBusy(true); setMsg("");
     try {
-      await saveExam(cid, term, st.id, { name: st.name, school: f.school, grade: f.grade,
+      await saveExam(cls.id, term, st.id, { name: st.name, school: f.school, grade: f.grade,
         start: f.start, end: f.end, math: f.math, prep: f.prep, back: f.back, note: f.note.trim(),
-        byTeacher: true });
+        days: days, byTeacher: true });
       onDone();
     } catch (e) { setMsg("저장 실패: " + e.message); setBusy(false); }
   }
@@ -2297,25 +2371,61 @@ function ExamEntry({ cid, term, st, cur, schoolOpts, onDone }) {
         ))}
       </div>
 
-      <label className="cm-label">내신 기간</label>
-      <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"}}>
-        <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" value={f.start} onChange={(e) => set("start", e.target.value)} />
-        <span style={{color: "var(--muted)"}}>~</span>
-        <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" value={f.end} min={f.start} onChange={(e) => set("end", e.target.value)} />
+      <label className="cm-label">수업 요일 <span className="cm-h-hint">(달력의 수업일과 등원 회차가 여기서 나와요)</span></label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+        {DAY_NAMES.map((d, i) => (
+          <button key={i} className={"cm-ab-tab" + (days.indexOf(i) >= 0 ? " on" : "")}
+            onClick={() => setDays((p) => (p.indexOf(i) >= 0 ? p.filter((x) => x !== i) : p.concat([i]).sort()))}>{d}</button>
+        ))}
       </div>
-      <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
-        <div style={{flex: 1, minWidth: 130}}>
-          <label className="cm-label">수학 시험</label>
-          <input className="cm-input" style={{margin: 0}} type="date" value={f.math} onChange={(e) => set("math", e.target.value)} />
-        </div>
-        <div style={{flex: 1, minWidth: 130}}>
-          <label className="cm-label">직보</label>
-          <input className="cm-input" style={{margin: 0}} type="date" value={f.prep} onChange={(e) => set("prep", e.target.value)} />
-        </div>
-        <div style={{flex: 1, minWidth: 130}}>
-          <label className="cm-label">복귀</label>
-          <input className="cm-input" style={{margin: 0}} type="date" value={f.back} onChange={(e) => set("back", e.target.value)} />
-        </div>
+
+      <label className="cm-label">달력에 칠하기</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8}}>
+        {PAINT_MODES.map((pm) => (
+          <button key={pm.key} className={"cm-ab-tab" + (mode === pm.key ? " on" : "")}
+            style={mode === pm.key ? undefined : { background: pm.bg, color: pm.fg, borderColor: pm.bg }}
+            onClick={() => { setMode(pm.key); setAnchor(""); }}>{pm.label}</button>
+        ))}
+        <span style={{marginLeft: "auto", display: "flex", gap: 4, alignItems: "center"}}>
+          <button className="cm-ab-tab" onClick={() => setPmonth(shiftMonthStr(pmonth, -1))}>‹</button>
+          <b style={{fontSize: 13}}>{Number(pmonth.slice(5))}월</b>
+          <button className="cm-ab-tab" onClick={() => setPmonth(shiftMonthStr(pmonth, 1))}>›</button>
+        </span>
+      </div>
+      <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 6}}>
+        {mode === "exam"
+          ? (anchor ? "끝나는 날을 한 번 더 누르세요" : "시험 시작일을 누르고, 끝나는 날을 누르세요")
+          : (mode === "erase" ? "지울 칸을 누르세요" : "해당 날짜를 누르세요 (다시 누르면 지워져요)")}
+      </div>
+      <div className="cm-ab-wrap" data-no-swipe>
+        <table className="cm-ab-table">
+          <thead>
+            <tr>{paintDays.map((d) => {
+              const day = Number(d.slice(8));
+              return <th key={d} style={{minWidth: day === 1 ? 28 : 20, padding: "3px 1px"}}>{day === 1 ? Number(d.slice(5, 7)) + "/1" : day}</th>;
+            })}</tr>
+            <tr>{paintDays.map((d) => {
+              const w = new Date(d + "T00:00:00").getDay();
+              return <th key={d} style={{fontSize: 9, padding: "1px", color: w === 0 ? "#d6453f" : (w === 6 ? "#2b5f8a" : "#8a7f72")}}>{DAY_NAMES[w]}</th>;
+            })}</tr>
+          </thead>
+          <tbody>
+            <tr>{paintDays.map((d) => {
+              const mk = paintMark(d);
+              const isDay = days.indexOf(new Date(d + "T00:00:00").getDay()) >= 0;
+              const stl = mk ? { background: mk.bg, color: mk.fg, fontWeight: 700, padding: "6px 1px", cursor: "pointer" }
+                             : { padding: "6px 1px", cursor: "pointer", background: isDay ? "#f4f6f9" : undefined };
+              return <td key={d} style={stl} onClick={() => paint(d)}>{mk ? mk.t : (isDay ? "·" : "")}</td>;
+            })}</tr>
+          </tbody>
+        </table>
+      </div>
+      <div style={{fontSize: 12, color: "var(--muted)", margin: "6px 0 2px"}}>
+        {f.start ? <>내신 <b>{shortDate(f.start)}~{shortDate(f.end || f.start)}</b></> : "내신 기간 미정"}
+        {f.math ? <> · 수학 <b>{shortDate(f.math)}</b></> : null}
+        {f.prep ? <> · 직보 <b>{shortDate(f.prep)}</b></> : null}
+        {f.back ? <> · 복귀 <b>{shortDate(f.back)}</b></> : null}
+        {" · "}<b style={{color: "var(--navy)"}}>{Number(pmonth.slice(5))}월 등원 {liveCount}회</b>
       </div>
       <label className="cm-label">비고 (선택)</label>
       <input className="cm-input" value={f.note} onChange={(e) => set("note", e.target.value)} />
@@ -2469,11 +2579,14 @@ function ExamBoard({ onBack }) {
   // 회차 계산과 성격이 다르다. 필요하면 규칙을 바꾸면 된다.
   // attendsOn은 일반반이면 요일을 안 본다 — 호출부가 cls.classDays로 따로 거르는 함수다.
   // 그대로 쓰면 그 달 전체가 수업일로 잡혀 등원이 31회로 나온다.
-  function isClassDay(cls, st, d) {
+  function isClassDay(cls, st, d, v) {
     if (!isActiveOn(st, d)) return false;
     const dow = new Date(d + "T00:00:00").getDay();
-    return isIndividual(cls) ? (st.days || []).indexOf(dow) >= 0
-                             : (cls.classDays || []).indexOf(dow) >= 0;
+    // 제출에 요일이 적혀 있으면 그걸 쓴다 — 선생님이 달력에서 고른 값이고,
+    // 나중에 반 요일이 바뀌어도 그때 센 회차가 그대로 재현된다.
+    const days = (v && v.days && v.days.length) ? v.days
+               : (isIndividual(cls) ? (st.days || []) : (cls.classDays || []));
+    return days.indexOf(dow) >= 0;
   }
   // 안 오는 구간은 내신기간(start~end)이 아니라 **직보 다음날 ~ 복귀 전날**이다.
   // 직보가 마지막 수업이고 그 다음 오는 날이 복귀이므로, 시험이 끝난 뒤라도
@@ -2493,7 +2606,7 @@ function ExamBoard({ onBack }) {
     const come = {};              // 실제로 오는 날의 집합 (중복으로 안 세려고 집합으로 둔다)
     let total = 0, skip = 0;
     monthDays.forEach((d) => {
-      if (!isClassDay(cls, st, d)) return;
+      if (!isClassDay(cls, st, d, v)) return;
       total++;
       if (isOut(d)) { skip++; return; }
       come[d] = 1;
@@ -2590,7 +2703,7 @@ function ExamBoard({ onBack }) {
           )}
 
           {entry && (
-            <ExamEntry key={entry.cid + entry.st.id} cid={entry.cid} term={term} st={entry.st}
+            <ExamEntry key={entry.cls.id + entry.st.id} cls={entry.cls} term={term} st={entry.st}
               cur={entry.cur} schoolOpts={schoolOpts} onDone={() => setEntry(null)} />
           )}
 
@@ -2638,7 +2751,7 @@ function ExamBoard({ onBack }) {
                       <td className="cm-ab-name">{st.name}<br/><span style={{fontSize: 10, color: "#8a7f72"}}>{v.school} · {cls.name}</span></td>
                       {strip.map((d) => {
                         const m = markOf(v, d);
-                        const classDay = isClassDay(cls, st, d);
+                        const classDay = isClassDay(cls, st, d, v);
                         const resting = classDay && isOutOn(v, d);   // 수업일인데 안 오는 날
                         const st2 = m ? { background: m.bg, color: m.fg, fontWeight: 700, padding: "3px 2px" }
                                       : { padding: "3px 2px",
@@ -2683,7 +2796,7 @@ function ExamBoard({ onBack }) {
                     <tr key={cls.id + st.id}>
                       <td className="cm-ab-name">{st.name}
                         <br/><button className="cm-link" style={{padding: 0, fontSize: 11}}
-                          onClick={() => setEntry({ cid: cls.id, st, cur: v })}>고치기</button>
+                          onClick={() => setEntry({ cls, st, cur: v })}>고치기</button>
                         {v.byTeacher && <span style={{fontSize: 10, color: "#8a7f72"}}> · 대신 입력</span>}
                       </td>
                       <td>{cls.name}</td>
@@ -2730,7 +2843,7 @@ function ExamBoard({ onBack }) {
                      <span style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6}}>
                        {missing.map((x) => (
                          <button key={x.cls.id + x.st.id} className="cm-ab-tab"
-                           onClick={() => setEntry({ cid: x.cls.id, st: x.st, cur: null })}>
+                           onClick={() => setEntry({ cls: x.cls, st: x.st, cur: null })}>
                            {x.st.name} <span style={{opacity: .7}}>({x.cls.name})</span>
                          </button>
                        ))}
