@@ -2451,13 +2451,21 @@ function ExamBoard({ onBack }) {
                              : (cls.classDays || []).indexOf(dow) >= 0;
   }
   function attendCount(cls, st, v) {
+    const inExam = (d) => !!(v && v.start && v.end && d >= v.start && d <= v.end);
+    const come = {};              // 실제로 오는 날의 집합 (중복으로 안 세려고 집합으로 둔다)
     let total = 0, skip = 0;
     strip.forEach((d) => {
       if (!isClassDay(cls, st, d)) return;
       total++;
-      if (v && v.start && v.end && d >= v.start && d <= v.end) skip++;
+      if (inExam(d)) { skip++; return; }
+      come[d] = 1;
     });
-    return { total: total, skip: skip, come: total - skip };
+    // 직보는 온다 — 수업 요일이 아니어도, 내신기간 안이어도 센다. 수강료에 들어간다.
+    let extra = 0;
+    if (v && v.prep && v.prep >= strip[0] && v.prep <= strip[strip.length - 1] && !come[v.prep]) {
+      come[v.prep] = 1; extra++;
+    }
+    return { total: total, skip: skip, extra: extra, come: Object.keys(come).length };
   }
   const markOf = (v, d) => {
     if (v.math && d === v.math) return EXAM_MARKS.math;
@@ -2594,7 +2602,9 @@ function ExamBoard({ onBack }) {
                       })}
                       <td style={{fontWeight: 700, color: "var(--navy)", minWidth: 54}}>
                         {cnt.come}회
-                        <br/><span style={{fontSize: 9, fontWeight: 400, color: "#8a7f72"}}>{cnt.total}−{cnt.skip}</span>
+                        <br/><span style={{fontSize: 9, fontWeight: 400, color: "#8a7f72"}}>
+                          {cnt.total}−{cnt.skip}{cnt.extra ? "+" + cnt.extra : ""}
+                        </span>
                       </td>
                     </tr>
                     );
@@ -2606,6 +2616,7 @@ function ExamBoard({ onBack }) {
 
           <div style={{display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 14px", alignItems: "center"}}>
             <span className="cm-chip" style={{background: "#f4f6f9", color: "#5a6b82"}}>· 수업일</span>
+            <span style={{fontSize: 11, color: "var(--muted)"}}>등원 = 수업일 − 내신기간 + 직보</span>
             {Object.keys(EXAM_MARKS).map((k) => (
               <span key={k} className="cm-chip" style={{background: EXAM_MARKS[k].bg, color: EXAM_MARKS[k].fg}}>
                 {EXAM_MARKS[k].t} {EXAM_MARKS[k].label}
