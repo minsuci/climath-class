@@ -461,6 +461,18 @@ function recentMonths(n) {
   return out;
 }
 
+// 내신 참여표용 달 목록 — 다가올 달도 고를 수 있어야 한다.
+// 9월 시험 준비를 8월에 하므로 지난 달만 주면 정작 필요한 달이 없다.
+function examMonths(back, fwd) {
+  const y = Number(todayStr.slice(0, 4)), m = Number(todayStr.slice(5, 7));
+  const out = [];
+  for (let i = (fwd == null ? 4 : fwd); i >= -(back == null ? 9 : back); i--) {
+    const d = new Date(y, m - 1 + i, 1);
+    out.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
+  }
+  return out;
+}
+
 // 그 달에 수업이 있는 날짜를 요일에서 만들어낸다.
 // days 문서는 그날 뭔가 일어나야 생긴다. 출석을 한 번도 안 찍은 날은 문서가 없어서
 // 월간 출석부에 칸 자체가 없었고, 그래서 나중에 채워 넣을 방법이 없었다.
@@ -2323,7 +2335,15 @@ function ExamBoard({ onBack }) {
   const [fixing, setFixing] = useState("");
   const [shared, setShared] = useState([]);
   const [entry, setEntry] = useState(null);   // 대신 입력 중인 {cid, st, cur}
+  const [month, setMonth] = useState(todayStr.slice(0, 7));
   const backRef = useSwipeBack(onBack);
+  // 참여표는 PC로 본다. 560px 컬럼에 가두면 달력이 못 들어간다 (안내문과 같은 처리)
+  useEffect(() => {
+    const el = document.querySelector(".cm-shell");
+    if (!el) return;
+    el.classList.add("cm-shell-wide");
+    return () => el.classList.remove("cm-shell-wide");
+  }, []);
   const classes = activeClasses();
   useEffect(() => listenSchools(setShared), []);
 
@@ -2407,16 +2427,37 @@ function ExamBoard({ onBack }) {
     setFixing("");
   }
 
-  // 날짜 띠 범위
-  const ds = [];
-  inGrade.forEach((x) => ["start", "end", "math", "prep", "back"].forEach((k) => { if (x.v[k]) ds.push(x.v[k]); }));
-  ds.sort();
-  let strip = [];
-  if (ds.length) {
-    const a = new Date(ds[0] + "T00:00:00"); a.setDate(a.getDate() - 1);
-    const b = new Date(ds[ds.length - 1] + "T00:00:00"); b.setDate(b.getDate() + 1);
-    for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) strip.push(ymd(new Date(d)));
-    if (strip.length > 70) strip = strip.slice(0, 70);
+  // 날짜 띠 = 고른 달 전체 (1일부터 말일까지).
+  // 제출한 날짜만 감싸면 달마다 폭이 들쭉날쭉해서 "이 달에 몇 번 오나"를 셀 수가 없다.
+  const strip = [];
+  {
+    const [yy, mm] = month.split("-").map(Number);
+    const last = new Date(yy, mm, 0).getDate();
+    for (let d = 1; d <= last; d++) strip.push(ymd(new Date(yy, mm - 1, d)));
+  }
+
+  // 그 달의 등원 회차 — 수강료 산정에 쓴다.
+  //   수업일 = 반 요일(개진반은 학생 요일) ∩ 그 달 ∩ 학생 수강기간   (attendsOn)
+  //   빠지는 날 = 그 수업일 중 내신기간에 걸치는 날
+  //   등원 = 수업일 − 빠지는 날
+  // 직보·복귀는 따로 더하지 않는다. 대개 원래 수업일에 잡히고, 아니면 추가 보강이라
+  // 회차 계산과 성격이 다르다. 필요하면 규칙을 바꾸면 된다.
+  // attendsOn은 일반반이면 요일을 안 본다 — 호출부가 cls.classDays로 따로 거르는 함수다.
+  // 그대로 쓰면 그 달 전체가 수업일로 잡혀 등원이 31회로 나온다.
+  function isClassDay(cls, st, d) {
+    if (!isActiveOn(st, d)) return false;
+    const dow = new Date(d + "T00:00:00").getDay();
+    return isIndividual(cls) ? (st.days || []).indexOf(dow) >= 0
+                             : (cls.classDays || []).indexOf(dow) >= 0;
+  }
+  function attendCount(cls, st, v) {
+    let total = 0, skip = 0;
+    strip.forEach((d) => {
+      if (!isClassDay(cls, st, d)) return;
+      total++;
+      if (v && v.start && v.end && d >= v.start && d <= v.end) skip++;
+    });
+    return { total: total, skip: skip, come: total - skip };
   }
   const markOf = (v, d) => {
     if (v.math && d === v.math) return EXAM_MARKS.math;
@@ -2505,6 +2546,15 @@ function ExamBoard({ onBack }) {
               cur={entry.cur} schoolOpts={schoolOpts} onDone={() => setEntry(null)} />
           )}
 
+          <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 10}}>
+            <span style={{fontSize: 12, color: "var(--muted)"}}>달력</span>
+            <select className="cm-ab-month-sel" style={{marginBottom: 0, fontWeight: 600}}
+              value={month} onChange={(e) => setMonth(e.target.value)}>
+              {examMonths().map((m) => <option key={m} value={m}>{Number(m.slice(5)) + "월" + (m.slice(0,4) !== todayStr.slice(0,4) ? " (" + m.slice(0,4) + ")" : "")}</option>)}
+            </select>
+            <span style={{fontSize: 12, color: "var(--muted)"}}>1일부터 말일까지 보여줘요</span>
+          </div>
+
           <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, marginTop: 10}}>
             {GRADES.map((g) => {
               const n = got.filter((x) => (x.v.grade || "") === g).length;
@@ -2518,29 +2568,44 @@ function ExamBoard({ onBack }) {
                 <thead>
                   <tr>
                     <th className="cm-ab-name">이름</th>
-                    {strip.map((d) => <th key={d} style={{minWidth: 22, padding: "3px 2px"}}>{shortDate(d)}</th>)}
+                    {strip.map((d) => <th key={d} style={{minWidth: 22, padding: "3px 2px"}}>{Number(d.slice(8))}</th>)}
+                    <th rowSpan={2} style={{minWidth: 54}}>등원</th>
                   </tr>
                   <tr>
                     <th className="cm-ab-name"></th>
-                    {strip.map((d) => <th key={d} style={{fontSize: 9, color: "#8a7f72", padding: "2px"}}>{DAY_NAMES[new Date(d + "T00:00:00").getDay()]}</th>)}
+                    {strip.map((d) => {
+                      const w = new Date(d + "T00:00:00").getDay();
+                      return <th key={d} style={{fontSize: 9, padding: "2px", color: w === 0 ? "#d6453f" : (w === 6 ? "#2b5f8a" : "#8a7f72")}}>{DAY_NAMES[w]}</th>;
+                    })}
                   </tr>
                 </thead>
                 <tbody>
-                  {inGrade.map(({ cls, st, v }) => (
+                  {inGrade.map(({ cls, st, v }) => {
+                    const cnt = attendCount(cls, st, v);
+                    return (
                     <tr key={cls.id + st.id}>
                       <td className="cm-ab-name">{st.name}<br/><span style={{fontSize: 10, color: "#8a7f72"}}>{v.school} · {cls.name}</span></td>
                       {strip.map((d) => {
                         const m = markOf(v, d);
-                        return <td key={d} style={m ? {background: m.bg, color: m.fg, fontWeight: 700, padding: "3px 2px"} : {padding: "3px 2px"}}>{m ? m.t : ""}</td>;
+                        const classDay = isClassDay(cls, st, d);
+                        const st2 = m ? { background: m.bg, color: m.fg, fontWeight: 700, padding: "3px 2px" }
+                                      : { padding: "3px 2px", background: classDay ? "#f4f6f9" : undefined };
+                        return <td key={d} style={st2}>{m ? m.t : (classDay ? "·" : "")}</td>;
                       })}
+                      <td style={{fontWeight: 700, color: "var(--navy)", minWidth: 54}}>
+                        {cnt.come}회
+                        <br/><span style={{fontSize: 9, fontWeight: 400, color: "#8a7f72"}}>{cnt.total}−{cnt.skip}</span>
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           ) : <div className="cm-empty">{grade}에서 아직 낸 학생이 없어요</div>}
 
-          <div style={{display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 14px"}}>
+          <div style={{display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 14px", alignItems: "center"}}>
+            <span className="cm-chip" style={{background: "#f4f6f9", color: "#5a6b82"}}>· 수업일</span>
             {Object.keys(EXAM_MARKS).map((k) => (
               <span key={k} className="cm-chip" style={{background: EXAM_MARKS[k].bg, color: EXAM_MARKS[k].fg}}>
                 {EXAM_MARKS[k].t} {EXAM_MARKS[k].label}
