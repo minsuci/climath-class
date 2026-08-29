@@ -56,11 +56,78 @@ const STUB = `
     });
   }
   window.db = { collection: function(n){ return colRef(n); } };
-  window.firebase = { firestore: Object.assign(function(){ return window.db; }, {
-    FieldValue: { arrayUnion: function(){ return arguments[0]; }, arrayRemove: function(){ return arguments[0]; },
-                  serverTimestamp: function(){ return Date.now(); }, delete: function(){ return null; } }
-  }) };
-  console.log("[preview] 메모리 Firestore 사용 중 — 운영 DB에 쓰지 않습니다");
+
+  /* ---- 가짜 인증 ----
+     실제 앱은 /api/auth 가 준 커스텀 토큰으로 로그인한다. 정적 서버에는 그게 없으므로
+     토큰을 흉내 내고 claims를 그대로 돌려준다. 보안 규칙은 여기서 안 돈다 —
+     규칙 검증은 프리뷰가 아니라 실제 배포본에서 해야 한다. */
+  var _user = null, _watch = [];
+  function fire(){ _watch.forEach(function(f){ try { f(_user); } catch(e){} }); }
+  window.firebase = {
+    firestore: Object.assign(function(){ return window.db; }, {
+      FieldValue: { arrayUnion: function(){ return arguments[0]; }, arrayRemove: function(){ return arguments[0]; },
+                    serverTimestamp: function(){ return Date.now(); }, delete: function(){ return null; } }
+    }),
+    auth: function(){ return {
+      get currentUser(){ return _user; },
+      signInWithCustomToken: function(tok){
+        var c = JSON.parse(atob(String(tok).split(".")[1]));
+        _user = { uid: c.uid, isAnonymous: false,
+                  getIdToken: function(){ return Promise.resolve(tok); },
+                  getIdTokenResult: function(){ return Promise.resolve({ claims: c.claims }); } };
+        fire(); return Promise.resolve({ user: _user });
+      },
+      signInAnonymously: function(){ return Promise.reject(new Error("preview: 익명 로그인 없음")); },
+      signOut: function(){ _user = null; fire(); return Promise.resolve(); },
+      onAuthStateChanged: function(cb){ _watch.push(cb); setTimeout(function(){ cb(_user); }, 0); return function(){}; }
+    }; }
+  };
+
+  /* ---- 가짜 /api/auth ---- 실제 서버 로직을 아주 얇게 흉내 낸다 */
+  var TEACHERS = [{ tid: "t-owner", name: "한민수", role: "owner", status: "active", pin: "2030", classIds: [] }];
+  var _fetch = window.fetch.bind(window);
+  var mkTok = function(uid, claims){
+    return "x." + btoa(unescape(encodeURIComponent(JSON.stringify({ uid: uid, claims: claims })))) + ".y"; };
+  window.fetch = function(url, init){
+    if (String(url).indexOf("/api/auth") < 0) return _fetch(url, init);
+    var b = {}; try { b = JSON.parse((init && init.body) || "{}"); } catch(e){}
+    var ok = function(o){ return Promise.resolve({ ok: true, status: 200, json: function(){ return Promise.resolve(o); } }); };
+    var bad = function(m, c){ return Promise.resolve({ ok: false, status: c || 400, json: function(){ return Promise.resolve({ error: m }); } }); };
+    if (b.action === "teachers")
+      return ok({ teachers: TEACHERS.map(function(t){ return { tid: t.tid, name: t.name, role: t.role, status: t.status }; }) });
+    if (b.action === "login" && b.kind === "teacher") {
+      var t = TEACHERS.filter(function(x){ return x.tid === b.tid; })[0];
+      if (!t || String(b.pin) !== t.pin) return bad("PIN이 올바르지 않습니다", 401);
+      return ok({ token: mkTok("t_" + t.tid, { role: t.role, tid: t.tid }), tid: t.tid, name: t.name, role: t.role });
+    }
+    if (b.action === "login" && b.kind === "student") {
+      var nm = String(b.name || "").replace(/\s+/g, ""), cids = [];
+      Object.keys(store).forEach(function(k){
+        if (k.indexOf("classes/") !== 0 || k.slice(8).indexOf("/") >= 0) return;
+        var r = (store[k].roster || []).filter(function(x){ return String(x.name).replace(/\s+/g,"") === nm; });
+        if (r.length) cids.push(k.split("/")[1]);
+      });
+      if (!cids.length) return bad("명단에 없는 이름이에요", 404);
+      if (String(b.pin) !== "1234") return bad("PIN이 올바르지 않아요.", 401);
+      return ok({ token: mkTok("s_" + nm, { role: "student", sname: nm, cids: cids }), name: nm, cids: cids, mustChangePin: true });
+    }
+    if (b.action === "defaultPinReport") return ok({ total: 0, groups: [] });
+    return ok({ ok: true });
+  };
+
+  /* ---- 시험용 반 ---- 실제 시드 생성은 앱에서 없앴으므로 여기서 넣는다 */
+  var t0 = Date.now();
+  store["classes/c-reg"] = { name: "미리보기 일반반", classDays: [1,5], type: "regular", time: t0,
+    books: [{ name: "교재A", total: 100 }, { name: "교재B", total: 50 }],
+    roster: [{ id:"s1", name:"김서진" }, { id:"s2", name:"임서윤" }, { id:"t1", name:"한민수", teacher:true }] };
+  store["classes/c-ind"] = { name: "미리보기 개진반", classDays: [], type: "individual", time: t0 + 1, books: [],
+    roster: [{ id:"s1", name:"지승훈", days:[2,4], books:[{ name:"개별교재", total:80 }] },
+             { id:"t1", name:"한민수", teacher:true }] };
+  TEACHERS[0].classIds = ["c-reg", "c-ind"];
+  store["teachers/t-owner"] = TEACHERS[0];
+
+  console.log("[preview] 메모리 Firestore + 가짜 인증 사용 중 — 운영 DB에 쓰지 않습니다");
+  console.log("[preview] 선생님 한민수 / PIN 2030,  학생 PIN 1234");
 })();
 </script>`;
 

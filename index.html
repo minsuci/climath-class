@@ -2806,7 +2806,7 @@ function validateBooks(books) {
 }
 
 function BookManager({ cls, canEdit }) {
-  const [books, setBooks] = useState(getBooks(cls).map((b) => ({ ...b })));
+  const [books, setBooks, dirty, settleBooks] = useEditable(getBooks(cls), cls.id);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   async function save() {
@@ -2817,7 +2817,7 @@ function BookManager({ cls, canEdit }) {
     try {
       await saveClassBooks(cls.id, v.books);
       cls.books = v.books;
-      setBooks(v.books.map((b) => ({ ...b })));
+      settleBooks(v.books.map((b) => ({ ...b })));
       setMsg("저장됐어요 ✓");
     } catch (e) { setMsg("저장 실패: " + e.message); }
     setBusy(false);
@@ -2836,8 +2836,9 @@ function BookManager({ cls, canEdit }) {
     <div>
       <div className="cm-hint" style={{marginBottom: 12}}>교재 <b>이름을 바꾸면</b> 그 교재로 쌓인 기존 과제·질문 기록과 <b>연결이 끊겨요</b>. 문항수만 바꾸는 건 안전해요.</div>
       <BookEditor books={books} onChange={setBooks} />
+      {dirty && <div className="cm-hint" style={{color: "#c2703f", marginTop: 6}}>아직 저장 안 됐어요 — 아래 저장을 눌러주세요</div>}
       {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
-      <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중..." : "저장"}</button>
+      <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "저장 중..." : (dirty ? "저장 •" : "저장")}</button>
     </div>
   );
 }
@@ -3105,13 +3106,17 @@ function StudentProgressView({ cls, me }) {
 }
 
 function RosterManager({ cls, canEdit, onChanged }) {
-  const [roster, setRoster] = useState(cls.roster);
+  // 여기는 누를 때마다 바로 저장하므로 편집 중인 초안이 없다.
+  // 대신 **밖에서 명단이 바뀌면 반드시 따라가야** 한다 — 개별진도반은 교재가
+  // 이 명단 안에 들어있어서, 옛 사본으로 저장하면 학생별 설정에서 방금 저장한
+  // 교재가 통째로 날아간다.
+  const [roster, , , settleRoster] = useEditable(cls.roster || [], cls.id);
   const [busy, setBusy] = useState(false);
   const students = roster.filter((r) => !r.teacher);
   const teachers = roster.filter((r) => r.teacher);
   async function commit(newRoster) {
     setBusy(true);
-    try { await saveClassRoster(cls.id, newRoster); cls.roster = newRoster; setRoster(newRoster); if (onChanged) onChanged(); }
+    try { await saveClassRoster(cls.id, newRoster); cls.roster = newRoster; settleRoster(newRoster); if (onChanged) onChanged(); }
     catch (e) { alert("저장 실패: " + e.message); }
     setBusy(false);
   }
@@ -3158,9 +3163,11 @@ function RosterManager({ cls, canEdit, onChanged }) {
   );
 }
 
-function StudentConfig({ cls, canEdit }) {
-  const init = () => cls.roster.map((r) => ({ ...r, days: [...(r.days || [])], books: (r.books || []).map((b) => ({ ...b })) }));
-  const [roster, setRoster] = useState(init);
+function StudentConfig({ cls, canEdit, onChanged }) {
+  // 저장된 명단을 편집하되 밖에서 바뀌면 따라간다 (고치던 중이면 그대로 둔다).
+  // 처음 한 번만 읽으면, 반이 바뀌거나 다른 데서 저장이 일어났을 때
+  // 옛 명단을 들고 있다가 그걸로 통째로 덮어쓴다.
+  const [roster, setRoster, dirty, settleRoster] = useEditable(cls.roster || [], cls.id);
   const [open, setOpen] = useState(null);
   const [msg, setMsg] = useState({});
   const [busy, setBusy] = useState(false);
@@ -3182,11 +3189,15 @@ function StudentConfig({ cls, canEdit }) {
     if (v.err) { setMsg({ [st.id]: v.err }); return; }
     setBusy(true); setMsg({});
     try {
-      const newRoster = roster.map((r) => (r.id === st.id ? { ...r, days: st.days, books: v.books, startDate: st.startDate || "", endDate: st.endDate || "" } : r));
+      // 내 초안 전체로 덮지 않는다. **지금 저장된 명단** 위에 이 학생의 변경만 얹는다 —
+      // 그래야 그 사이 다른 데서(명단 편집 등) 바뀐 내용이 날아가지 않는다.
+      const base = (cls.roster || []).length ? cls.roster : roster;
+      const newRoster = base.map((r) => (r.id === st.id ? { ...r, days: st.days, books: v.books, startDate: st.startDate || "", endDate: st.endDate || "" } : r));
       await saveClassRoster(cls.id, newRoster);
       cls.roster = newRoster;
-      setRoster(newRoster.map((r) => ({ ...r, days: [...(r.days || [])], books: (r.books || []).map((b) => ({ ...b })) })));
+      settleRoster(newRoster.map((r) => ({ ...r, days: [...(r.days || [])], books: (r.books || []).map((b) => ({ ...b })) })));
       setMsg({ [st.id]: "저장됐어요 ✓" });
+      if (onChanged) onChanged();
     } catch (e) { setMsg({ [st.id]: "저장 실패: " + e.message }); }
     setBusy(false);
   }
@@ -3664,6 +3675,36 @@ function TeacherManage({ me, teachers, onRefresh, onBack }) {
 const canDragDrop = typeof window !== "undefined" && window.matchMedia
   ? window.matchMedia("(hover: hover) and (pointer: fine)").matches : false;
 
+// ----- 저장된 값을 편집하되, 밖에서 바뀌면 따라가기 -----
+// `useState(props에서 읽은 값)`은 **처음 뜰 때 한 번만** 읽는다. 그 뒤로 저장된 값이
+// 바뀌어도 편집기는 옛 값을 들고 있고, 그 상태로 저장을 누르면 **옛 값이 덮어쓴다.**
+//
+// 그래서: 대상이 바뀌면 무조건 다시 읽고, 같은 대상인데 저장된 값이 달라졌으면
+// **내가 고치던 중이 아닐 때만** 따라간다 (입력 중에 값이 튀면 안 된다).
+function useEditable(value, key) {
+  const [draft, setDraft] = useState(value);
+  const [dirty, setDirty] = useState(false);
+  const sig = JSON.stringify(value);
+  const keyRef = React.useRef(key);
+  const sigRef = React.useRef(sig);
+  const dirtyRef = React.useRef(false);
+  dirtyRef.current = dirty;
+  useEffect(() => {
+    if (keyRef.current !== key) {          // 다른 반·다른 학생으로 옮겨감
+      keyRef.current = key; sigRef.current = sig;
+      setDraft(value); setDirty(false); return;
+    }
+    if (sig !== sigRef.current) {          // 저장된 값이 밖에서 바뀜
+      sigRef.current = sig;
+      if (!dirtyRef.current) setDraft(value);
+    }
+  }, [key, sig]);
+  const edit = (v) => { setDirty(true); setDraft(v); };
+  // 저장 성공 후: 이 값을 기준으로 삼고 편집중 표시를 끈다
+  const settle = (v) => { sigRef.current = JSON.stringify(v); setDraft(v); setDirty(false); };
+  return [draft, edit, dirty, settle];
+}
+
 // ----- 드래그해서 파일 올리기 -----
 // { over, handlers } 를 돌려준다. handlers를 감쌀 요소에 그대로 펼쳐 넣으면 된다.
 //
@@ -3773,6 +3814,9 @@ function useSwipeBack(onBack) {
 
 function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, selected, setSelected, side, onBack, onClassChanged }) {
   const [rosterVer, bumpVer] = useState(0);
+  // 명단 편집기와 학생별 설정은 둘 다 cls.roster를 편집한다. 한쪽이 저장하면
+  // 다른 쪽을 다시 마운트해 최신 명단을 읽게 한다 — 안 그러면 옛 사본으로 덮어쓴다.
+  const [cfgVer, bumpCfg] = useState(0);
   const [days, setDays] = useState(null);
   const [notice, setNotice] = useState(null);
   const [noticeText, setNoticeText] = useState("");
@@ -3969,12 +4013,12 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
         )}
         <div className="cm-card">
           <h3 className="cm-h3">학생 명단</h3>
-          <RosterManager cls={cls} canEdit={canEdit} onChanged={() => bumpVer((v) => v + 1)} />
+          <RosterManager key={"rm" + cfgVer} cls={cls} canEdit={canEdit} onChanged={() => bumpVer((v) => v + 1)} />
         </div>
         {isIndividual(cls) ? (
           <div className="cm-card">
             <h3 className="cm-h3">학생별 설정 <span className="cm-h-hint">(등원요일 · 교재)</span></h3>
-            <StudentConfig key={"sc" + rosterVer} cls={cls} canEdit={canEdit} />
+            <StudentConfig key={"sc" + rosterVer} cls={cls} canEdit={canEdit} onChanged={() => bumpCfg((v) => v + 1)} />
           </div>
         ) : (
           <div className="cm-card">
