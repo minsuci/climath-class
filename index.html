@@ -509,6 +509,8 @@ function ymd(d) {
 }
 const todayStr = ymd(new Date());
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
+// "2026-08-17" → "8/17" (표·그래프에서 좁게 쓴다)
+const shortDate = (d) => { const p = String(d).split("-"); return parseInt(p[1]) + "/" + parseInt(p[2]); };
 function fmtDate(d) {
   const dt = new Date(d + "T00:00:00");
   return d.split("-").join(".") + " (" + WD[dt.getDay()] + ")";
@@ -620,6 +622,29 @@ function listenDm(cid, sid, cb) {
 }
 const scoresCol = (cid, date) => dayDoc(cid, date).collection("scores");
 async function addScore(cid, date, s) { await scoresCol(cid, date).add(s); touchDay(cid, date); }
+
+// 점수는 날짜마다 흩어져 있다(days/{date}/scores). 추이를 그리려면 모아야 한다.
+// 날짜 수만큼 읽기가 나가므로 최근 것부터 maxDays개만 본다 — 그래프에는 충분하다.
+// sid를 주면 그 학생 것만, 안 주면 반 전체.
+async function loadScoreHistory(cid, sid, maxDays) {
+  const snap = await daysCol(cid).get();
+  const dates = [];
+  snap.forEach((d) => dates.push(d.id));
+  dates.sort();
+  const recent = dates.slice(-(maxDays || 80));
+  const out = [];
+  await Promise.all(recent.map(async (date) => {
+    try {
+      const s = await scoresCol(cid, date).get();
+      s.forEach((d) => {
+        const v = d.data();
+        if (!sid || v.sid === sid) out.push({ id: d.id, date, ...v });
+      });
+    } catch (e) { /* 권한 없는 날은 건너뛴다 */ }
+  }));
+  out.sort((a, b) => a.date.localeCompare(b.date) || (a.time || 0) - (b.time || 0));
+  return out;
+}
 async function listDays(cid) {
   const s = await daysCol(cid).get();
   const arr = [];
@@ -1798,7 +1823,13 @@ function StudentHome({ cls, me, onLogout }) {
       )}
       {activeTab === "q" && <QuestionForm cls={cls} me={me} />}
       {activeTab === "hw" && <StudentHomework cls={cls} me={me} />}
-      {activeTab === "score" && <ScoreForm cls={cls} me={me} />}
+      {activeTab === "score" && (<>
+        <ScoreForm cls={cls} me={me} />
+        <div className="cm-card">
+          <h3 className="cm-h3">점수 추이 <span className="cm-h-hint">(그동안 본 테스트)</span></h3>
+          <ScoreTrend cls={cls} sid={me.id} />
+        </div>
+      </>)}
       {activeTab === "prog" && <StudentProgressView cls={cls} me={me} />}
       {activeTab === "flyer" && <FlyerView cls={cls} />}
       {activeTab === "notes" && (
@@ -1928,6 +1959,100 @@ function StudentHomework({ cls, me }) {
           onChange={(arr) => persistBook(b.name, arr)} />
       ))}
     </>
+  );
+}
+
+// ----- 점수 추이 그래프 -----
+// 외부 차트 라이브러리를 쓰지 않는다. CDN을 하나 더 늘리면 그게 죽을 때 앱이 같이 죽는다
+// (버전 고정 원칙과 같은 이유). 점 몇 개짜리 꺾은선은 SVG로 충분하다.
+function ScoreChart({ rows, height }) {
+  const [pick, setPick] = useState(null);
+  const H = height || 170, W = 320;          // viewBox 기준. 화면에는 폭 100%로 늘린다
+  const PAD = { l: 26, r: 8, t: 10, b: 22 };
+  if (!rows.length) return null;
+  const n = rows.length;
+  const x = (i) => PAD.l + (n === 1 ? (W - PAD.l - PAD.r) / 2 : (i * (W - PAD.l - PAD.r)) / (n - 1));
+  const y = (v) => PAD.t + (100 - Math.max(0, Math.min(100, v))) * (H - PAD.t - PAD.b) / 100;
+  const line = rows.map((r, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(r.score).toFixed(1)).join(" ");
+  const avg = Math.round(rows.reduce((a, r) => a + r.score, 0) / n);
+  const sel = pick == null ? null : rows[pick];
+  return (
+    <div>
+      <svg viewBox={"0 0 " + W + " " + H} style={{width: "100%", height: "auto", display: "block", touchAction: "manipulation"}}>
+        {[0, 50, 100].map((g) => (
+          <g key={g}>
+            <line x1={PAD.l} x2={W - PAD.r} y1={y(g)} y2={y(g)} stroke="#e7e0d2" strokeWidth="1" />
+            <text x={PAD.l - 4} y={y(g) + 3} textAnchor="end" fontSize="7" fill="#8a7f72">{g}</text>
+          </g>
+        ))}
+        <line x1={PAD.l} x2={W - PAD.r} y1={y(avg)} y2={y(avg)} stroke="#c2703f" strokeWidth="1" strokeDasharray="3 3" opacity=".7" />
+        <path d={line} fill="none" stroke="var(--navy)" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+        {rows.map((r, i) => (
+          <circle key={i} cx={x(i)} cy={y(r.score)} r={pick === i ? 4.5 : 3}
+            fill={pick === i ? "#c2703f" : "var(--navy)"} stroke="#fff" strokeWidth="1.2"
+            style={{cursor: "pointer"}} onClick={() => setPick(pick === i ? null : i)} />
+        ))}
+        {rows.map((r, i) => (n <= 8 || i === 0 || i === n - 1 || i === pick) && (
+          <text key={"t" + i} x={x(i)} y={H - 6} textAnchor="middle" fontSize="7" fill="#8a7f72">{shortDate(r.date)}</text>
+        ))}
+      </svg>
+      <div style={{fontSize: 12, color: "var(--muted)", marginTop: 4, minHeight: 18}}>
+        {sel
+          ? <span><b style={{color: "var(--ink)"}}>{sel.score}점</b> · {sel.correct}/{sel.total} · {fmtDate(sel.date)}{sel.label ? " · " + sel.label : ""}</span>
+          : <span>평균 <b style={{color: "#c2703f"}}>{avg}점</b> · {n}회 · 점을 누르면 자세히 보여요</span>}
+      </div>
+    </div>
+  );
+}
+
+// 한 사람의 점수 추이 (학생 본인 화면 / 선생님이 고른 학생)
+function ScoreTrend({ cls, sid, compact }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    setRows(null);
+    loadScoreHistory(cls.id, sid).then((r) => { if (alive) setRows(r); }).catch(() => { if (alive) setRows([]); });
+    return () => { alive = false; };
+  }, [cls.id, sid]);
+  if (rows === null) return <div className="cm-empty">불러오는 중…</div>;
+  if (!rows.length) return <div className="cm-empty">아직 제출한 점수가 없어요</div>;
+  const best = rows.reduce((a, r) => (r.score > a.score ? r : a), rows[0]);
+  const last = rows[rows.length - 1];
+  const prev = rows.length > 1 ? rows[rows.length - 2] : null;
+  const diff = prev ? last.score - prev.score : null;
+  return (
+    <div>
+      <ScoreChart rows={rows} />
+      {!compact && (
+        <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10}}>
+          <span className="cm-chip" style={{background: "#eef1f6", color: "var(--navy)"}}>최근 {last.score}점</span>
+          {diff !== null && (
+            <span className="cm-chip" style={{background: diff >= 0 ? "#e6f0e9" : "#fae3e2", color: diff >= 0 ? "#3f7d5e" : "#d6453f"}}>
+              지난번보다 {diff >= 0 ? "+" : ""}{diff}점
+            </span>
+          )}
+          <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f"}}>최고 {best.score}점</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 선생님용: 학생을 골라 추이를 본다
+function ScoreTrendBoard({ cls }) {
+  const students = (cls.roster || []).filter((r) => !r.teacher && !isEnded(r));
+  const [sid, setSid] = useState(students[0] ? students[0].id : null);
+  if (!students.length) return <div className="cm-empty">명단에 학생이 없어요</div>;
+  return (
+    <div>
+      <div className="cm-hint" style={{marginBottom: 10}}>학생이 <b>점수</b> 탭에서 제출한 테스트를 모아 그린 그래프예요.</div>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12}}>
+        {students.map((st) => (
+          <button key={st.id} className={"cm-ab-tab" + (sid === st.id ? " on" : "")} onClick={() => setSid(st.id)}>{st.name}</button>
+        ))}
+      </div>
+      {sid && <ScoreTrend key={sid} cls={cls} sid={sid} />}
+    </div>
   );
 }
 
@@ -2626,6 +2751,15 @@ function AdminView() {
   const [showEnded, setShowEnded] = useState(false); // 종강한 반 펼치기
   const [cls, setCls] = useState(null);
   const [busyLogin, setBusyLogin] = useState(false);
+  // 안내문이 생기면서 일반반의 "진도표"는 대개 안 쓰게 됐다. 다만 개별진도반은
+  // 학생마다 진도계획표가 따로라 안내문(반 하나짜리)으로 대체되지 않는다.
+  // 개진반은 그대로 두고, 일반반은 올려둔 파일이 있을 때만 메뉴를 띄운다.
+  const [hasProgFile, setHasProgFile] = useState(false);
+  useEffect(() => {
+    setHasProgFile(false);
+    if (!cls || isIndividual(cls)) return;
+    return progressDoc(cls.id, "class").onSnapshot((d) => setHasProgFile(d.exists), () => {});
+  }, [cls && cls.id]);
 
   // 로그인 화면 목록은 서버에서 받는다 — 이름/역할/승인상태만 오고 PIN은 안 온다.
   // (예전에는 teachers 문서를 통째로 받아 PIN이 브라우저에 다 있었다)
@@ -2732,9 +2866,10 @@ function AdminView() {
           // 종강한 반에서는 수업 로그를 새로 찍을 일이 없다
           ...(isIndividual(cls) && !isClassEnded(cls) ? [{ key: "c:live", ico: "◐", label: "수업 로그" }] : []),
           { key: "c:book", ico: "▦", label: "월간 출석부" },
+          { key: "c:scores", ico: "◐", label: "점수 추이" },
           { key: "c:notice", ico: "◑", label: "공지" },
           { key: "c:flyer", ico: "▤", label: "안내문" },
-          { key: "c:progress", ico: "◈", label: "진도표" },
+          ...(isIndividual(cls) || hasProgFile ? [{ key: "c:progress", ico: "◈", label: "진도표" }] : []),
           { key: "c:notes", ico: "✎", label: "강의노트" },
           { key: "c:ailog", ico: "✦", label: "AI 질문" },
           { key: "c:consult", ico: "◉", label: "상담" },
@@ -3117,7 +3252,7 @@ function NoteUnit({ cls, unit, canEdit }) {
 // ----- 안내문 -----
 // flyer.html은 자체 style·script를 가진 완결된 문서라 앱 DOM에 인라인하면 CSS가 서로 밟는다.
 // iframe으로 띄우고 postMessage로만 주고받는다. 저장은 앱이 Firestore에 한다.
-function FlyerEditor({ cls, canEdit }) {
+function FlyerEditor({ cls, canEdit, onOpenProgress }) {
   const ref = React.useRef(null);
   const [draft, setDraft] = useState(undefined);   // undefined=로딩, null=빈 것
   const [pub, setPub] = useState(null);
@@ -3194,6 +3329,10 @@ function FlyerEditor({ cls, canEdit }) {
       <div className="cm-hint" style={{marginBottom: 10}}>
         왼쪽을 채우면 오른쪽 안내문이 바뀌어요. 다 만들면 <b>저장</b>하고, 학생에게 보여줄 땐 <b>게시</b>하세요.
         인쇄는 <b>새 창에서 열기</b>가 편해요.
+        {canEdit && !isIndividual(cls) && onOpenProgress && (<>
+          {" "}직접 만든 PDF·이미지를 대신 올리시려면{" "}
+          <button className="cm-link" style={{padding: 0}} onClick={onOpenProgress}>진도표</button>로 가세요.
+        </>)}
       </div>
       <div className="cm-fly-bar">
         {canEdit && <button className="cm-btn cm-btn-primary" disabled={busy}
@@ -4074,10 +4213,17 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
         </div>
       )}
 
+      {activeView === "scores" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">점수 추이</h3>
+          <ScoreTrendBoard cls={cls} />
+        </div>
+      )}
+
       {activeView === "flyer" && (
         <div className="cm-card">
           <h3 className="cm-h3">안내문 <span className="cm-h-hint">(진도계획 A4 한 장)</span></h3>
-          <FlyerEditor cls={cls} canEdit={canEdit} />
+          <FlyerEditor cls={cls} canEdit={canEdit} onOpenProgress={() => setActiveView("progress")} />
         </div>
       )}
 
@@ -4394,7 +4540,6 @@ function AttendanceBook({ cls, canEdit }) {
   }
 
   // 날짜 포맷 M/D
-  const shortDate = (d) => { const p = d.split("-"); return parseInt(p[1]) + "/" + parseInt(p[2]); };
 
   if (loading) return <div><MonthNav /><div className="cm-empty">불러오는 중…</div></div>;
   if (days.length === 0) return <div><MonthNav /><div className="cm-empty">이 달에 수업 기록이 없어요</div></div>;
