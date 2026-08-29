@@ -90,7 +90,6 @@ service cloud.firestore {
       // 내신 참여표. 학생은 자기 것을 내고 반 것을 읽는다(같은 반 일정은 서로 알아도 된다).
       // 회차는 선생님만 연다 — 학생이 바꾸면 접수가 엉뚱한 곳에 쌓인다.
       match /exams/{x}        { allow read: if inClass(cid); allow write: if teaches(cid) || enrolled(cid); }
-      match /config/examTerm  { allow read: if inClass(cid); allow write: if teaches(cid); }
 
       match /config/notice    { allow read: if inClass(cid); allow write: if teaches(cid); }
       match /config/flyerPub  { allow read: if inClass(cid); allow write: if teaches(cid); }  // 게시본
@@ -110,6 +109,13 @@ service cloud.firestore {
       // 수업기록·수업로그는 학부모에게 나가는 글과 녹취 구간이다. 학생에겐 안 보인다.
       match /dailyNotes/{x} { allow read, write: if teaches(cid); }
       match /lessonLogs/{x} { allow read, write: if teaches(cid); }
+    }
+
+    // ---------- 학원 전체 설정 ----------
+    // 내신 회차는 반별이 아니라 학원 전체로 하나다. 선생님이 열고 학생은 읽기만 한다.
+    match /appConfig/{doc} {
+      allow read:  if signedIn();
+      allow write: if isTeacher();
     }
 
     // ---------- 상담 · 보고서 ----------
