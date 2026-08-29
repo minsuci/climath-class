@@ -2209,6 +2209,109 @@ function ExamForm({ cls, me }) {
   );
 }
 
+// 선생님이 학생 대신 넣는 칸. 전화로 받아적거나 학생이 안 내면 여기서 채운다.
+// 학생 폼과 같은 곳(exams/{회차}__{sid})에 쓰므로 나중에 학생이 내면 그 위에 덮인다.
+function ExamEntry({ cid, term, st, cur, schoolOpts, onDone }) {
+  const [f, setF] = useState({
+    school: (cur && cur.school) || "", grade: (cur && cur.grade) || "",
+    start: (cur && cur.start) || "", end: (cur && cur.end) || "",
+    math: (cur && cur.math) || "", prep: (cur && cur.prep) || "",
+    back: (cur && cur.back) || "", note: (cur && cur.note) || "",
+  });
+  const [q, setQ] = useState("");
+  const [etc, setEtc] = useState(false);
+  const [etcName, setEtcName] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  function set(k, v) {
+    setF((p) => {
+      const n = { ...p, [k]: v };
+      if (k === "math" && (!p.prep || p.prep === dayBefore(p.math))) n.prep = dayBefore(v);
+      return n;
+    });
+  }
+  async function save() {
+    if (busy) return;
+    if (!f.school) { setMsg("학교를 골라주세요"); return; }
+    if (!f.grade) { setMsg("학년을 골라주세요"); return; }
+    if (!f.start || !f.end) { setMsg("내신 기간을 넣어주세요"); return; }
+    if (f.end < f.start) { setMsg("종료일이 시작일보다 빠를 수 없어요"); return; }
+    setBusy(true); setMsg("");
+    try {
+      await saveExam(cid, term, st.id, { name: st.name, school: f.school, grade: f.grade,
+        start: f.start, end: f.end, math: f.math, prep: f.prep, back: f.back, note: f.note.trim(),
+        byTeacher: true });
+      onDone();
+    } catch (e) { setMsg("저장 실패: " + e.message); setBusy(false); }
+  }
+  return (
+    <div style={{background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: "12px 14px", marginTop: 8}}>
+      <div style={{fontWeight: 700, marginBottom: 8}}>{st.name} <span className="cm-h-hint">— 대신 입력</span></div>
+
+      <label className="cm-label" style={{marginTop: 0}}>학교</label>
+      {f.school ? (
+        <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"}}>
+          <span className="cm-chip" style={{background: "#eef1f6", color: "var(--navy)", fontSize: 14}}>{f.school}</span>
+          <button className="cm-link" onClick={() => { set("school", ""); setQ(""); }}>바꾸기</button>
+        </div>
+      ) : (<>
+        <input className="cm-input" placeholder="학교 이름 일부 (예: 중동)" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6}}>
+          {schoolOpts.filter((x) => !q.trim() || x.includes(q.trim())).slice(0, 12).map((x) => (
+            <button key={x} className="cm-ab-tab" onClick={() => { setEtc(false); set("school", x); }}>{x}</button>
+          ))}
+          <button className={"cm-ab-tab" + (etc ? " on" : "")} onClick={() => { setEtc(true); setEtcName(q.trim()); }}>기타 (직접 입력)</button>
+        </div>
+        {etc && (
+          <div style={{display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap"}}>
+            <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 140}} autoFocus placeholder="학교 이름"
+              value={etcName} onChange={(e) => setEtcName(e.target.value)} />
+            <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "8px 13px"}}
+              disabled={!etcName.trim()} onClick={() => { set("school", etcName.trim()); setEtc(false); }}>이 학교로</button>
+          </div>
+        )}
+      </>)}
+
+      <label className="cm-label">학년</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+        {GRADES.map((g) => (
+          <button key={g} className={"cm-ab-tab" + (f.grade === g ? " on" : "")} onClick={() => set("grade", g)}>{g}</button>
+        ))}
+      </div>
+
+      <label className="cm-label">내신 기간</label>
+      <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"}}>
+        <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" value={f.start} onChange={(e) => set("start", e.target.value)} />
+        <span style={{color: "var(--muted)"}}>~</span>
+        <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" value={f.end} min={f.start} onChange={(e) => set("end", e.target.value)} />
+      </div>
+      <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
+        <div style={{flex: 1, minWidth: 130}}>
+          <label className="cm-label">수학 시험</label>
+          <input className="cm-input" style={{margin: 0}} type="date" value={f.math} onChange={(e) => set("math", e.target.value)} />
+        </div>
+        <div style={{flex: 1, minWidth: 130}}>
+          <label className="cm-label">직보</label>
+          <input className="cm-input" style={{margin: 0}} type="date" value={f.prep} onChange={(e) => set("prep", e.target.value)} />
+        </div>
+        <div style={{flex: 1, minWidth: 130}}>
+          <label className="cm-label">복귀</label>
+          <input className="cm-input" style={{margin: 0}} type="date" value={f.back} onChange={(e) => set("back", e.target.value)} />
+        </div>
+      </div>
+      <label className="cm-label">비고 (선택)</label>
+      <input className="cm-input" value={f.note} onChange={(e) => set("note", e.target.value)} />
+
+      {msg && <div className="cm-err">{msg}</div>}
+      <div style={{display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap"}}>
+        <button className="cm-btn cm-btn-primary" style={{margin: 0, width: "auto", padding: "9px 16px"}}
+          disabled={busy} onClick={save}>{busy ? "저장 중..." : "저장"}</button>
+        <button className="cm-link" onClick={onDone}>취소</button>
+      </div>
+    </div>
+  );
+}
+
 // ----- 내신: 선생님이 모아 보기 (반 선택 전 · 전체) -----
 // 반별로 보면 "이번 주에 누가 빠지나"를 못 본다. 담당 반 전체를 한 화면에 모은다.
 function ExamBoard({ onBack }) {
@@ -2219,6 +2322,7 @@ function ExamBoard({ onBack }) {
   const [draft, setDraft] = useState("");
   const [fixing, setFixing] = useState("");
   const [shared, setShared] = useState([]);
+  const [entry, setEntry] = useState(null);   // 대신 입력 중인 {cid, st, cur}
   const backRef = useSwipeBack(onBack);
   const classes = activeClasses();
   useEffect(() => listenSchools(setShared), []);
@@ -2261,6 +2365,8 @@ function ExamBoard({ onBack }) {
   const known = {};
   KNOWN_SCHOOLS.concat(shared).forEach((n) => { known[n] = 1; });
   const newSchools = Array.from(new Set(got.map((x) => x.v.school).filter((n) => n && !known[n])));
+  const schoolOpts = Array.from(new Set(KNOWN_SCHOOLS.concat(shared).concat(got.map((x) => x.v.school).filter(Boolean))))
+    .sort((a, b) => a.localeCompare(b, "ko"));
 
   // 같은 학교·같은 학년인데 일정이 다른 것 (반이 달라도 잡는다 — 오히려 이쪽이 더 흔하다)
   const groups = {};
@@ -2394,7 +2500,12 @@ function ExamBoard({ onBack }) {
             </div>
           )}
 
-          <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
+          {entry && (
+            <ExamEntry key={entry.cid + entry.st.id} cid={entry.cid} term={term} st={entry.st}
+              cur={entry.cur} schoolOpts={schoolOpts} onDone={() => setEntry(null)} />
+          )}
+
+          <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, marginTop: 10}}>
             {GRADES.map((g) => {
               const n = got.filter((x) => (x.v.grade || "") === g).length;
               return <button key={g} className={"cm-ab-tab" + (grade === g ? " on" : "")} onClick={() => setGrade(g)}>{g} {n}</button>;
@@ -2447,7 +2558,11 @@ function ExamBoard({ onBack }) {
                 <tbody>
                   {inGrade.map(({ cls, st, v }) => (
                     <tr key={cls.id + st.id}>
-                      <td className="cm-ab-name">{st.name}</td>
+                      <td className="cm-ab-name">{st.name}
+                        <br/><button className="cm-link" style={{padding: 0, fontSize: 11}}
+                          onClick={() => setEntry({ cid: cls.id, st, cur: v })}>고치기</button>
+                        {v.byTeacher && <span style={{fontSize: 10, color: "#8a7f72"}}> · 대신 입력</span>}
+                      </td>
                       <td>{cls.name}</td>
                       <td>{v.school}</td>
                       <td>{v.start && v.end ? shortDate(v.start) + "~" + shortDate(v.end) : "-"}</td>
@@ -2487,8 +2602,16 @@ function ExamBoard({ onBack }) {
                border: "1px solid " + (missing.length ? "#e6cbb9" : "#cfe0d5"), borderRadius: 12, padding: "12px 14px"}}>
             <div style={{fontSize: 14, color: missing.length ? "#a8562c" : "#3f7d5e", lineHeight: 1.6}}>
               {missing.length
-                ? <><b>아직 안 낸 학생 {missing.length}명</b> <span style={{fontSize: 12, opacity: .8}}>(담당 반 전체)</span>
-                     <br/><span style={{fontSize: 13}}>{missing.map((x) => x.st.name + "(" + x.cls.name + ")").join(" · ")}</span></>
+                ? <><b>아직 안 낸 학생 {missing.length}명</b> <span style={{fontSize: 12, opacity: .8}}>(담당 반 전체 · 이름을 누르면 대신 넣을 수 있어요)</span>
+                     <br/>
+                     <span style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6}}>
+                       {missing.map((x) => (
+                         <button key={x.cls.id + x.st.id} className="cm-ab-tab"
+                           onClick={() => setEntry({ cid: x.cls.id, st: x.st, cur: null })}>
+                           {x.st.name} <span style={{opacity: .7}}>({x.cls.name})</span>
+                         </button>
+                       ))}
+                     </span></>
                 : <b>담당 반 전원 제출 완료 ✓</b>}
             </div>
           </div>
@@ -4111,6 +4234,17 @@ function RosterManager({ cls, canEdit, onChanged }) {
     if (!name || !name.trim() || name.trim() === st.name) return;
     await commit(roster.map((r) => (r.id === st.id ? { ...r, name: name.trim() } : r)));
   }
+  // 선생님 항목을 보통 학생으로. teacher 키를 지우면 모든 학생 목록에 들어온다.
+  async function toStudent(t) {
+    if (!confirm(t.name + " 님을 이 반의 학생으로 바꿀까요?" + "\n\n" +
+      "출석부 · 과제 · 점수 · 학습관리 보고서 · 내신 참여표에 학생으로 나타납니다.")) return;
+    await commit(roster.map((r) => {
+      if (r.id !== t.id) return r;
+      const n = { ...r };
+      delete n.teacher;
+      return n;
+    }));
+  }
   async function removeStudent(st) {
     if (!confirm(st.name + " 학생을 명단에서 뺄까요?\n\n출석·과제·질문 기록은 삭제되지 않고 남지만, 명단·출석부에서 사라져요.")) return;
     await commit(roster.filter((r) => r.id !== st.id));
@@ -4139,6 +4273,28 @@ function RosterManager({ cls, canEdit, onChanged }) {
         </div>
       ))}
       {canEdit && <button className="cm-link" style={{marginTop: 10}} disabled={busy} onClick={addStudent}>+ 학생 추가</button>}
+
+      {/* 명단의 선생님 항목. 지금까지 화면에 아예 안 보여서, 왜 어떤 사람이
+          출석부·내신 참여표 등에서 통째로 빠지는지 알 길이 없었다. */}
+      {teachers.length > 0 && (
+        <div style={{marginTop: 14, paddingTop: 12, borderTop: "1px dashed var(--line)"}}>
+          <div className="cm-hint" style={{marginBottom: 8}}>
+            <b>명단의 선생님 항목</b> — 출석부 · 과제 · 점수 · 보고서 · 내신 참여표 등
+            <b> 학생 목록에서 전부 빠져 있어요.</b> 학생처럼 쓰시려면 바꾸면 됩니다.
+          </div>
+          {teachers.map((t) => (
+            <div key={t.id} style={{display: "flex", alignItems: "center", gap: 8, padding: "7px 0"}}>
+              <strong>{t.name}</strong>
+              <span className="cm-chip" style={{background: "#eef1f6", color: "var(--navy)"}}>선생님 항목</span>
+              {canEdit && (
+                <span style={{marginLeft: "auto"}}>
+                  <button className="cm-link" disabled={busy} onClick={() => toStudent(t)}>학생으로 바꾸기</button>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
