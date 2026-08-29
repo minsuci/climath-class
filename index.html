@@ -574,6 +574,28 @@ async function clearNotice(cid) {
 function listenNotice(cid, cb) {
   return noticeDoc(cid).onSnapshot((d) => cb(d.exists ? d.data() : null));
 }
+// ----- 안내문 (진도계획 A4 한 장) -----
+// 편집 중인 초안과 학생에게 내보낸 게시본을 나눠 둔다.
+// 초안이 학생에게 새어 나가면 안 되고, 게시한 뒤에도 계속 고칠 수 있어야 한다.
+const flyerDoc = (cid) => classDoc(cid).collection("config").doc("flyer");
+const flyerPubDoc = (cid) => classDoc(cid).collection("config").doc("flyerPub");
+async function loadFlyer(cid) {
+  const d = await flyerDoc(cid).get();
+  return d.exists ? (d.data().data || null) : null;
+}
+async function saveFlyer(cid, data) {
+  await flyerDoc(cid).set({ data, time: Date.now() }, { merge: true });
+}
+async function publishFlyer(cid, data) {
+  await flyerPubDoc(cid).set({ data, time: Date.now(), active: true });
+}
+async function unpublishFlyer(cid) {
+  await flyerPubDoc(cid).set({ active: false }, { merge: true });
+}
+function listenFlyerPub(cid, cb) {
+  return flyerPubDoc(cid).onSnapshot((d) => cb(d.exists ? d.data() : null));
+}
+
 const dmCol = (cid) => classDoc(cid).collection("dms");
 const dmDoc = (cid, sid) => dmCol(cid).doc(sid);
 async function postDm(cid, sid, text) {
@@ -1693,7 +1715,10 @@ function StudentHome({ cls, me, onLogout }) {
     setDmDismissed(true);
   }
 
-  const noGateTabs = ["prog", "notes", "ai"]; // 출석 없이도 볼 수 있는 탭
+  // 게시된 안내문이 있을 때만 탭을 띄운다 (빈 탭을 눌러보게 하지 않는다)
+  const [hasFlyer, setHasFlyer] = useState(false);
+  useEffect(() => listenFlyerPub(cls.id, (d) => setHasFlyer(!!(d && d.active))), [cls.id]);
+  const noGateTabs = ["prog", "notes", "ai", "flyer"]; // 출석 없이도 볼 수 있는 탭
   const activeTab = me.teacher ? tab : (att || noGateTabs.includes(tab) ? tab : "att");
   const showDmBanner = !!(dmNotice && dmNotice.active && dmNotice.text && !dmDismissed);
   const showClassBanner = !!(notice && notice.active && notice.text && !noticeDismissed) && !showDmBanner;
@@ -1711,6 +1736,7 @@ function StudentHome({ cls, me, onLogout }) {
         { key: "score", ico: "◈", label: "점수", disabled: !me.teacher && !att },
         { sep: true },
         { key: "prog", ico: "▦", label: "진도계획표" },
+        ...(hasFlyer ? [{ key: "flyer", ico: "▤", label: "안내문" }] : []),
         { key: "notes", ico: "✎", label: "강의노트" },
         { key: "ai", ico: "✦", label: "AI 힌트" },
       ]} />
@@ -1763,6 +1789,7 @@ function StudentHome({ cls, me, onLogout }) {
       {activeTab === "hw" && <StudentHomework cls={cls} me={me} />}
       {activeTab === "score" && <ScoreForm cls={cls} me={me} />}
       {activeTab === "prog" && <StudentProgressView cls={cls} me={me} />}
+      {activeTab === "flyer" && <FlyerView cls={cls} />}
       {activeTab === "notes" && (
         <div className="cm-card">
           <h3 className="cm-h3">강의노트</h3>
@@ -2695,6 +2722,7 @@ function AdminView() {
           ...(isIndividual(cls) && !isClassEnded(cls) ? [{ key: "c:live", ico: "◐", label: "수업 로그" }] : []),
           { key: "c:book", ico: "▦", label: "월간 출석부" },
           { key: "c:notice", ico: "◑", label: "공지" },
+          { key: "c:flyer", ico: "▤", label: "안내문" },
           { key: "c:progress", ico: "◈", label: "진도표" },
           { key: "c:notes", ico: "✎", label: "강의노트" },
           { key: "c:ailog", ico: "✦", label: "AI 질문" },
@@ -3071,6 +3099,128 @@ function NoteUnit({ cls, unit, canEdit }) {
           {msg && <div className="cm-hint" style={{marginTop: 6}}>{msg}</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ----- 안내문 -----
+// flyer.html은 자체 style·script를 가진 완결된 문서라 앱 DOM에 인라인하면 CSS가 서로 밟는다.
+// iframe으로 띄우고 postMessage로만 주고받는다. 저장은 앱이 Firestore에 한다.
+function FlyerEditor({ cls, canEdit }) {
+  const ref = React.useRef(null);
+  const [draft, setDraft] = useState(undefined);   // undefined=로딩, null=빈 것
+  const [pub, setPub] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const draftRef = React.useRef(null);
+  draftRef.current = draft;
+
+  useEffect(() => { loadFlyer(cls.id).then((d) => setDraft(d || null)).catch(() => setDraft(null)); }, [cls.id]);
+  useEffect(() => listenFlyerPub(cls.id, setPub), [cls.id]);
+
+  // iframe이 준비됐다고 알리면 데이터를 내려보낸다
+  useEffect(() => {
+    function onMsg(ev) {
+      const m = ev.data;
+      if (!m || m.src !== "climath-flyer") return;
+      if (m.type === "ready") send();
+      if (m.type === "change") { draftRef.current = m.data; setDraft(m.data); setDirty(true); }
+    }
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [cls.id]);
+  function send() {
+    const w = ref.current && ref.current.contentWindow;
+    if (w) w.postMessage({ src: "climath-app", type: "load", data: draftRef.current || null }, "*");
+  }
+  useEffect(() => { if (draft !== undefined) send(); }, [draft === undefined]);
+
+  async function doSave() {
+    if (busy) return;
+    setBusy(true); setMsg("");
+    try { await saveFlyer(cls.id, draftRef.current || {}); setDirty(false); setMsg("저장됐어요 ✓"); }
+    catch (e) { setMsg("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+  async function doPublish() {
+    if (busy) return;
+    if (!confirm("지금 내용을 학생 화면에 게시할까요?" + "\n" + "학생과 학부모가 바로 볼 수 있게 됩니다.")) return;
+    setBusy(true); setMsg("");
+    try {
+      await saveFlyer(cls.id, draftRef.current || {});
+      await publishFlyer(cls.id, draftRef.current || {});
+      setDirty(false); setMsg("게시됐어요 ✓");
+    } catch (e) { setMsg("게시 실패: " + e.message); }
+    setBusy(false);
+  }
+  async function doUnpublish() {
+    if (!confirm("학생 화면에서 안내문을 내릴까요? (초안은 그대로 남아요)")) return;
+    setBusy(true);
+    try { await unpublishFlyer(cls.id); setMsg("내렸어요"); } catch (e) { setMsg("실패: " + e.message); }
+    setBusy(false);
+  }
+
+  const live = pub && pub.active;
+  const url = "/flyer.html?cid=" + encodeURIComponent(cls.id);
+  if (draft === undefined) return <div className="cm-empty">불러오는 중…</div>;
+  return (
+    <div>
+      <div className="cm-hint" style={{marginBottom: 10}}>
+        왼쪽을 채우면 오른쪽 안내문이 바뀌어요. 다 만들면 <b>저장</b>하고, 학생에게 보여줄 땐 <b>게시</b>하세요.
+        인쇄는 <b>새 창에서 열기</b>가 편해요.
+      </div>
+      <div style={{display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10}}>
+        {canEdit && <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy}
+          onClick={doSave}>{busy ? "…" : (dirty ? "저장 •" : "저장")}</button>}
+        {canEdit && <button className="cm-btn cm-btn-ghost" style={{margin: 0}} disabled={busy}
+          onClick={doPublish}>학생에게 게시</button>}
+        <button className="cm-link" onClick={() => window.open(url, "_blank")}>새 창에서 열기 (인쇄)</button>
+        {live && canEdit && <button className="cm-link" style={{color: "#d6453f"}} onClick={doUnpublish}>게시 내리기</button>}
+      </div>
+      <div style={{marginBottom: 8}}>
+        {live
+          ? <span className="cm-chip" style={{background: "#e6f0e9", color: "#3f7d5e"}}>학생 화면에 게시 중 · {fmtDate(ymd(new Date(pub.time)))}</span>
+          : <span className="cm-chip" style={{background: "#f0ece5", color: "#7c6f5f"}}>아직 게시 안 함 (선생님만 보임)</span>}
+        {dirty && <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f", marginLeft: 6}}>저장 안 된 변경</span>}
+      </div>
+      {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"} style={{marginBottom: 8}}>{msg}</div>}
+      <iframe ref={ref} src={url} title="안내문 편집"
+        style={{width: "100%", height: Math.max(520, Math.round(window.innerHeight * 0.72)),
+                border: "1px solid var(--line)", borderRadius: 12, background: "#fff"}} />
+    </div>
+  );
+}
+
+// 학생·학부모가 보는 게시본. 편집 패널 없이 안내문만 (flyer.html의 view=1)
+function FlyerView({ cls }) {
+  const ref = React.useRef(null);
+  const [pub, setPub] = useState(undefined);
+  const pubRef = React.useRef(null);
+  pubRef.current = pub;
+  useEffect(() => listenFlyerPub(cls.id, (d) => setPub(d && d.active ? d : null)), [cls.id]);
+  useEffect(() => {
+    function onMsg(ev) {
+      const m = ev.data;
+      if (!m || m.src !== "climath-flyer" || m.type !== "ready") return;
+      const w = ref.current && ref.current.contentWindow;
+      if (w) w.postMessage({ src: "climath-app", type: "load", data: (pubRef.current || {}).data || null }, "*");
+    }
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+  useEffect(() => {
+    const w = ref.current && ref.current.contentWindow;
+    if (w && pub) w.postMessage({ src: "climath-app", type: "load", data: pub.data || null }, "*");
+  }, [pub]);
+  if (pub === undefined) return <div className="cm-empty">불러오는 중…</div>;
+  if (!pub) return <div className="cm-empty">아직 게시된 안내문이 없어요</div>;
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">안내문</h3>
+      <iframe ref={ref} src={"/flyer.html?view=1&cid=" + encodeURIComponent(cls.id)} title="안내문"
+        style={{width: "100%", height: Math.max(480, Math.round(window.innerHeight * 0.7)),
+                border: "1px solid var(--line)", borderRadius: 12, background: "#fff"}} />
     </div>
   );
 }
@@ -3896,6 +4046,13 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
             <b>{cls.endDate} 종강한 반</b>이에요. 기록 열람용으로 열려 있고, 학생 화면에는 보이지 않아요.
             다시 열려면 <b>반 설정 → 종강 취소</b>.
           </div>
+        </div>
+      )}
+
+      {activeView === "flyer" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">안내문 <span className="cm-h-hint">(진도계획 A4 한 장)</span></h3>
+          <FlyerEditor cls={cls} canEdit={canEdit} />
         </div>
       )}
 

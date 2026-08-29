@@ -85,7 +85,12 @@ service cloud.firestore {
       match /homework/{x}   { allow read: if inClass(cid); allow write: if teaches(cid) || enrolled(cid); }
       match /questioned/{x} { allow read: if inClass(cid); allow write: if teaches(cid) || enrolled(cid); }
       match /makeups/{x}    { allow read: if inClass(cid); allow write: if teaches(cid); }
-      match /config/{x}     { allow read: if inClass(cid); allow write: if teaches(cid); }
+      // config는 문서마다 공개 범위가 다르므로 하나씩 적는다.
+      // `match /config/{x}` 로 뭉뚱그리면 게시 전 안내문 초안까지 학생이 읽는다.
+      match /config/notice    { allow read: if inClass(cid); allow write: if teaches(cid); }
+      match /config/flyerPub  { allow read: if inClass(cid); allow write: if teaches(cid); }  // 게시본
+      match /config/flyer     { allow read, write: if teaches(cid); }                          // 초안
+      match /config/lessonLog { allow read, write: if teaches(cid); }
       match /dms/{sid}      { allow read: if inClass(cid); allow write: if teaches(cid); }
       match /aiLogs/{x}     { allow read: if inClass(cid); allow write: if teaches(cid) || enrolled(cid); }
       match /progress/{k}   {
