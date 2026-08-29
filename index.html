@@ -2241,6 +2241,22 @@ function ExamBoard({ onBack }) {
     });
   });
   const inGrade = got.filter((x) => (x.v.grade || "") === grade);
+
+  // 명단에서 안 잡히는 제출 — 그냥 두면 낸 사람은 냈다고 생각하는데 화면엔 없다.
+  // 선생님 항목(teacher:true), 수강 종료, 명단에서 빠진 학생, id가 어긋난 경우가 여기 걸린다.
+  const orphans = [];
+  classes.forEach((c) => {
+    const m = byClass[c.id] || {};
+    const live = {};
+    (c.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((r) => { live[r.id] = 1; });
+    Object.keys(m).forEach((sid) => {
+      if (live[sid]) return;
+      const who = (c.roster || []).find((r) => r.id === sid);
+      orphans.push({ cls: c, v: m[sid],
+        why: !who ? "명단에 없음" : (who.teacher ? "선생님 항목" : "수강 종료") });
+    });
+  });
+
   // 제출에는 있는데 기본·공용 목록 어디에도 없는 학교 (학생이 기타로 넣은 것)
   const known = {};
   KNOWN_SCHOOLS.concat(shared).forEach((n) => { known[n] = 1; });
@@ -2446,6 +2462,24 @@ function ExamBoard({ onBack }) {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {orphans.length > 0 && (
+            <div style={{marginTop: 14, background: "#f0ece5", border: "1px solid #ded5c7", borderRadius: 12, padding: "11px 13px"}}>
+              <div style={{fontSize: 13, fontWeight: 700, color: "#7c6f5f", marginBottom: 6}}>
+                명단에 안 잡히는 제출 {orphans.length}건
+              </div>
+              <div style={{fontSize: 12, color: "#7c6f5f", lineHeight: 1.6}}>
+                냈는데 위 표에는 안 나오는 것들이에요. 명단을 손보면 바로 올라옵니다.
+                {orphans.map((o, i) => (
+                  <div key={i} style={{marginTop: 4}}>
+                    · <b>{o.v.name || "(이름 없음)"}</b> {o.v.grade || ""} {o.v.school || ""}
+                    {o.v.start ? " · " + shortDate(o.v.start) + "~" + shortDate(o.v.end || o.v.start) : ""}
+                    <span style={{opacity: .8}}> — {o.cls.name} / {o.why}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
