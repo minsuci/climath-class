@@ -609,6 +609,45 @@ function listenFlyerPub(cid, cb) {
   return flyerPubDoc(cid).onSnapshot((d) => cb(d.exists ? d.data() : null));
 }
 
+// ----- 내신 참여표 -----
+// 내신기간에는 학생마다 안 오는 날이 다르다. 그걸 학생이 직접 내고 선생님이 한눈에 본다.
+// 회차(2026 2학기 중간)를 키에 넣어 기말·다음 학기가 덮어쓰지 않게 한다.
+//   classes/{cid}/exams/{회차}__{sid}
+// 회차는 선생님이 연다 — 학생이 고르게 하면 엉뚱한 회차에 내는 사고가 난다.
+const examCol = (cid) => classDoc(cid).collection("exams");
+const examTermDoc = (cid) => classDoc(cid).collection("config").doc("examTerm");
+const examKey = (term, sid) => String(term).replace(/[\/\s]+/g, "_") + "__" + sid;
+async function saveExam(cid, term, sid, data) {
+  await examCol(cid).doc(examKey(term, sid)).set({ ...data, term, sid, updated: Date.now() }, { merge: true });
+}
+function listenExams(cid, term, cb) {
+  return examCol(cid).where("term", "==", term).onSnapshot((s) => {
+    const m = {};
+    s.forEach((d) => { const v = d.data(); m[v.sid] = { id: d.id, ...v }; });
+    cb(m);
+  }, () => cb({}));
+}
+function listenExamTerm(cid, cb) {
+  return examTermDoc(cid).onSnapshot((d) => cb(d.exists ? (d.data().term || "") : ""), () => cb(""));
+}
+async function saveExamTerm(cid, term) { await examTermDoc(cid).set({ term, time: Date.now() }, { merge: true }); }
+
+// 직보 = 수학시험 전날. 기본값으로 채워주되 학생이 고칠 수 있다.
+function dayBefore(d) {
+  if (!d) return "";
+  const x = new Date(d + "T00:00:00");
+  x.setDate(x.getDate() - 1);
+  return ymd(x);
+}
+const GRADES = ["고1", "고2", "고3"];
+// 참여표에 찍는 표식 (시트의 범례와 같은 뜻)
+const EXAM_MARKS = {
+  prep: { t: "직", label: "직보 (수학시험 전날)", bg: "#f6e7df", fg: "#c2703f" },
+  math: { t: "수", label: "수학시험", bg: "#fae3e2", fg: "#d6453f" },
+  exam: { t: "시", label: "내신기간", bg: "#f0ece5", fg: "#7c6f5f" },
+  back: { t: "첫", label: "복귀 (정규 첫 등원)", bg: "#e3edf5", fg: "#2b5f8a" },
+};
+
 const dmCol = (cid) => classDoc(cid).collection("dms");
 const dmDoc = (cid, sid) => dmCol(cid).doc(sid);
 async function postDm(cid, sid, text) {
@@ -1756,7 +1795,10 @@ function StudentHome({ cls, me, onLogout }) {
   // 게시된 안내문이 있을 때만 탭을 띄운다 (빈 탭을 눌러보게 하지 않는다)
   const [hasFlyer, setHasFlyer] = useState(false);
   useEffect(() => listenFlyerPub(cls.id, (d) => setHasFlyer(!!(d && d.active))), [cls.id]);
-  const noGateTabs = ["prog", "notes", "ai", "flyer"]; // 출석 없이도 볼 수 있는 탭
+  // 내신 접수는 선생님이 회차를 연 동안에만 학생에게 보인다
+  const [examTerm, setExamTerm] = useState("");
+  useEffect(() => listenExamTerm(cls.id, setExamTerm), [cls.id]);
+  const noGateTabs = ["prog", "notes", "ai", "flyer", "exam"]; // 출석 없이도 볼 수 있는 탭
   const activeTab = me.teacher ? tab : (att || noGateTabs.includes(tab) ? tab : "att");
   const showDmBanner = !!(dmNotice && dmNotice.active && dmNotice.text && !dmDismissed);
   const showClassBanner = !!(notice && notice.active && notice.text && !noticeDismissed) && !showDmBanner;
@@ -1775,6 +1817,7 @@ function StudentHome({ cls, me, onLogout }) {
         { sep: true },
         { key: "prog", ico: "▦", label: "진도계획표" },
         ...(hasFlyer ? [{ key: "flyer", ico: "▤", label: "안내문" }] : []),
+        ...(examTerm ? [{ key: "exam", ico: "▣", label: "내신" }] : []),
         { key: "notes", ico: "✎", label: "강의노트" },
         { key: "ai", ico: "✦", label: "AI 힌트" },
       ]} />
@@ -1834,6 +1877,7 @@ function StudentHome({ cls, me, onLogout }) {
       </>)}
       {activeTab === "prog" && <StudentProgressView cls={cls} me={me} />}
       {activeTab === "flyer" && <FlyerView cls={cls} />}
+      {activeTab === "exam" && <ExamForm cls={cls} me={me} />}
       {activeTab === "notes" && (
         <div className="cm-card">
           <h3 className="cm-h3">강의노트</h3>
@@ -1961,6 +2005,242 @@ function StudentHomework({ cls, me }) {
           onChange={(arr) => persistBook(b.name, arr)} />
       ))}
     </>
+  );
+}
+
+// ----- 내신: 학생 입력 -----
+function ExamForm({ cls, me }) {
+  const [term, setTerm] = useState(null);
+  const [mine, setMine] = useState(undefined);
+  const [f, setF] = useState({ school: "", grade: "", start: "", end: "", math: "", prep: "", back: "", note: "" });
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => listenExamTerm(cls.id, setTerm), [cls.id]);
+  useEffect(() => {
+    if (!term) return;
+    return listenExams(cls.id, term, (m) => {
+      const v = m[me.id];
+      setMine(v || null);
+      if (v) setF({ school: v.school || "", grade: v.grade || "", start: v.start || "", end: v.end || "",
+                    math: v.math || "", prep: v.prep || "", back: v.back || "", note: v.note || "" });
+    });
+  }, [cls.id, term, me.id]);
+
+  // 학교·학년은 지난 회차 것을 그대로 쓴다 (매번 다시 치게 하지 않는다)
+  useEffect(() => {
+    if (mine || !term) return;
+    examCol(cls.id).where("sid", "==", me.id).get().then((s) => {
+      let latest = null;
+      s.forEach((d) => { const v = d.data(); if (!latest || (v.updated || 0) > (latest.updated || 0)) latest = v; });
+      if (latest) setF((p) => (p.school || p.grade ? p : { ...p, school: latest.school || "", grade: latest.grade || "" }));
+    }).catch(() => {});
+  }, [mine, term, cls.id, me.id]);
+
+  function set(k, v) {
+    setF((p) => {
+      const n = { ...p, [k]: v };
+      // 수학시험일을 넣으면 직보를 전날로 채워준다 (직접 고친 적 없을 때만)
+      if (k === "math" && (!p.prep || p.prep === dayBefore(p.math))) n.prep = dayBefore(v);
+      return n;
+    });
+  }
+  async function submit() {
+    if (busy) return;
+    if (!f.school.trim()) { setMsg("학교를 입력해주세요"); return; }
+    if (!f.grade) { setMsg("학년을 골라주세요"); return; }
+    if (!f.start || !f.end) { setMsg("내신 기간을 넣어주세요"); return; }
+    if (f.end < f.start) { setMsg("종료일이 시작일보다 빠를 수 없어요"); return; }
+    setBusy(true); setMsg("");
+    try {
+      await saveExam(cls.id, term, me.id, { name: me.name, school: f.school.trim(), grade: f.grade,
+        start: f.start, end: f.end, math: f.math, prep: f.prep, back: f.back, note: f.note.trim() });
+      setMsg("냈어요 ✓ 선생님이 바로 볼 수 있어요");
+    } catch (e) { setMsg("저장 실패: " + e.message); }
+    setBusy(false);
+  }
+
+  if (term === null) return <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>;
+  if (!term) return (
+    <div className="cm-card">
+      <h3 className="cm-h3">내신 참여</h3>
+      <div className="cm-empty">아직 접수 기간이 아니에요. 선생님이 열면 여기에 나와요.</div>
+    </div>
+  );
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">내신 참여 <span className="cm-h-hint">({term})</span></h3>
+      <div className="cm-hint" style={{marginBottom: 6}}>
+        내신 기간에 언제 안 오고 언제 돌아오는지 알려줘. 정해진 게 바뀌면 다시 내면 돼.
+      </div>
+      {mine && <div className="cm-done" style={{marginBottom: 8}}>이미 냈어요 · 고치면 바로 반영돼요</div>}
+
+      <label className="cm-label">학교</label>
+      <input className="cm-input" placeholder="예: 중동고" value={f.school} onChange={(e) => set("school", e.target.value)} />
+      <label className="cm-label">학년</label>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+        {GRADES.map((g) => (
+          <button key={g} className={"cm-ab-tab" + (f.grade === g ? " on" : "")} onClick={() => set("grade", g)}>{g}</button>
+        ))}
+      </div>
+
+      <label className="cm-label">내신 기간</label>
+      <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"}}>
+        <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" value={f.start} onChange={(e) => set("start", e.target.value)} />
+        <span style={{color: "var(--muted)"}}>~</span>
+        <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" value={f.end} min={f.start} onChange={(e) => set("end", e.target.value)} />
+      </div>
+
+      <label className="cm-label">수학 시험 날짜</label>
+      <input className="cm-input" type="date" value={f.math} onChange={(e) => set("math", e.target.value)} />
+      <label className="cm-label">직보 <span className="cm-h-hint">(수학시험 전날 · 자동으로 채워져요)</span></label>
+      <input className="cm-input" type="date" value={f.prep} onChange={(e) => set("prep", e.target.value)} />
+      <label className="cm-label">복귀 날짜 <span className="cm-h-hint">(시험 끝나고 처음 오는 날)</span></label>
+      <input className="cm-input" type="date" value={f.back} onChange={(e) => set("back", e.target.value)} />
+      <label className="cm-label">비고 (선택)</label>
+      <input className="cm-input" placeholder="예: 수행평가로 목요일 결석" value={f.note} onChange={(e) => set("note", e.target.value)} />
+
+      {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
+      <button className="cm-btn cm-btn-primary" disabled={busy} onClick={submit}>{busy ? "내는 중..." : (mine ? "고쳐서 다시 내기" : "제출하기")}</button>
+    </div>
+  );
+}
+
+// ----- 내신: 선생님이 모아 보기 -----
+function ExamBoard({ cls, canEdit }) {
+  const [term, setTerm] = useState(null);
+  const [rows, setRows] = useState({});
+  const [grade, setGrade] = useState("고1");
+  const [editTerm, setEditTerm] = useState(false);
+  const [draft, setDraft] = useState("");
+  useEffect(() => listenExamTerm(cls.id, (t) => { setTerm(t); setDraft(t); }), [cls.id]);
+  useEffect(() => { if (term) return listenExams(cls.id, term, setRows); }, [cls.id, term]);
+
+  const students = (cls.roster || []).filter((r) => !r.teacher && !isEnded(r));
+  const got = students.map((st) => ({ st, v: rows[st.id] })).filter((x) => x.v);
+  const inGrade = got.filter((x) => (x.v.grade || "") === grade);
+  const missing = students.filter((st) => !rows[st.id]);
+
+  // 날짜 띠 범위 — 낸 사람들의 날짜 전체를 감싸고 앞뒤로 하루씩
+  const ds = [];
+  inGrade.forEach((x) => ["start", "end", "math", "prep", "back"].forEach((k) => { if (x.v[k]) ds.push(x.v[k]); }));
+  ds.sort();
+  let strip = [];
+  if (ds.length) {
+    const a = new Date(ds[0] + "T00:00:00"); a.setDate(a.getDate() - 1);
+    const b = new Date(ds[ds.length - 1] + "T00:00:00"); b.setDate(b.getDate() + 1);
+    for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) strip.push(ymd(new Date(d)));
+    if (strip.length > 70) strip = strip.slice(0, 70);
+  }
+  const markOf = (v, d) => {
+    if (v.math && d === v.math) return EXAM_MARKS.math;
+    if (v.prep && d === v.prep) return EXAM_MARKS.prep;
+    if (v.back && d === v.back) return EXAM_MARKS.back;
+    if (v.start && v.end && d >= v.start && d <= v.end) return EXAM_MARKS.exam;
+    return null;
+  };
+
+  if (term === null) return <div className="cm-empty">불러오는 중…</div>;
+  return (
+    <div>
+      {/* 회차 */}
+      <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10}}>
+        {!editTerm && <span className="cm-chip" style={{background: term ? "#e6f0e9" : "#f0ece5", color: term ? "#3f7d5e" : "#7c6f5f"}}>
+          {term ? "접수 중 · " + term : "아직 안 열었어요"}
+        </span>}
+        {canEdit && !editTerm && <button className="cm-link" onClick={() => setEditTerm(true)}>{term ? "회차 바꾸기" : "회차 열기"}</button>}
+        {canEdit && editTerm && (<>
+          <input className="cm-input" style={{margin: 0, maxWidth: 220}} placeholder="예: 2026 2학기 중간"
+            value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "9px 14px"}}
+            onClick={async () => { await saveExamTerm(cls.id, draft.trim()); setEditTerm(false); }}>저장</button>
+          <button className="cm-link" onClick={() => { setDraft(term); setEditTerm(false); }}>취소</button>
+        </>)}
+      </div>
+      {!term && <div className="cm-hint">회차를 열면 학생 화면에 <b>내신</b> 탭이 생겨요.</div>}
+
+      {term && (<>
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
+          {GRADES.map((g) => {
+            const n = got.filter((x) => (x.v.grade || "") === g).length;
+            return <button key={g} className={"cm-ab-tab" + (grade === g ? " on" : "")} onClick={() => setGrade(g)}>{g} {n}</button>;
+          })}
+        </div>
+
+        {/* 날짜 띠 */}
+        {strip.length > 0 ? (
+          <div className="cm-ab-wrap" data-no-swipe>
+            <table className="cm-ab-table">
+              <thead>
+                <tr>
+                  <th className="cm-ab-name">이름</th>
+                  {strip.map((d) => <th key={d} style={{minWidth: 22, padding: "3px 2px"}}>{shortDate(d)}</th>)}
+                </tr>
+                <tr>
+                  <th className="cm-ab-name"></th>
+                  {strip.map((d) => <th key={d} style={{fontSize: 9, color: "#8a7f72", padding: "2px"}}>{DAY_NAMES[new Date(d + "T00:00:00").getDay()]}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {inGrade.map(({ st, v }) => (
+                  <tr key={st.id}>
+                    <td className="cm-ab-name">{st.name}<br/><span style={{fontSize: 10, color: "#8a7f72"}}>{v.school}</span></td>
+                    {strip.map((d) => {
+                      const m = markOf(v, d);
+                      return <td key={d} style={m ? {background: m.bg, color: m.fg, fontWeight: 700, padding: "3px 2px"} : {padding: "3px 2px"}}>{m ? m.t : ""}</td>;
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <div className="cm-empty">{grade}에서 아직 낸 학생이 없어요</div>}
+
+        {/* 범례 */}
+        <div style={{display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 14px"}}>
+          {Object.keys(EXAM_MARKS).map((k) => (
+            <span key={k} className="cm-chip" style={{background: EXAM_MARKS[k].bg, color: EXAM_MARKS[k].fg}}>
+              {EXAM_MARKS[k].t} {EXAM_MARKS[k].label}
+            </span>
+          ))}
+        </div>
+
+        {/* 표 */}
+        {inGrade.length > 0 && (
+          <div className="cm-ab-wrap" data-no-swipe>
+            <table className="cm-ab-table">
+              <thead><tr>
+                <th className="cm-ab-name">이름</th><th>학교</th><th>내신기간</th><th>수학시험</th><th>직보</th><th>복귀</th><th>비고</th>
+              </tr></thead>
+              <tbody>
+                {inGrade.map(({ st, v }) => (
+                  <tr key={st.id}>
+                    <td className="cm-ab-name">{st.name}</td>
+                    <td>{v.school}</td>
+                    <td>{v.start && v.end ? shortDate(v.start) + "~" + shortDate(v.end) : "-"}</td>
+                    <td>{v.math ? shortDate(v.math) : "-"}</td>
+                    <td>{v.prep ? shortDate(v.prep) : "-"}</td>
+                    <td>{v.back ? shortDate(v.back) : "-"}</td>
+                    <td style={{textAlign: "left", whiteSpace: "normal", maxWidth: 160}}>{v.note || ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* 아직 안 낸 학생 — 독촉용 */}
+        <div className="cm-card" style={{marginTop: 14, background: missing.length ? "#f6e7df" : "#e6f0e9",
+             borderColor: missing.length ? "#e6cbb9" : "#cfe0d5"}}>
+          <div style={{fontSize: 14, color: missing.length ? "#a8562c" : "#3f7d5e", lineHeight: 1.6}}>
+            {missing.length
+              ? <><b>아직 안 낸 학생 {missing.length}명</b> <span style={{fontSize: 12, opacity: .8}}>(반 전체 기준)</span>
+                   <br/><span style={{fontSize: 13}}>{missing.map((st) => st.name).join(" · ")}</span></>
+              : <b>반 전체 제출 완료 ✓</b>}
+          </div>
+        </div>
+      </>)}
+    </div>
   );
 }
 
@@ -2963,6 +3243,7 @@ function AdminView() {
           ...(isIndividual(cls) && !isClassEnded(cls) ? [{ key: "c:live", ico: "◐", label: "수업 로그" }] : []),
           { key: "c:book", ico: "▦", label: "월간 출석부" },
           { key: "c:scores", ico: "◐", label: "점수 추이" },
+          { key: "c:exams", ico: "▣", label: "내신 참여표" },
           { key: "c:notice", ico: "◑", label: "공지" },
           { key: "c:flyer", ico: "▤", label: "안내문" },
           ...(isIndividual(cls) || hasProgFile ? [{ key: "c:progress", ico: "◈", label: "진도표" }] : []),
@@ -4306,6 +4587,13 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
             <b>{cls.endDate} 종강한 반</b>이에요. 기록 열람용으로 열려 있고, 학생 화면에는 보이지 않아요.
             다시 열려면 <b>반 설정 → 종강 취소</b>.
           </div>
+        </div>
+      )}
+
+      {activeView === "exams" && (
+        <div className="cm-card">
+          <h3 className="cm-h3">내신 참여표</h3>
+          <ExamBoard cls={cls} canEdit={canEdit} />
         </div>
       )}
 
