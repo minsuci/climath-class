@@ -437,6 +437,44 @@ function addMonths(baseStr, n) {
   if (d.getDate() < day) d.setDate(0); // 말일 보정 (1/31 +1개월 → 2/28)
   return ymd(d);
 }
+// 최근 n개월 목록 (YYYY-MM). 반드시 1일로 만들어야 한다 —
+// 오늘이 29~31일이면 setMonth가 넘쳐 없는 달이 생긴다
+// (8/29에서 6개월 전은 2/29인데 그런 날이 없어 3/1이 된다 → 2월이 사라지고 3월이 두 번).
+function recentMonths(n) {
+  const y = Number(todayStr.slice(0, 4)), m = Number(todayStr.slice(5, 7));
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const d = new Date(y, m - 1 - i, 1);
+    out.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
+  }
+  return out;
+}
+
+// 그 달에 수업이 있는 날짜를 요일에서 만들어낸다.
+// days 문서는 그날 뭔가 일어나야 생긴다. 출석을 한 번도 안 찍은 날은 문서가 없어서
+// 월간 출석부에 칸 자체가 없었고, 그래서 나중에 채워 넣을 방법이 없었다.
+// 개별진도반은 학생마다 요일이 다르므로 전원의 요일을 합친다 (표에서 학생별로 다시 거른다).
+function scheduledDates(cls, ym) {
+  const [y, m] = ym.split("-").map(Number);
+  if (!y || !m) return [];
+  let dows;
+  if (isIndividual(cls)) {
+    const seen = {};
+    (cls.roster || []).forEach((r) => { if (!r.teacher) (r.days || []).forEach((d) => { seen[d] = 1; }); });
+    dows = Object.keys(seen).map(Number);
+  } else {
+    dows = cls.classDays || [];
+  }
+  if (!dows.length) return [];
+  const out = [];
+  const last = new Date(y, m, 0).getDate();
+  for (let d = 1; d <= last; d++) {
+    const dt = new Date(y, m - 1, d);
+    if (dows.indexOf(dt.getDay()) >= 0) out.push(ymd(dt));
+  }
+  return out;
+}
+
 // 그 날짜에 수업 대상인 학생인가 (요일 + 기간)
 function attendsOn(cls, st, date) {
   if (!isActiveOn(st, date)) return false;
@@ -2074,11 +2112,7 @@ function ReportCenter({ onBack }) {
     || a.st.name.localeCompare(b.st.name, "ko") || a.cls.name.localeCompare(b.cls.name, "ko"));
   const filtered = q ? everyone.filter((x) => norm(x.st.name).includes(norm(q))) : everyone;
 
-  const monthOpts = [];
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(); d.setMonth(d.getMonth() - i);
-    monthOpts.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
-  }
+  const monthOpts = recentMonths(12);
 
   async function load(cls, st, m) {
     setData(null); setSaved(false); setBusy(true);
@@ -4048,13 +4082,7 @@ function AttendanceBook({ cls, canEdit }) {
   React.useEffect(() => listenMakeups(cls.id, setMakeups), [cls.id]);
 
   // 최근 12개월 옵션
-  const monthOptions = [];
-  for (let i = 0; i < 12; i++) {
-    const d = new Date();
-    d.setMonth(d.getMonth() - i);
-    const ym = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
-    monthOptions.push(ym);
-  }
+  const monthOptions = recentMonths(12);
   function shiftMonth(delta) {
     const [y, m] = month.split("-").map(Number);
     const d = new Date(y, m - 1 + delta, 1);
@@ -4083,14 +4111,18 @@ function AttendanceBook({ cls, canEdit }) {
   useEffect(() => {
     setLoading(true);
     // 해당 월의 days 목록 불러오기
-    listDays(cls.id).then((allDays) => {
-      const classDays = isIndividual(cls) ? [] : (cls.classDays || []);
-      const filtered = allDays.filter((d) => {
-        if (!d.startsWith(month)) return false;
-        if (classDays.length === 0) return true;
-        const dow = new Date(d + "T00:00:00").getDay(); // 0=일~6=토
-        return classDays.includes(dow);
-      }).sort();
+    // 기록이 있는 날 ∪ 수업이 있었어야 할 날(오늘까지).
+    // 앞엣것만 쓰면 출석을 안 찍은 날은 칸이 아예 없어서 나중에 못 채운다.
+    // 뒤엣것만 쓰면 요일 밖에 한 보강수업이 사라진다. 둘을 합쳐야 한다.
+    daysCol(cls.id).get().then((snap) => {
+      const real = [];
+      snap.forEach((d) => { if (String(d.id).startsWith(month)) real.push(d.id); });
+      const sched = scheduledDates(cls, month).filter((d) => d <= todayStr);
+      const set = {};
+      real.concat(sched).forEach((d) => { set[d] = 1; });
+      // 요일이 하나도 설정 안 된 반이면 오늘이라도 보여준다 (예전 동작 유지)
+      if (!sched.length && month === nowYM) set[todayStr] = 1;
+      const filtered = Object.keys(set).sort();
       setDays(filtered);
 
       if (filtered.length === 0) { setLoading(false); return; }
