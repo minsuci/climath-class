@@ -662,6 +662,12 @@ function listenExamTerm(cb) {
 }
 async function saveExamTerm(term) { await examTermDoc().set({ term, time: Date.now() }, { merge: true }); }
 
+function dayAfter(d) {
+  if (!d) return "";
+  const x = new Date(d + "T00:00:00");
+  x.setDate(x.getDate() + 1);
+  return ymd(x);
+}
 // 직보 = 수학시험 전날. 기본값으로 채워주되 학생이 고칠 수 있다.
 function dayBefore(d) {
   if (!d) return "";
@@ -2450,21 +2456,35 @@ function ExamBoard({ onBack }) {
     return isIndividual(cls) ? (st.days || []).indexOf(dow) >= 0
                              : (cls.classDays || []).indexOf(dow) >= 0;
   }
+  // 안 오는 구간은 내신기간(start~end)이 아니라 **직보 다음날 ~ 복귀 전날**이다.
+  // 직보가 마지막 수업이고 그 다음 오는 날이 복귀이므로, 시험이 끝난 뒤라도
+  // 복귀 전이면 안 온다. 내신기간으로 재면 그 사이 수업일을 잘못 센다.
+  // 둘 중 없는 값은 내신기간으로 대신한다.
+  // 안 오는 구간 = 직보 다음날 ~ 복귀 전날 (없으면 내신기간으로 대신)
+  function outRange(v) {
+    return {
+      s: (v && v.prep) ? dayAfter(v.prep) : ((v && v.start) || ""),
+      e: (v && v.back) ? dayBefore(v.back) : ((v && v.end) || ""),
+    };
+  }
+  const isOutOn = (v, d) => { const r = outRange(v); return !!(r.s && r.e && d >= r.s && d <= r.e); };
+
   function attendCount(cls, st, v) {
-    const inExam = (d) => !!(v && v.start && v.end && d >= v.start && d <= v.end);
+    const isOut = (d) => isOutOn(v, d);
     const come = {};              // 실제로 오는 날의 집합 (중복으로 안 세려고 집합으로 둔다)
     let total = 0, skip = 0;
     strip.forEach((d) => {
       if (!isClassDay(cls, st, d)) return;
       total++;
-      if (inExam(d)) { skip++; return; }
+      if (isOut(d)) { skip++; return; }
       come[d] = 1;
     });
-    // 직보는 온다 — 수업 요일이 아니어도, 내신기간 안이어도 센다. 수강료에 들어간다.
+    // 직보와 복귀는 오는 날이다. 수업 요일이 아니어도 센다 — 수강료에 들어간다.
     let extra = 0;
-    if (v && v.prep && v.prep >= strip[0] && v.prep <= strip[strip.length - 1] && !come[v.prep]) {
-      come[v.prep] = 1; extra++;
-    }
+    [(v && v.prep) || "", (v && v.back) || ""].forEach((d) => {
+      if (!d || d < strip[0] || d > strip[strip.length - 1] || come[d]) return;
+      come[d] = 1; extra++;
+    });
     return { total: total, skip: skip, extra: extra, come: Object.keys(come).length };
   }
   const markOf = (v, d) => {
@@ -2576,7 +2596,13 @@ function ExamBoard({ onBack }) {
                 <thead>
                   <tr>
                     <th className="cm-ab-name">이름</th>
-                    {strip.map((d) => <th key={d} style={{minWidth: 22, padding: "3px 2px"}}>{Number(d.slice(8))}</th>)}
+                    {strip.map((d) => {
+                      const day = Number(d.slice(8));
+                      // 1일에는 몇 월인지 같이 적는다 — 달을 바꿔가며 보면 헷갈린다
+                      return <th key={d} style={{minWidth: day === 1 ? 30 : 22, padding: "3px 2px"}}>
+                        {day === 1 ? Number(d.slice(5, 7)) + "/1" : day}
+                      </th>;
+                    })}
                     <th rowSpan={2} style={{minWidth: 54}}>등원</th>
                   </tr>
                   <tr>
@@ -2596,9 +2622,12 @@ function ExamBoard({ onBack }) {
                       {strip.map((d) => {
                         const m = markOf(v, d);
                         const classDay = isClassDay(cls, st, d);
+                        const resting = classDay && isOutOn(v, d);   // 수업일인데 안 오는 날
                         const st2 = m ? { background: m.bg, color: m.fg, fontWeight: 700, padding: "3px 2px" }
-                                      : { padding: "3px 2px", background: classDay ? "#f4f6f9" : undefined };
-                        return <td key={d} style={st2}>{m ? m.t : (classDay ? "·" : "")}</td>;
+                                      : { padding: "3px 2px",
+                                          background: resting ? "#f0ece5" : (classDay ? "#f4f6f9" : undefined),
+                                          color: resting ? "#b6ab9b" : undefined };
+                        return <td key={d} style={st2}>{m ? m.t : (resting ? "–" : (classDay ? "·" : ""))}</td>;
                       })}
                       <td style={{fontWeight: 700, color: "var(--navy)", minWidth: 54}}>
                         {cnt.come}회
@@ -2616,7 +2645,8 @@ function ExamBoard({ onBack }) {
 
           <div style={{display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0 14px", alignItems: "center"}}>
             <span className="cm-chip" style={{background: "#f4f6f9", color: "#5a6b82"}}>· 수업일</span>
-            <span style={{fontSize: 11, color: "var(--muted)"}}>등원 = 수업일 − 내신기간 + 직보</span>
+            <span className="cm-chip" style={{background: "#f0ece5", color: "#b6ab9b"}}>– 안 오는 날</span>
+            <span style={{fontSize: 11, color: "var(--muted)"}}>등원 = 그 달 수업일 − (직보 다음 ~ 복귀 전) + 직보·복귀</span>
             {Object.keys(EXAM_MARKS).map((k) => (
               <span key={k} className="cm-chip" style={{background: EXAM_MARKS[k].bg, color: EXAM_MARKS[k].fg}}>
                 {EXAM_MARKS[k].t} {EXAM_MARKS[k].label}
