@@ -623,28 +623,6 @@ function listenDm(cid, sid, cb) {
 const scoresCol = (cid, date) => dayDoc(cid, date).collection("scores");
 async function addScore(cid, date, s) { await scoresCol(cid, date).add(s); touchDay(cid, date); }
 
-// 점수는 날짜마다 흩어져 있다(days/{date}/scores). 추이를 그리려면 모아야 한다.
-// 날짜 수만큼 읽기가 나가므로 최근 것부터 maxDays개만 본다 — 그래프에는 충분하다.
-// sid를 주면 그 학생 것만, 안 주면 반 전체.
-async function loadScoreHistory(cid, sid, maxDays) {
-  const snap = await daysCol(cid).get();
-  const dates = [];
-  snap.forEach((d) => dates.push(d.id));
-  dates.sort();
-  const recent = dates.slice(-(maxDays || 80));
-  const out = [];
-  await Promise.all(recent.map(async (date) => {
-    try {
-      const s = await scoresCol(cid, date).get();
-      s.forEach((d) => {
-        const v = d.data();
-        if (!sid || v.sid === sid) out.push({ id: d.id, date, ...v });
-      });
-    } catch (e) { /* 권한 없는 날은 건너뛴다 */ }
-  }));
-  out.sort((a, b) => a.date.localeCompare(b.date) || (a.time || 0) - (b.time || 0));
-  return out;
-}
 async function listDays(cid) {
   const s = await daysCol(cid).get();
   const arr = [];
@@ -652,6 +630,30 @@ async function listDays(cid) {
   if (!arr.includes(todayStr)) arr.push(todayStr);
   return arr.sort().reverse();
 }
+
+// 점수는 날짜마다 흩어져 있다(days/{date}/scores). 추이를 그리려면 모아야 한다.
+// 날짜 하나당 읽기가 한 번 나가므로 **기간을 받아서** 그만큼만 본다.
+// 어차피 날짜별로 전원 것을 읽으므로 반 전체를 돌려준다 — 반 평균을 공짜로 낼 수 있다.
+// 돌려주는 것: { rows, days, truncated }
+const SCORE_MAX_DAYS = 120;
+async function loadScoreHistory(cid, fromDate, toDate) {
+  const snap = await daysCol(cid).get();
+  let dates = [];
+  snap.forEach((d) => dates.push(d.id));
+  dates = dates.filter((d) => (!fromDate || d >= fromDate) && (!toDate || d <= toDate)).sort();
+  const truncated = dates.length > SCORE_MAX_DAYS;
+  const use = truncated ? dates.slice(-SCORE_MAX_DAYS) : dates;
+  const rows = [];
+  await Promise.all(use.map(async (date) => {
+    try {
+      const sc = await scoresCol(cid, date).get();
+      sc.forEach((d) => rows.push({ id: d.id, date, ...d.data() }));
+    } catch (e) { /* 권한 없는 날은 건너뛴다 */ }
+  }));
+  rows.sort((a, b) => a.date.localeCompare(b.date) || (a.time || 0) - (b.time || 0));
+  return { rows, days: use.length, truncated };
+}
+
 // ----- 수업 로그 (개별진도반: 누구와 몇 분을 했는지) -----
 // classes/{cid}/lessonLogs/{date}
 //   { date, startedAt, endedAt, shift, teacher, segments:[{sid,name,kind,unit,start,end}], transcript:[{t,text}] }
@@ -1965,15 +1967,20 @@ function StudentHomework({ cls, me }) {
 // ----- 점수 추이 그래프 -----
 // 외부 차트 라이브러리를 쓰지 않는다. CDN을 하나 더 늘리면 그게 죽을 때 앱이 같이 죽는다
 // (버전 고정 원칙과 같은 이유). 점 몇 개짜리 꺾은선은 SVG로 충분하다.
-function ScoreChart({ rows, height }) {
+function ScoreChart({ rows, classAvg, showClass }) {
   const [pick, setPick] = useState(null);
-  const H = height || 170, W = 320;          // viewBox 기준. 화면에는 폭 100%로 늘린다
+  const H = 175, W = 320;                    // viewBox 기준. 화면에는 폭 100%로 늘린다
   const PAD = { l: 26, r: 8, t: 10, b: 22 };
   if (!rows.length) return null;
   const n = rows.length;
   const x = (i) => PAD.l + (n === 1 ? (W - PAD.l - PAD.r) / 2 : (i * (W - PAD.l - PAD.r)) / (n - 1));
   const y = (v) => PAD.t + (100 - Math.max(0, Math.min(100, v))) * (H - PAD.t - PAD.b) / 100;
-  const line = rows.map((r, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(r.score).toFixed(1)).join(" ");
+  const path = (get) => rows.map((r, i) => {
+    const v = get(r);
+    return v == null ? null : (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1);
+  }).filter(Boolean).join(" ");
+  const mineLine = path((r) => r.score);
+  const clsLine = showClass ? path((r) => (classAvg[r.date] == null ? null : classAvg[r.date])) : "";
   const avg = Math.round(rows.reduce((a, r) => a + r.score, 0) / n);
   const sel = pick == null ? null : rows[pick];
   return (
@@ -1985,8 +1992,9 @@ function ScoreChart({ rows, height }) {
             <text x={PAD.l - 4} y={y(g) + 3} textAnchor="end" fontSize="7" fill="#8a7f72">{g}</text>
           </g>
         ))}
-        <line x1={PAD.l} x2={W - PAD.r} y1={y(avg)} y2={y(avg)} stroke="#c2703f" strokeWidth="1" strokeDasharray="3 3" opacity=".7" />
-        <path d={line} fill="none" stroke="var(--navy)" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+        <line x1={PAD.l} x2={W - PAD.r} y1={y(avg)} y2={y(avg)} stroke="var(--navy)" strokeWidth="1" strokeDasharray="3 3" opacity=".45" />
+        {clsLine && <path d={clsLine} fill="none" stroke="#c2703f" strokeWidth="1.4" strokeDasharray="4 3" opacity=".85" strokeLinejoin="round" />}
+        <path d={mineLine} fill="none" stroke="var(--navy)" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
         {rows.map((r, i) => (
           <circle key={i} cx={x(i)} cy={y(r.score)} r={pick === i ? 4.5 : 3}
             fill={pick === i ? "#c2703f" : "var(--navy)"} stroke="#fff" strokeWidth="1.2"
@@ -1996,42 +2004,130 @@ function ScoreChart({ rows, height }) {
           <text key={"t" + i} x={x(i)} y={H - 6} textAnchor="middle" fontSize="7" fill="#8a7f72">{shortDate(r.date)}</text>
         ))}
       </svg>
+      <div style={{fontSize: 11, color: "var(--muted)", display: "flex", gap: 12, flexWrap: "wrap", marginTop: 2}}>
+        <span><b style={{color: "var(--navy)"}}>—</b> 내 점수</span>
+        <span><b style={{color: "var(--navy)", opacity: .5}}>┄</b> 내 평균 {avg}점</span>
+        {clsLine && <span><b style={{color: "#c2703f"}}>┄</b> 반 평균</span>}
+      </div>
       <div style={{fontSize: 12, color: "var(--muted)", marginTop: 4, minHeight: 18}}>
         {sel
-          ? <span><b style={{color: "var(--ink)"}}>{sel.score}점</b> · {sel.correct}/{sel.total} · {fmtDate(sel.date)}{sel.label ? " · " + sel.label : ""}</span>
-          : <span>평균 <b style={{color: "#c2703f"}}>{avg}점</b> · {n}회 · 점을 누르면 자세히 보여요</span>}
+          ? <span><b style={{color: "var(--ink)"}}>{sel.score}점</b> · {sel.correct}/{sel.total} · {fmtDate(sel.date)}
+              {sel.label ? " · " + sel.label : ""}
+              {showClass && classAvg[sel.date] != null ? " · 반 평균 " + classAvg[sel.date] + "점" : ""}
+            </span>
+          : <span>점을 누르면 그 회차를 자세히 보여줘요</span>}
       </div>
     </div>
   );
 }
 
-// 한 사람의 점수 추이 (학생 본인 화면 / 선생님이 고른 학생)
-function ScoreTrend({ cls, sid, compact }) {
-  const [rows, setRows] = useState(null);
+// 기간 고르기
+const SCORE_RANGES = [
+  { key: "3m", label: "3개월", months: 3 },
+  { key: "6m", label: "6개월", months: 6 },
+  { key: "1y", label: "1년", months: 12 },
+  { key: "all", label: "전체", months: 0 },
+];
+function rangeFrom(months) {
+  if (!months) return "";
+  const d = new Date(todayStr + "T00:00:00");
+  d.setMonth(d.getMonth() - months);
+  d.setDate(1);            // 29~31일이면 넘치므로 1일 기준 (recentMonths와 같은 이유)
+  return ymd(d);
+}
+
+// 한 사람의 점수 추이
+function ScoreTrend({ cls, sid }) {
+  const [rangeKey, setRangeKey] = useState("6m");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [custom, setCustom] = useState(false);
+  const [data, setData] = useState(null);
+  const [showClass, setShowClass] = useState(true);
+
+  const f = custom ? from : rangeFrom((SCORE_RANGES.find((r) => r.key === rangeKey) || {}).months);
+  const t = custom ? to : "";
+
   useEffect(() => {
     let alive = true;
-    setRows(null);
-    loadScoreHistory(cls.id, sid).then((r) => { if (alive) setRows(r); }).catch(() => { if (alive) setRows([]); });
+    setData(null);
+    loadScoreHistory(cls.id, f, t).then((r) => { if (alive) setData(r); })
+      .catch(() => { if (alive) setData({ rows: [], days: 0, truncated: false }); });
     return () => { alive = false; };
-  }, [cls.id, sid]);
-  if (rows === null) return <div className="cm-empty">불러오는 중…</div>;
-  if (!rows.length) return <div className="cm-empty">아직 제출한 점수가 없어요</div>;
+  }, [cls.id, sid, f, t]);
+
+  const picker = (
+    <div style={{marginBottom: 12}}>
+      <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+        {SCORE_RANGES.map((r) => (
+          <button key={r.key} className={"cm-ab-tab" + (!custom && rangeKey === r.key ? " on" : "")}
+            onClick={() => { setCustom(false); setRangeKey(r.key); }}>{r.label}</button>
+        ))}
+        <button className={"cm-ab-tab" + (custom ? " on" : "")} onClick={() => setCustom(true)}>직접 고르기</button>
+      </div>
+      {custom && (
+        <div style={{display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap"}}>
+          <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date"
+            value={from} max={to || todayStr} onChange={(e) => setFrom(e.target.value)} />
+          <span style={{color: "var(--muted)"}}>~</span>
+          <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date"
+            value={to} min={from} max={todayStr} onChange={(e) => setTo(e.target.value)} />
+          {(from || to) && <button className="cm-link" onClick={() => { setFrom(""); setTo(""); }}>지우기</button>}
+        </div>
+      )}
+    </div>
+  );
+
+  if (data === null) return <div>{picker}<div className="cm-empty">불러오는 중…</div></div>;
+
+  const all = data.rows;
+  const rows = sid ? all.filter((r) => r.sid === sid) : [];
+  // 날짜별 반 평균 (그 날 제출한 사람들의 평균)
+  const byDate = {};
+  all.forEach((r) => { (byDate[r.date] = byDate[r.date] || []).push(r.score); });
+  const classAvg = {};
+  Object.keys(byDate).forEach((d) => {
+    classAvg[d] = Math.round(byDate[d].reduce((a, b) => a + b, 0) / byDate[d].length);
+  });
+  const others = all.filter((r) => r.sid !== sid).length;
+
+  if (!rows.length) {
+    return <div>{picker}<div className="cm-empty">이 기간에 제출한 점수가 없어요</div></div>;
+  }
   const best = rows.reduce((a, r) => (r.score > a.score ? r : a), rows[0]);
   const last = rows[rows.length - 1];
   const prev = rows.length > 1 ? rows[rows.length - 2] : null;
   const diff = prev ? last.score - prev.score : null;
+  const myAvg = Math.round(rows.reduce((a, r) => a + r.score, 0) / rows.length);
+  const clsKeys = Object.keys(classAvg);
+  const clsAvgAll = clsKeys.length ? Math.round(clsKeys.reduce((a, d) => a + classAvg[d], 0) / clsKeys.length) : null;
+
   return (
     <div>
-      <ScoreChart rows={rows} />
-      {!compact && (
-        <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10}}>
-          <span className="cm-chip" style={{background: "#eef1f6", color: "var(--navy)"}}>최근 {last.score}점</span>
-          {diff !== null && (
-            <span className="cm-chip" style={{background: diff >= 0 ? "#e6f0e9" : "#fae3e2", color: diff >= 0 ? "#3f7d5e" : "#d6453f"}}>
-              지난번보다 {diff >= 0 ? "+" : ""}{diff}점
-            </span>
-          )}
-          <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f"}}>최고 {best.score}점</span>
+      {picker}
+      {others > 0 && (
+        <label style={{display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)", marginBottom: 8}}>
+          <input type="checkbox" checked={showClass} onChange={(e) => setShowClass(e.target.checked)} />
+          반 평균 같이 보기
+        </label>
+      )}
+      <ScoreChart rows={rows} classAvg={classAvg} showClass={showClass && others > 0} />
+      <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10}}>
+        <span className="cm-chip" style={{background: "#eef1f6", color: "var(--navy)"}}>{rows.length}회 · 내 평균 {myAvg}점</span>
+        <span className="cm-chip" style={{background: "#eef1f6", color: "var(--navy)"}}>최근 {last.score}점</span>
+        {diff !== null && (
+          <span className="cm-chip" style={{background: diff >= 0 ? "#e6f0e9" : "#fae3e2", color: diff >= 0 ? "#3f7d5e" : "#d6453f"}}>
+            지난번보다 {diff >= 0 ? "+" : ""}{diff}점
+          </span>
+        )}
+        <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f"}}>최고 {best.score}점</span>
+        {others > 0 && clsAvgAll != null && (
+          <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f"}}>반 평균 {clsAvgAll}점</span>
+        )}
+      </div>
+      {data.truncated && (
+        <div className="cm-hint" style={{marginTop: 8}}>
+          기간이 길어 최근 {SCORE_MAX_DAYS}번의 수업만 불러왔어요. 기간을 좁히면 전부 나와요.
         </div>
       )}
     </div>
