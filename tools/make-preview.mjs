@@ -15,6 +15,28 @@ const STUB = `
   var store = {};                      // "경로/문서id" -> data
   window.__store = store;
   function newId(){ return "x" + Math.random().toString(36).slice(2,8); }
+  /* arrayUnion/arrayRemove 를 진짜로 적용한다.
+     예전 스텁은 값을 그대로 돌려줘서 배열이 문자열로 들어갔다 — 앱은 멀쩡한데
+     프리뷰만 틀리면 없는 버그를 쫓게 된다. */
+  function applyOps(base, patch){
+    var out = Object.assign({}, base);
+    Object.keys(patch||{}).forEach(function(k){
+      var v = patch[k];
+      if (v && v.__op === "union") {
+        var cur = Array.isArray(out[k]) ? out[k].slice() : (out[k] == null ? [] : [out[k]]);
+        v.vals.forEach(function(x){ if (cur.indexOf(x) < 0) cur.push(x); });
+        out[k] = cur;
+      } else if (v && v.__op === "remove") {
+        var cur2 = Array.isArray(out[k]) ? out[k].slice() : [];
+        out[k] = cur2.filter(function(x){ return v.vals.indexOf(x) < 0; });
+      } else if (v === null && patch[k] === null) {
+        delete out[k];
+      } else {
+        out[k] = v;
+      }
+    });
+    return out;
+  }
   function snap(path){
     var d = store[path];
     // ref가 있어야 한다 — deleteFileDoc/deleteNoteUnit이 d.ref.delete()를 부른다
@@ -26,10 +48,11 @@ const STUB = `
       _p: path,
       get: function(){ return Promise.resolve(snap(path)); },
       set: function(o, opt){
-        store[path] = (opt && opt.merge) ? Object.assign({}, store[path]||{}, o) : o;
+        var base = (opt && opt.merge) ? (store[path]||{}) : {};
+        store[path] = applyOps(base, o);
         return Promise.resolve();
       },
-      update: function(o){ store[path] = Object.assign({}, store[path]||{}, o); return Promise.resolve(); },
+      update: function(o){ store[path] = applyOps(store[path]||{}, o); return Promise.resolve(); },
       delete: function(){ delete store[path]; return Promise.resolve(); },
       collection: function(n){ return colRef(path + "/" + n); },
       onSnapshot: function(cb){ cb(snap(path)); return function(){}; }
@@ -65,8 +88,10 @@ const STUB = `
   function fire(){ _watch.forEach(function(f){ try { f(_user); } catch(e){} }); }
   window.firebase = {
     firestore: Object.assign(function(){ return window.db; }, {
-      FieldValue: { arrayUnion: function(){ return arguments[0]; }, arrayRemove: function(){ return arguments[0]; },
-                    serverTimestamp: function(){ return Date.now(); }, delete: function(){ return null; } }
+      FieldValue: {
+        arrayUnion: function(){ return { __op: "union", vals: [].slice.call(arguments) }; },
+        arrayRemove: function(){ return { __op: "remove", vals: [].slice.call(arguments) }; },
+        serverTimestamp: function(){ return Date.now(); }, delete: function(){ return null; } }
     }),
     auth: function(){ return {
       get currentUser(){ return _user; },

@@ -629,6 +629,22 @@ function listenExams(cid, term, cb) {
     cb(m);
   }, () => cb({}));
 }
+// 학교 목록은 학원 전체가 함께 쓴다. 기본 목록(KNOWN_SCHOOLS)에 없는 학교를
+// 선생님이 여기 더하면 모든 학생 화면에 바로 뜬다. 학생은 읽기만 한다 —
+// 아무나 쓰면 오타가 목록으로 굳어버린다.
+const schoolsDoc = () => db.collection("appConfig").doc("schools");
+function listenSchools(cb) {
+  return schoolsDoc().onSnapshot((d) => cb((d.exists && d.data().list) || []), () => cb([]));
+}
+async function addSchoolToList(name) {
+  const n = String(name || "").trim();
+  if (!n) return;
+  await schoolsDoc().set({ list: firebase.firestore.FieldValue.arrayUnion(n) }, { merge: true });
+}
+async function removeSchoolFromList(name) {
+  await schoolsDoc().set({ list: firebase.firestore.FieldValue.arrayRemove(name) }, { merge: true });
+}
+
 function listenExamTerm(cb) {
   return examTermDoc().onSnapshot((d) => cb(d.exists ? (d.data().term || "") : ""), () => cb(""));
 }
@@ -2034,6 +2050,9 @@ function ExamForm({ cls, me }) {
   const [q, setQ] = useState("");
   const [seen, setSeen] = useState([]);   // 이 반에서 이미 쓴 학교들
   const [peers, setPeers] = useState([]); // 이번 회차에 낸 다른 학생들
+  const [shared, setShared] = useState([]); // 선생님이 더해둔 학원 공용 목록
+  const [etc, setEtc] = useState(false);    // 기타 = 직접 입력
+  const [etcName, setEtcName] = useState("");
 
   useEffect(() => listenExamTerm(setTerm), []);
   useEffect(() => {
@@ -2071,7 +2090,9 @@ function ExamForm({ cls, me }) {
     }).catch(() => {});
   }, [cls.id]);
 
-  const schoolOpts = Array.from(new Set(KNOWN_SCHOOLS.concat(seen))).sort((a, b) => a.localeCompare(b, "ko"));
+  useEffect(() => listenSchools(setShared), []);
+  const schoolOpts = Array.from(new Set(KNOWN_SCHOOLS.concat(shared).concat(seen)))
+    .sort((a, b) => a.localeCompare(b, "ko"));
   // 같은 학교·같은 학년 친구가 이미 낸 일정 (있으면 그대로 쓰게 해준다)
   const sameSchool = (f.school && f.grade)
     ? peers.find((v) => v.school === f.school && v.grade === f.grade && v.start && v.end) || null
@@ -2094,7 +2115,7 @@ function ExamForm({ cls, me }) {
     setBusy(true); setMsg("");
     try {
       await saveExam(cls.id, term, me.id, { name: me.name, school: f.school.trim(), grade: f.grade,
-        start: f.start, end: f.end, math: f.math, prep: f.prep, back: f.back, note: f.note.trim() });
+        start: f.start, end: f.end, math: f.math, prep: f.prep, note: f.note.trim() });
       setMsg("냈어요 ✓ 선생님이 바로 볼 수 있어요");
     } catch (e) { setMsg("저장 실패: " + e.message); }
     setBusy(false);
@@ -2111,7 +2132,8 @@ function ExamForm({ cls, me }) {
     <div className="cm-card">
       <h3 className="cm-h3">내신 참여 <span className="cm-h-hint">({term})</span></h3>
       <div className="cm-hint" style={{marginBottom: 6}}>
-        내신 기간에 언제 안 오고 언제 돌아오는지 알려줘. 정해진 게 바뀌면 다시 내면 돼.
+        내신 기간이 언제인지 알려줘. 정해진 게 바뀌면 다시 내면 돼.
+        <br/><b>복귀 날짜는 선생님이 정해서 알려줄 거야.</b>
       </div>
       {mine && <div className="cm-done" style={{marginBottom: 8}}>이미 냈어요 · 고치면 바로 반영돼요</div>}
 
@@ -2126,13 +2148,21 @@ function ExamForm({ cls, me }) {
           value={q} onChange={(e) => setQ(e.target.value)} />
         <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6}}>
           {schoolOpts.filter((x) => !q.trim() || x.includes(q.trim())).slice(0, 14).map((x) => (
-            <button key={x} className="cm-ab-tab" onClick={() => set("school", x)}>{x}</button>
+            <button key={x} className="cm-ab-tab" onClick={() => { setEtc(false); set("school", x); }}>{x}</button>
           ))}
+          <button className={"cm-ab-tab" + (etc ? " on" : "")}
+            onClick={() => { setEtc(true); setEtcName(q.trim()); }}>기타 (직접 입력)</button>
         </div>
-        {q.trim() && !schoolOpts.some((x) => x === q.trim()) && (
-          <button className="cm-link" style={{marginTop: 6}} onClick={() => set("school", q.trim())}>
-            목록에 없어요 — “{q.trim()}”로 직접 넣기
-          </button>
+        {etc && (
+          <div style={{display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap"}}>
+            <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 150}} autoFocus
+              placeholder="학교 이름을 적어줘 (예: 세화고)"
+              value={etcName} onChange={(e) => setEtcName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && etcName.trim()) { set("school", etcName.trim()); setEtc(false); } }} />
+            <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "9px 14px"}}
+              disabled={!etcName.trim()} onClick={() => { set("school", etcName.trim()); setEtc(false); }}>이 학교로</button>
+            <button className="cm-link" onClick={() => setEtc(false)}>취소</button>
+          </div>
         )}
       </>)}
       {sameSchool && (
@@ -2165,11 +2195,14 @@ function ExamForm({ cls, me }) {
       <input className="cm-input" type="date" value={f.math} onChange={(e) => set("math", e.target.value)} />
       <label className="cm-label">직보 <span className="cm-h-hint">(수학시험 전날 · 자동으로 채워져요)</span></label>
       <input className="cm-input" type="date" value={f.prep} onChange={(e) => set("prep", e.target.value)} />
-      <label className="cm-label">복귀 날짜 <span className="cm-h-hint">(시험 끝나고 처음 오는 날)</span></label>
-      <input className="cm-input" type="date" value={f.back} onChange={(e) => set("back", e.target.value)} />
       <label className="cm-label">비고 (선택)</label>
       <input className="cm-input" placeholder="예: 수행평가로 목요일 결석" value={f.note} onChange={(e) => set("note", e.target.value)} />
 
+      {mine && mine.back && (
+        <div className="cm-hint" style={{marginTop: 10, background: "#e3edf5", color: "#2b5f8a", padding: "9px 11px", borderRadius: 10}}>
+          선생님이 정한 <b>복귀 날짜는 {fmtDate(mine.back)}</b>이야. 그날 보자.
+        </div>
+      )}
       {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
       <button className="cm-btn cm-btn-primary" disabled={busy} onClick={submit}>{busy ? "내는 중..." : (mine ? "고쳐서 다시 내기" : "제출하기")}</button>
     </div>
@@ -2185,8 +2218,10 @@ function ExamBoard({ onBack }) {
   const [editTerm, setEditTerm] = useState(false);
   const [draft, setDraft] = useState("");
   const [fixing, setFixing] = useState("");
+  const [shared, setShared] = useState([]);
   const backRef = useSwipeBack(onBack);
   const classes = activeClasses();
+  useEffect(() => listenSchools(setShared), []);
 
   useEffect(() => listenExamTerm((t) => { setTerm(t); setDraft(t); }), []);
   useEffect(() => {
@@ -2206,6 +2241,10 @@ function ExamBoard({ onBack }) {
     });
   });
   const inGrade = got.filter((x) => (x.v.grade || "") === grade);
+  // 제출에는 있는데 기본·공용 목록 어디에도 없는 학교 (학생이 기타로 넣은 것)
+  const known = {};
+  KNOWN_SCHOOLS.concat(shared).forEach((n) => { known[n] = 1; });
+  const newSchools = Array.from(new Set(got.map((x) => x.v.school).filter((n) => n && !known[n])));
 
   // 같은 학교·같은 학년인데 일정이 다른 것 (반이 달라도 잡는다 — 오히려 이쪽이 더 흔하다)
   const groups = {};
@@ -2289,6 +2328,24 @@ function ExamBoard({ onBack }) {
         </div>
         {!term && <div className="cm-hint">회차를 열면 학생 화면에 <b>내신</b> 탭이 생겨요. 담당 반 전체가 여기 모입니다.</div>}
 
+        {/* 학생이 "기타"로 직접 넣은 학교를 공용 목록에 올린다.
+            올려두면 다음부터 다른 학생도 고를 수 있어서 표기가 갈라지지 않는다. */}
+        {newSchools.length > 0 && (
+          <div style={{background: "#eef1f6", border: "1px solid #d8e0ea", borderRadius: 12, padding: "11px 13px", marginBottom: 12}}>
+            <div style={{fontSize: 13, color: "var(--navy)", fontWeight: 700, marginBottom: 6}}>
+              목록에 없는 학교 {newSchools.length}개
+            </div>
+            <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 8, lineHeight: 1.5}}>
+              학생이 직접 넣은 이름이에요. 목록에 올리면 다음부터 다른 학생도 고를 수 있어요.
+            </div>
+            <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+              {newSchools.map((n) => (
+                <button key={n} className="cm-ab-tab" onClick={() => addSchoolToList(n)}>{n} + 목록에 추가</button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {term && (<>
           {conflicts.length > 0 && (
             <div style={{background: "#fae3e2", border: "1px solid #eec9c7", borderRadius: 12, padding: "12px 14px", marginBottom: 12}}>
@@ -2368,7 +2425,8 @@ function ExamBoard({ onBack }) {
             <div className="cm-ab-wrap" data-no-swipe>
               <table className="cm-ab-table">
                 <thead><tr>
-                  <th className="cm-ab-name">이름</th><th>반</th><th>학교</th><th>내신기간</th><th>수학시험</th><th>직보</th><th>복귀</th><th>비고</th>
+                  <th className="cm-ab-name">이름</th><th>반</th><th>학교</th><th>내신기간</th><th>수학시험</th><th>직보</th>
+                  <th style={{minWidth: 118}}>복귀 <span style={{fontWeight: 400, color: "#8a7f72"}}>(선생님이 정함)</span></th><th>비고</th>
                 </tr></thead>
                 <tbody>
                   {inGrade.map(({ cls, st, v }) => (
@@ -2379,7 +2437,10 @@ function ExamBoard({ onBack }) {
                       <td>{v.start && v.end ? shortDate(v.start) + "~" + shortDate(v.end) : "-"}</td>
                       <td>{v.math ? shortDate(v.math) : "-"}</td>
                       <td>{v.prep ? shortDate(v.prep) : "-"}</td>
-                      <td>{v.back ? shortDate(v.back) : "-"}</td>
+                      <td style={{padding: "2px 3px"}}>
+                        <input type="date" value={v.back || ""} style={{fontSize: 11, border: "1px solid var(--line)", borderRadius: 6, padding: "3px 4px", fontFamily: "inherit"}}
+                          onChange={(e) => saveExam(cls.id, term, st.id, { back: e.target.value }).catch((err) => alert("저장 실패: " + err.message))} />
+                      </td>
                       <td style={{textAlign: "left", whiteSpace: "normal", maxWidth: 160}}>{v.note || ""}</td>
                     </tr>
                   ))}
