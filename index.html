@@ -2307,6 +2307,7 @@ function StudentDirectory({ me, onBack }) {
   const [people, setPeople] = useState(null);
   const [teachers, setTeachers] = useState([]);
   const [q, setQ] = useState("");
+  const [clsFilter, setClsFilter] = useState("all");  // "all" | 반id | "none"(배정 없음)
   const [open, setOpen] = useState(null);      // 편집 중인 pid ("new"면 새로 추가)
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -2365,8 +2366,23 @@ function StudentDirectory({ me, onBack }) {
   }
 
   if (people === null) return <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>;
-  const shown = q.trim() ? people.filter((p) => norm(p.name).includes(norm(q)) || String(p.school || "").includes(q.trim())) : people;
   const tName = (tid) => { const t = teachers.find((x) => x.tid === tid); return t ? t.name : ""; };
+
+  // 반별 보기 — 어느 반에 몇 명인지 세고, 고른 반의 명단 순서대로 보여준다
+  const inCls = (p, cid) => (CLASSES.find((c) => c.id === cid) || { roster: [] }).roster
+    .some((r) => r.pid === p.pid);
+  const countIn = (cid) => people.filter((p) => inCls(p, cid)).length;
+  const noneCount = people.filter((p) => classesOfPerson(p.pid).length === 0).length;
+
+  let shown = people;
+  if (clsFilter === "none") shown = people.filter((p) => classesOfPerson(p.pid).length === 0);
+  else if (clsFilter !== "all") {
+    const c = CLASSES.find((x) => x.id === clsFilter);
+    const order = {};
+    ((c && c.roster) || []).forEach((r, i) => { if (r.pid) order[r.pid] = i; });
+    shown = people.filter((p) => order[p.pid] != null).sort((a, b) => order[a.pid] - order[b.pid]);
+  }
+  if (q.trim()) shown = shown.filter((p) => norm(p.name).includes(norm(q)) || String(p.school || "").includes(q.trim()));
 
   return (
     <div ref={backRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
@@ -2385,6 +2401,21 @@ function StudentDirectory({ me, onBack }) {
             value={q} onChange={(e) => setQ(e.target.value)} />
           <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "9px 14px"}}
             onClick={() => setOpen("new")}>+ 학생 추가</button>
+        </div>
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
+          <button className={"cm-ab-tab" + (clsFilter === "all" ? " on" : "")}
+            onClick={() => setClsFilter("all")}>전체 {people.length}</button>
+          {activeClasses().map((c) => (
+            <button key={c.id} className={"cm-ab-tab" + (clsFilter === c.id ? " on" : "")}
+              onClick={() => setClsFilter(c.id)}>{c.name} {countIn(c.id)}</button>
+          ))}
+          {noneCount > 0 && (
+            <button className={"cm-ab-tab" + (clsFilter === "none" ? " on" : "")}
+              onClick={() => setClsFilter("none")}
+              style={clsFilter === "none" ? undefined : { background: "#f6e7df", color: "#c2703f", borderColor: "#e6cbb9" }}>
+              배정 없음 {noneCount}
+            </button>
+          )}
         </div>
         {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"} style={{marginBottom: 8}}>{msg}</div>}
 
@@ -2419,7 +2450,11 @@ function StudentDirectory({ me, onBack }) {
           </div>
         )}
 
-        <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 6}}>학생 {shown.length}명</div>
+        <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 6}}>
+          {clsFilter === "all" ? "전체" : (clsFilter === "none" ? "배정된 반이 없는 학생" : (findClass(clsFilter) || {}).name)}
+          {" · "}{shown.length}명
+          {clsFilter !== "all" && clsFilter !== "none" && " (명단 순서)"}
+        </div>
         {shown.length === 0 && <div className="cm-empty">아직 없어요</div>}
         {shown.map((p) => {
           const inClasses = classesOfPerson(p.pid);
