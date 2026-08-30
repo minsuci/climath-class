@@ -876,6 +876,29 @@ async function syncStudentToRosters(person) {
     try { await saveClassRoster(c.id, next); c.roster = next; } catch (e) {}
   }
 }
+// 반에 넣기 / 빼기.
+// 명단 전체를 다시 쓰므로 **반드시 최신(cls.roster) 위에 얹는다** — 화면이 들고 있던
+// 옛 사본으로 저장하면 그 사이 바뀐 다른 학생 내용이 날아간다.
+async function assignToClass(cid, person) {
+  const cls = findClass(cid);
+  if (!cls) return;
+  if ((cls.roster || []).some((r) => r.pid === person.pid)) return;   // 이미 있음
+  const id = "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  const next = (cls.roster || []).concat([{
+    id: id, pid: person.pid, name: person.name,
+    school: person.school || "", grade: person.grade || "",
+  }]);
+  await saveClassRoster(cid, next);
+  cls.roster = next;
+}
+async function unassignFromClass(cid, pid) {
+  const cls = findClass(cid);
+  if (!cls) return;
+  const next = (cls.roster || []).filter((r) => r.pid !== pid);
+  await saveClassRoster(cid, next);
+  cls.roster = next;
+}
+
 // 그 사람이 어느 반에 있나
 function classesOfPerson(pid) {
   const out = [];
@@ -2311,6 +2334,7 @@ function StudentDirectory({ me, onBack }) {
   const [open, setOpen] = useState(null);      // 편집 중인 pid ("new"면 새로 추가)
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [ver, bumpVer] = useState(0);   // 반 배정이 바뀌면 CLASSES를 다시 읽어 그린다
   const backRef = useSwipeBack(onBack);
 
   useEffect(() => listenStudents(setPeople), []);
@@ -2421,7 +2445,8 @@ function StudentDirectory({ me, onBack }) {
 
         {open === "new" && (
           <StudentEditor person={null} teachers={teachers}
-            onDone={() => setOpen(null)} onSaved={() => setOpen(null)} />
+            onDone={() => setOpen(null)} onSaved={() => setOpen(null)}
+            onChanged={() => bumpVer((v) => v + 1)} />
         )}
 
         {/* 아직 안 이어진 명단 항목 */}
@@ -2473,7 +2498,8 @@ function StudentDirectory({ me, onBack }) {
               </div>
               {open === p.pid && (
                 <StudentEditor person={p} teachers={teachers}
-                  onDone={() => setOpen(null)} onSaved={() => setOpen(null)} />
+                  onDone={() => setOpen(null)} onSaved={() => setOpen(null)}
+                  onChanged={() => bumpVer((v) => v + 1)} />
               )}
             </div>
           );
@@ -2484,7 +2510,7 @@ function StudentDirectory({ me, onBack }) {
 }
 
 // 학생 한 명 편집 (새로 추가도 같은 화면)
-function StudentEditor({ person, teachers, onDone, onSaved }) {
+function StudentEditor({ person, teachers, onDone, onSaved, onChanged }) {
   const [f, setF] = useState({
     name: (person && person.name) || "", school: (person && person.school) || "",
     grade: (person && person.grade) || "", homeroom: (person && person.homeroom) || "",
@@ -2495,7 +2521,31 @@ function StudentEditor({ person, teachers, onDone, onSaved }) {
   const [shared, setShared] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [assignMsg, setAssignMsg] = useState("");
   useEffect(() => listenSchools(setShared), []);
+
+  async function toggleClass(c, inIt) {
+    if (busy || !person) return;
+    if (inIt) {
+      if (!confirm(person.name + " 학생을 " + c.name + " 명단에서 뺄까요?" + "\n\n" +
+        "출석·과제·질문 기록은 지워지지 않고 남아요. 명단·출석부에서만 사라집니다." +
+        (isIndividual(c) ? "\n개별진도반이라 등원요일·교재 설정도 함께 사라져요." : ""))) return;
+      setBusy(true); setAssignMsg("");
+      try { await unassignFromClass(c.id, person.pid); onChanged && onChanged(); }
+      catch (e) { setAssignMsg("빼지 못했어요: " + e.message); }
+      setBusy(false);
+      return;
+    }
+    setBusy(true); setAssignMsg("");
+    try {
+      await assignToClass(c.id, { pid: person.pid, name: f.name.trim() || person.name, school: f.school, grade: f.grade });
+      setAssignMsg(isIndividual(c)
+        ? c.name + "에 넣었어요. 등원요일·교재는 반 설정 → 학생별 설정에서 정해주세요."
+        : c.name + "에 넣었어요.");
+      onChanged && onChanged();
+    } catch (e) { setAssignMsg("넣지 못했어요: " + e.message); }
+    setBusy(false);
+  }
   const schoolOpts = Array.from(new Set(KNOWN_SCHOOLS.concat(shared))).sort((a, b) => a.localeCompare(b, "ko"));
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
@@ -2555,6 +2605,20 @@ function StudentEditor({ person, teachers, onDone, onSaved }) {
         ))}
         {f.grade && <button className="cm-link" onClick={() => set("grade", "")}>지우기</button>}
       </div>
+
+      {person && (<>
+        <label className="cm-label">반 배정 <span className="cm-h-hint">(누르면 넣고 빼요)</span></label>
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+          {activeClasses().map((c) => {
+            const inIt = (c.roster || []).some((r) => r.pid === person.pid);
+            return (
+              <button key={c.id} className={"cm-ab-tab" + (inIt ? " on" : "")} disabled={busy}
+                onClick={() => toggleClass(c, inIt)}>{c.name}</button>
+            );
+          })}
+        </div>
+        {assignMsg && <div className="cm-hint" style={{marginTop: 6, color: "#c2703f"}}>{assignMsg}</div>}
+      </>)}
 
       <label className="cm-label">담임</label>
       <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
