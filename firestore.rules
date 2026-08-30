@@ -111,6 +111,13 @@ service cloud.firestore {
       match /lessonLogs/{x} { allow read, write: if teaches(cid); }
     }
 
+    // ---------- 학생 명단 (사람 단위) ----------
+    // 학교·학년·담임이 들어간다. 선생님만 본다 —
+    // 학생 화면에 필요한 학교·학년은 반 명단(roster)에 함께 적어두므로 여기를 안 읽어도 된다.
+    match /students/{pid} {
+      allow read, write: if isTeacher();
+    }
+
     // ---------- 학원 전체 설정 ----------
     // 내신 회차는 반별이 아니라 학원 전체로 하나다. 선생님이 열고 학생은 읽기만 한다.
     match /appConfig/{doc} {
