@@ -842,13 +842,22 @@ async function signOutAll() {
 // roster 항목에는 school·grade를 함께 적어둔다(미러). 학생 화면은 반 문서만 읽을 수
 // 있어서, 그래야 학생도 자기 학교·학년을 본다.
 const studentsCol = () => db.collection("students");
-function listenStudents(cb) {
+function listenStudents(cb, onErr) {
   return studentsCol().onSnapshot((s) => {
     const arr = [];
     s.forEach((d) => arr.push({ pid: d.id, ...d.data() }));
     arr.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ko"));
     cb(arr);
-  }, () => cb([]));
+  }, (e) => { cb([]); if (onErr) onErr(e); });
+}
+// 권한 오류는 대개 "규칙을 아직 콘솔에 게시하지 않음"이다.
+// 영어 원문만 띄우면 무엇을 해야 하는지 알 수가 없다.
+function friendlyErr(e) {
+  const m = String((e && (e.code || e.message)) || e);
+  if (m.indexOf("permission") >= 0 || m.indexOf("insufficient") >= 0) {
+    return "권한이 없어요. Firebase 콘솔에서 보안 규칙을 다시 게시해야 합니다 (students 컬렉션이 새로 추가됐어요).";
+  }
+  return m;
 }
 async function saveStudent(pid, data) {
   if (pid) { await studentsCol().doc(pid).set({ ...data, updated: Date.now() }, { merge: true }); return pid; }
@@ -2337,7 +2346,9 @@ function StudentDirectory({ me, onBack }) {
   const [ver, bumpVer] = useState(0);   // 반 배정이 바뀌면 CLASSES를 다시 읽어 그린다
   const backRef = useSwipeBack(onBack);
 
-  useEffect(() => listenStudents(setPeople), []);
+  const [loadErr, setLoadErr] = useState("");
+  useEffect(() => listenStudents((arr) => { setPeople(arr); setLoadErr(""); },
+                                 (e) => setLoadErr(friendlyErr(e))), []);
   useEffect(() => { listTeachers().then(setTeachers).catch(() => setTeachers([])); }, []);
   useEffect(() => {
     const el = document.querySelector(".cm-shell");
@@ -2374,7 +2385,7 @@ function StudentDirectory({ me, onBack }) {
     try {
       for (const x of plan) await linkRosterToStudent(x.u.cls.id, x.u.r.id, x.p);
       setMsg(plan.length + "건 연결했어요 ✓");
-    } catch (e) { setMsg("연결 실패: " + e.message); }
+    } catch (e) { setMsg("연결 실패: " + friendlyErr(e)); }
     setBusy(false);
   }
 
@@ -2385,7 +2396,7 @@ function StudentDirectory({ me, onBack }) {
       const pid = await saveStudent(null, { name: u.r.name, school: u.r.school || "", grade: u.r.grade || "", homeroom: "" });
       await linkRosterToStudent(u.cls.id, u.r.id, { pid: pid, school: u.r.school || "", grade: u.r.grade || "" });
       setMsg(u.r.name + " 추가했어요 ✓");
-    } catch (e) { setMsg("실패: " + e.message); }
+    } catch (e) { setMsg("실패: " + friendlyErr(e)); }
     setBusy(false);
   }
 
@@ -2441,6 +2452,12 @@ function StudentDirectory({ me, onBack }) {
             </button>
           )}
         </div>
+        {loadErr && (
+          <div style={{background: "#fae3e2", border: "1px solid #eec9c7", borderRadius: 12,
+               padding: "12px 14px", marginBottom: 12, color: "#a5322d", fontSize: 13, lineHeight: 1.6}}>
+            <b>학생 명단을 읽지 못했어요.</b><br/>{loadErr}
+          </div>
+        )}
         {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"} style={{marginBottom: 8}}>{msg}</div>}
 
         {open === "new" && (
@@ -2532,7 +2549,7 @@ function StudentEditor({ person, teachers, onDone, onSaved, onChanged }) {
         (isIndividual(c) ? "\n개별진도반이라 등원요일·교재 설정도 함께 사라져요." : ""))) return;
       setBusy(true); setAssignMsg("");
       try { await unassignFromClass(c.id, person.pid); onChanged && onChanged(); }
-      catch (e) { setAssignMsg("빼지 못했어요: " + e.message); }
+      catch (e) { setAssignMsg("빼지 못했어요: " + friendlyErr(e)); }
       setBusy(false);
       return;
     }
@@ -2543,7 +2560,7 @@ function StudentEditor({ person, teachers, onDone, onSaved, onChanged }) {
         ? c.name + "에 넣었어요. 등원요일·교재는 반 설정 → 학생별 설정에서 정해주세요."
         : c.name + "에 넣었어요.");
       onChanged && onChanged();
-    } catch (e) { setAssignMsg("넣지 못했어요: " + e.message); }
+    } catch (e) { setAssignMsg("넣지 못했어요: " + friendlyErr(e)); }
     setBusy(false);
   }
   const schoolOpts = Array.from(new Set(KNOWN_SCHOOLS.concat(shared))).sort((a, b) => a.localeCompare(b, "ko"));
@@ -2558,7 +2575,7 @@ function StudentEditor({ person, teachers, onDone, onSaved, onChanged }) {
         name: f.name.trim(), school: f.school, grade: f.grade, homeroom: f.homeroom });
       await syncStudentToRosters({ pid: pid, school: f.school, grade: f.grade });
       onSaved();
-    } catch (e) { setMsg("저장 실패: " + e.message); setBusy(false); }
+    } catch (e) { setMsg("저장 실패: " + friendlyErr(e)); setBusy(false); }
   }
   async function remove() {
     if (!person) return;
