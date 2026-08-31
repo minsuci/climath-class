@@ -18,7 +18,7 @@ const STUB = `
   /* arrayUnion/arrayRemove 를 진짜로 적용한다.
      예전 스텁은 값을 그대로 돌려줘서 배열이 문자열로 들어갔다 — 앱은 멀쩡한데
      프리뷰만 틀리면 없는 버그를 쫓게 된다. */
-  function applyOps(base, patch){
+  function applyOps(base, patch, deep){
     var out = Object.assign({}, base);
     Object.keys(patch||{}).forEach(function(k){
       var v = patch[k];
@@ -31,12 +31,37 @@ const STUB = `
         out[k] = cur2.filter(function(x){ return v.vals.indexOf(x) < 0; });
       } else if (v === null && patch[k] === null) {
         delete out[k];
+      } else if (deep && v && typeof v === "object" && !Array.isArray(v)
+                 && out[k] && typeof out[k] === "object" && !Array.isArray(out[k])) {
+        /* 진짜 Firestore의 set({merge:true})는 map 안까지 합친다.
+           얕게 덮으면 { "학교|학년": {start} } 를 쓸 때 옆 칸(end/math)이 날아가서
+           앱은 멀쩡한데 프리뷰만 틀린다 — 없는 버그를 쫓게 된다. */
+        out[k] = applyOps(out[k], v, true);
       } else {
         out[k] = v;
       }
     });
     return out;
   }
+  /* onSnapshot을 한 번만 쏘면, 저장한 값이 화면에 안 돌아온다.
+     그러면 "저장은 됐는데 칸이 비어 보이는" 상태가 되어 앱 버그와 구별이 안 된다.
+     쓰기가 일어날 때마다 듣고 있는 쪽에 다시 쏜다. */
+  var _subs = [];
+  var _pending = 0;
+  function touch(){
+    if (_pending) return;
+    _pending = 1;
+    Promise.resolve().then(function(){
+      _pending = 0;
+      _subs.slice().forEach(function(sb){ try { sb.fire(); } catch(e){} });
+    });
+  }
+  function watch(fire){
+    var sb = { fire: fire };
+    _subs.push(sb);
+    return function(){ var i = _subs.indexOf(sb); if (i >= 0) _subs.splice(i, 1); };
+  }
+
   function snap(path){
     var d = store[path];
     // ref가 있어야 한다 — deleteFileDoc/deleteNoteUnit이 d.ref.delete()를 부른다
@@ -49,13 +74,18 @@ const STUB = `
       get: function(){ return Promise.resolve(snap(path)); },
       set: function(o, opt){
         var base = (opt && opt.merge) ? (store[path]||{}) : {};
-        store[path] = applyOps(base, o);
+        store[path] = applyOps(base, o, !!(opt && opt.merge));
+        touch();
         return Promise.resolve();
       },
-      update: function(o){ store[path] = applyOps(store[path]||{}, o); return Promise.resolve(); },
-      delete: function(){ delete store[path]; return Promise.resolve(); },
+      update: function(o){ store[path] = applyOps(store[path]||{}, o); touch(); return Promise.resolve(); },
+      delete: function(){ delete store[path]; touch(); return Promise.resolve(); },
       collection: function(n){ return colRef(path + "/" + n); },
-      onSnapshot: function(cb){ cb(snap(path)); return function(){}; }
+      onSnapshot: function(cb){
+        var fire = function(){ cb(snap(path)); };
+        fire();
+        return watch(fire);
+      }
     };
   }
   function colRef(path){
@@ -71,11 +101,16 @@ const STUB = `
     var q = {
       get: function(){ var ds = docsUnder(); return Promise.resolve({ docs: ds, forEach: function(f){ ds.forEach(f); }, size: ds.length, empty: !ds.length }); },
       orderBy: function(){ return q; }, limit: function(){ return q; }, where: function(){ return q; },
-      onSnapshot: function(cb){ var ds = docsUnder(); cb({ docs: ds, forEach: function(f){ ds.forEach(f); }, size: ds.length }); return function(){}; }
+      onSnapshot: function(cb){
+        var fire = function(){ var ds = docsUnder();
+          cb({ docs: ds, forEach: function(f){ ds.forEach(f); }, size: ds.length }); };
+        fire();
+        return watch(fire);
+      }
     };
     return Object.assign(q, {
       doc: function(id){ return docRef(path + "/" + (id === undefined ? newId() : id)); },
-      add: function(o){ var id = newId(); store[path + "/" + id] = o; return Promise.resolve({ id: id }); }
+      add: function(o){ var id = newId(); store[path + "/" + id] = o; touch(); return Promise.resolve({ id: id }); }
     });
   }
   window.db = { collection: function(n){ return colRef(n); } };

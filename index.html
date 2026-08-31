@@ -233,6 +233,8 @@ select.cm-sheet-in{cursor:pointer; appearance:none; -webkit-appearance:none;}
 .cm-sheet-ar.off{color:#cec5b7;}
 /* 아는 학교가 아니면 표시해둔다 — "경기"처럼 후보가 갈려 못 맞춘 것도 여기 걸린다 */
 .cm-sheet-in.odd{border-color:#e0b489; background:#fffaf3;}
+.cm-sched{table-layout:fixed; width:100%; min-width:880px;}
+.cm-sched input[type=date]{font-size:11px; padding:4px 5px;}
 
 .cm-drop{border:1.5px dashed transparent; border-radius:12px; transition:border-color .15s, background-color .15s; padding:2px;}
 .cm-drop.over{border-color:var(--clay); background:rgba(194,112,63,.06);}
@@ -701,6 +703,47 @@ function listenExamTerm(cb) {
   return examTermDoc().onSnapshot((d) => cb(d.exists ? (d.data().term || "") : ""), () => cb(""));
 }
 async function saveExamTerm(term) { await examTermDoc().set({ term, time: Date.now() }, { merge: true }); }
+
+// ----- 학교 일정 -----
+// 내신 기간과 수학시험 날짜는 학교·학년마다 하나로 정해져 있다. 그런데 지금까지는
+// 학생 40명이 각자 적어 냈다. 그래서 같은 학교인데 값이 갈리고(불일치 감지가 필요했던 이유),
+// 안 낸 학생은 참여표에서 아예 빠졌다. 여기 한 번 적어두면 참여표를 그걸로 채운다.
+//
+// 문서 하나에 납작하게 담는다: appConfig/schoolTerms
+//   { "<회차>__<학교>__<학년>": { term, school, grade, start, end, math, back, updated } }
+// 회차마다 다른 값이므로 열쇠에 회차를 넣는다. 납작하게 두면 한 칸만 고칠 때
+// merge로 그 열쇠만 쓰면 되고, 다른 선생님이 동시에 딴 학교를 고쳐도 안 부딪친다.
+const schoolTermsDoc = () => db.collection("appConfig").doc("schoolTerms");
+const termKey = (t) => String(t || "").replace(/[^0-9A-Za-z가-힣]+/g, "_");
+const schedKey = (term, school, grade) => termKey(term) + "__" + school + "__" + grade;
+function listenSchoolTerms(cb) {
+  return schoolTermsDoc().onSnapshot((d) => cb((d.exists && d.data()) || {}), () => cb({}));
+}
+// **넘긴 칸만** 보낸다. merge:true는 map 안까지 합쳐주므로 나머지는 그대로 남는다.
+// 통째로 보내면, 화면이 들고 있던 옛 사본으로 덮게 되어 방금 넣은 옆 칸이 지워진다
+// (시작 → 끝을 빠르게 이어 고치면 시작이 날아간다).
+async function saveSchoolTerm(term, school, grade, v) {
+  const one = { term: term, school: school, grade: grade, updated: Date.now() };
+  ["start", "end", "math", "back"].forEach((k) => {
+    if (v && v[k] !== undefined) one[k] = v[k];
+  });
+  await schoolTermsDoc().set({ [schedKey(term, school, grade)]: one }, { merge: true });
+}
+async function deleteSchoolTerm(term, school, grade) {
+  await schoolTermsDoc().set({ [schedKey(term, school, grade)]: firebase.firestore.FieldValue.delete() },
+    { merge: true });
+}
+// 그 회차에 적어둔 것만 골라낸다
+function schoolTermsOf(all, term) {
+  const pre = termKey(term) + "__";
+  return Object.keys(all || {})
+    .filter((k) => k.indexOf(pre) === 0 && all[k] && all[k].school)
+    .map((k) => all[k]);
+}
+function findSchoolTerm(all, term, school, grade) {
+  const v = (all || {})[schedKey(term, school, grade)];
+  return v && v.school && v.start ? v : null;
+}
 
 function dayAfter(d) {
   if (!d) return "";
@@ -2208,6 +2251,8 @@ function ExamForm({ cls, me }) {
   const [shared, setShared] = useState([]); // 선생님이 더해둔 학원 공용 목록
   const [etc, setEtc] = useState(false);    // 기타 = 직접 입력
   const [etcName, setEtcName] = useState("");
+  const [sched, setSched] = useState({});   // 선생님이 적어둔 학교 일정
+  const autoRef = useRef("");               // 어느 학교로 자동으로 채웠는지
 
   useEffect(() => listenExamTerm(setTerm), []);
   useEffect(() => {
@@ -2255,6 +2300,22 @@ function ExamForm({ cls, me }) {
   }, [cls.id]);
 
   useEffect(() => listenSchools(setShared), []);
+  useEffect(() => listenSchoolTerms(setSched), []);
+
+  // 선생님이 학교 일정을 적어뒀으면 그걸로 채워준다. 학생이 달력을 뒤질 일이 없어지고,
+  // 같은 학교인데 값이 갈리는 일도 애초에 안 생긴다. 이미 낸 사람은 안 건드린다.
+  // 다르면 학생이 고쳐서 내면 된다 — 분반마다 진짜 다를 수 있다.
+  const mySched = (term && f.school && f.grade) ? findSchoolTerm(sched, term, f.school, f.grade) : null;
+  useEffect(() => {
+    if (mine || !mySched) return;
+    const k = f.school + "|" + f.grade;
+    if (autoRef.current === k) return;   // 같은 학교로 두 번 덮지 않는다 (고쳐놓은 걸 되돌리게 된다)
+    autoRef.current = k;
+    setF((prev) => ({ ...prev, start: mySched.start, end: mySched.end, math: mySched.math || "",
+      prep: (prev.prep && prev.prep !== dayBefore(prev.math)) ? prev.prep
+            : (mySched.math ? dayBefore(mySched.math) : "") }));
+  }, [mine, f.school, f.grade, mySched ? examSig(mySched) : ""]);
+
   const schoolOpts = Array.from(new Set(KNOWN_SCHOOLS.concat(shared).concat(seen)))
     .sort((a, b) => a.localeCompare(b, "ko"));
   // 같은 학교·같은 학년 친구가 이미 낸 일정 (있으면 그대로 쓰게 해준다)
@@ -2295,6 +2356,13 @@ function ExamForm({ cls, me }) {
   return (
     <div className="cm-card">
       <h3 className="cm-h3">내신 참여 <span className="cm-h-hint">({term})</span></h3>
+      {mySched && !mine && (
+        <div className="cm-done" style={{marginBottom: 8}}>
+          {f.school} {f.grade} 일정을 선생님이 올려둬서 미리 채워놨어 · {shortDate(mySched.start)}~{shortDate(mySched.end)}
+          {mySched.math ? " · 수학 " + shortDate(mySched.math) : ""}
+          <br/><span style={{fontSize: 12, opacity: .85}}>네 반이랑 다르면 고쳐서 내면 돼.</span>
+        </div>
+      )}
       <div className="cm-hint" style={{marginBottom: 6}}>
         내신 기간이 언제인지 알려줘. 정해진 게 바뀌면 다시 내면 돼.
         <br/><b>복귀 날짜는 선생님이 정해서 알려줄 거야.</b>
@@ -2977,6 +3045,208 @@ function ExamEntry({ cls, term, st, cur, schoolOpts, onDone }) {
 
 // ----- 내신: 선생님이 모아 보기 (반 선택 전 · 전체) -----
 // 반별로 보면 "이번 주에 누가 빠지나"를 못 본다. 담당 반 전체를 한 화면에 모은다.
+// ----- 학교 일정 화면 -----
+// 학교·학년별로 내신 기간과 수학시험 날짜를 한 번 적어두는 곳.
+// 줄은 학생이 실제로 다니는 학교만 뜬다 (34개 × 4학년을 다 늘어놓으면 못 본다).
+function SchoolTermBoard({ onBack }) {
+  const [term, setTerm] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [editTerm, setEditTerm] = useState(false);
+  const [all, setAll] = useState(null);
+  const [people, setPeople] = useState(null);
+  const [shared, setShared] = useState([]);
+  const [msg, setMsg] = useState("");
+  const [addS, setAddS] = useState("");
+  const [addG, setAddG] = useState("고1");
+  const backRef = useSwipeBack(onBack);
+  // 날짜 칸이 여덟이라 좁은 컬럼에 안 들어간다 (참여표·안내문과 같은 처리)
+  useEffect(() => {
+    const el = document.querySelector(".cm-shell");
+    if (!el) return;
+    el.classList.add("cm-shell-wide");
+    return () => el.classList.remove("cm-shell-wide");
+  }, []);
+  useEffect(() => listenExamTerm((t) => { setTerm(t); setDraft(t); }), []);
+  useEffect(() => listenSchoolTerms(setAll), []);
+  useEffect(() => listenStudents(setPeople, () => setPeople([])), []);
+  useEffect(() => listenSchools(setShared), []);
+
+  if (term === null || all === null || people === null)
+    return <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>;
+
+  const curated = Array.from(new Set(KNOWN_SCHOOLS.concat(shared)));
+  const schoolOpts = Array.from(new Set(curated.concat(people.map((x) => x.school).filter(Boolean))))
+    .sort((a, b) => a.localeCompare(b, "ko"));
+
+  // 줄 = 학생이 다니는 (학교·학년) ∪ 이미 적어둔 (학교·학년)
+  const rows = {};
+  people.forEach((x) => {
+    if (!x.school || !x.grade) return;
+    const k = x.school + "|" + x.grade;
+    rows[k] = rows[k] || { school: x.school, grade: x.grade, n: 0 };
+    rows[k].n++;
+  });
+  schoolTermsOf(all, term).forEach((v) => {
+    const k = v.school + "|" + v.grade;
+    rows[k] = rows[k] || { school: v.school, grade: v.grade, n: 0 };
+  });
+  const list = Object.keys(rows).map((k) => rows[k]).sort((a, b) =>
+    a.school.localeCompare(b.school, "ko") || (GRADES.indexOf(a.grade) - GRADES.indexOf(b.grade)));
+
+  const done = list.filter((r) => { const v = all[schedKey(term, r.school, r.grade)]; return v && v.start && v.end; });
+  const coveredN = done.reduce((a, r) => a + r.n, 0);
+  const noSchool = people.filter((x) => !x.school || !x.grade).length;
+
+  async function addRow() {
+    const sc = matchSchool(addS, schoolOpts);
+    if (!sc) { setMsg("학교 이름을 넣어주세요"); return; }
+    if (rows[sc + "|" + addG]) { setMsg(sc + " " + addG + "은 이미 있어요"); return; }
+    try { await saveSchoolTerm(term, sc, addG, {}); setAddS(""); setMsg(""); }
+    catch (e) { setMsg("추가 실패: " + friendlyErr(e)); }
+  }
+
+  return (
+    <div ref={backRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 10}}>
+          <h2 className="cm-h2" style={{margin: 0}}>학교 일정</h2>
+          <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
+        </div>
+        <div className="cm-hint" style={{marginBottom: 10}}>
+          학교·학년마다 <b>내신 기간</b>과 <b>수학시험 날짜</b>를 한 번만 적어두는 곳이에요.
+          적어두면 <b>내신 참여표</b>에서 학생들 것을 한 번에 채울 수 있어요.
+          직보는 수학시험 전날로 알아서 잡히고, 복귀는 비워두면 학생별로 정하면 됩니다.
+        </div>
+
+        <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10}}>
+          {!editTerm && <span className="cm-chip" style={{background: term ? "#e6f0e9" : "#f0ece5", color: term ? "#3f7d5e" : "#7c6f5f"}}>
+            {term ? "회차 · " + term : "아직 회차를 안 열었어요"}
+          </span>}
+          {!editTerm && <button className="cm-link" onClick={() => setEditTerm(true)}>{term ? "회차 바꾸기" : "회차 열기"}</button>}
+          {editTerm && (<>
+            <input className="cm-input" style={{margin: 0, maxWidth: 220}} placeholder="예: 2026 2학기 중간"
+              value={draft} onChange={(e) => setDraft(e.target.value)} />
+            <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "9px 14px"}}
+              onClick={async () => { await saveExamTerm(draft.trim()); setEditTerm(false); }}>저장</button>
+            <button className="cm-link" onClick={() => { setDraft(term); setEditTerm(false); }}>취소</button>
+          </>)}
+        </div>
+
+        {!term ? (
+          <div className="cm-hint">회차를 열어야 일정을 적을 수 있어요. 일정은 회차마다 따로 저장돼요.</div>
+        ) : (<>
+          {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"} style={{marginBottom: 8}}>{msg}</div>}
+
+          <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 6}}>
+            {list.length}개 줄 · <b style={{color: "var(--navy)"}}>{done.length}개 적음</b> ·
+            이 일정으로 채울 수 있는 학생 <b style={{color: "var(--navy)"}}>{coveredN}명</b>
+            {noSchool > 0 && <span style={{color: "#c2703f"}}> · 학교·학년이 비어서 {noSchool}명은 못 채워요 (학생 명단에서 채워주세요)</span>}
+          </div>
+
+          <datalist id="cm-sched-schools">
+            {schoolOpts.map((x) => <option key={x} value={x} />)}
+          </datalist>
+          <div className="cm-ab-wrap" data-no-swipe>
+            <table className="cm-ab-table cm-sched">
+              <thead>
+                <tr>
+                  <th className="cm-ab-name" style={{width: 110}}>학교</th>
+                  <th style={{width: 56}}>학년</th>
+                  <th style={{width: 50}}>학생</th>
+                  <th style={{width: 126}}>내신 시작</th>
+                  <th style={{width: 126}}>내신 끝</th>
+                  <th style={{width: 126}}>수학시험</th>
+                  <th style={{width: 66}}>직보</th>
+                  <th style={{width: 126}}>복귀 <span style={{fontWeight: 400, color: "#8a7f72"}}>(선택)</span></th>
+                  <th style={{width: 56}}></th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.length === 0 && (
+                  <tr><td colSpan={10} style={{color: "var(--muted)", padding: 14}}>
+                    학생 명단에 학교·학년을 넣으면 여기 줄이 생겨요. 아래에서 직접 더할 수도 있어요.
+                  </td></tr>
+                )}
+                {list.map((r) => (
+                  <SchoolTermRow key={r.school + "|" + r.grade} term={term} row={r}
+                    cur={all[schedKey(term, r.school, r.grade)] || null} onMsg={setMsg} />
+                ))}
+                <tr>
+                  <td className="cm-ab-name" style={{padding: 3}}>
+                    <input className="cm-sheet-in" list="cm-sched-schools" placeholder="+ 학교" value={addS}
+                      onChange={(e) => setAddS(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") addRow(); }} />
+                  </td>
+                  <td style={{padding: 3}}>
+                    <select className="cm-sheet-in" value={addG} onChange={(e) => setAddG(e.target.value)}>
+                      {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </td>
+                  <td colSpan={8} style={{textAlign: "left", padding: "3px 6px"}}>
+                    {addS.trim()
+                      ? <button className="cm-link" onClick={addRow}>{matchSchool(addS, schoolOpts)} {addG} 줄 만들기</button>
+                      : <span style={{fontSize: 12, color: "#b6ab9b"}}>학생이 아직 없는 학교도 미리 적어둘 수 있어요</span>}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
+// 학교 일정 한 줄. 날짜를 고치면 바로 저장한다.
+function SchoolTermRow({ term, row, cur, onMsg }) {
+  const [busy, setBusy] = useState(false);
+  const [ok, setOk] = useState(false);
+  const v = cur || {};
+  async function patch(data) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await saveSchoolTerm(term, row.school, row.grade, data);
+      setOk(true); setTimeout(() => setOk(false), 1200);
+    } catch (e) { onMsg("저장 실패: " + friendlyErr(e)); }
+    setBusy(false);
+  }
+  async function clear() {
+    if (!confirm(row.school + " " + row.grade + " 일정을 지울까요?" + "\n" +
+      "이미 채워둔 학생들 참여표는 그대로 남아요.")) return;
+    setBusy(true);
+    try { await deleteSchoolTerm(term, row.school, row.grade); }
+    catch (e) { onMsg("지우지 못했어요: " + friendlyErr(e)); }
+    setBusy(false);
+  }
+  const bad = v.start && v.end && v.end < v.start;
+  const mathOut = v.math && v.start && v.end && (v.math < v.start || v.math > v.end);
+  const cell = { padding: 3, background: ok ? "#e6f0e9" : undefined, transition: "background .4s" };
+  const dateIn = (k) => (
+    <input type="date" className="cm-sheet-in" value={v[k] || ""} disabled={busy}
+      onChange={(e) => patch({ [k]: e.target.value })} />
+  );
+  return (
+    <tr>
+      <td className="cm-ab-name" style={cell}>{row.school}</td>
+      <td style={cell}>{row.grade}</td>
+      <td style={{ ...cell, color: row.n ? "var(--navy)" : "#b6ab9b" }}>{row.n}명</td>
+      <td style={cell}>{dateIn("start")}</td>
+      <td style={{ ...cell, background: bad ? "#fae3e2" : cell.background }}>{dateIn("end")}</td>
+      <td style={{ ...cell, background: mathOut ? "#f6e7df" : cell.background }}>{dateIn("math")}</td>
+      <td style={{ ...cell, fontSize: 11, color: "#c2703f" }}>{v.math ? shortDate(dayBefore(v.math)) : "-"}</td>
+      <td style={cell}>{dateIn("back")}</td>
+      <td style={cell}>
+        {cur && <button className="cm-link" style={{color: "#d6453f", padding: 0}} disabled={busy} onClick={clear}>지우기</button>}
+      </td>
+      <td style={{ ...cell, textAlign: "left", fontSize: 11, color: "#a8562c", whiteSpace: "normal" }}>
+        {bad ? "끝이 시작보다 빨라요" : (mathOut ? "수학시험이 내신 기간 밖이에요" : "")}
+      </td>
+    </tr>
+  );
+}
+
 function ExamBoard({ onBack }) {
   const [term, setTerm] = useState(null);
   const [byClass, setByClass] = useState({});   // { cid: { sid: 제출 } }
@@ -2986,6 +3256,9 @@ function ExamBoard({ onBack }) {
   const [fixing, setFixing] = useState("");
   const [shared, setShared] = useState([]);
   const [entry, setEntry] = useState(null);   // 대신 입력 중인 {cid, st, cur}
+  const [sched, setSched] = useState({});     // 학교 일정 (appConfig/schoolTerms)
+  const [filling, setFilling] = useState(false);
+  const [fillMsg, setFillMsg] = useState("");
   const backRef = useSwipeBack(onBack);
   // 참여표는 PC로 본다. 560px 컬럼에 가두면 달력이 못 들어간다 (안내문과 같은 처리)
   useEffect(() => {
@@ -2996,6 +3269,7 @@ function ExamBoard({ onBack }) {
   }, []);
   const classes = activeClasses();
   useEffect(() => listenSchools(setShared), []);
+  useEffect(() => listenSchoolTerms(setSched), []);
 
   useEffect(() => listenExamTerm((t) => { setTerm(t); setDraft(t); }), []);
   useEffect(() => {
@@ -3054,6 +3328,59 @@ function ExamBoard({ onBack }) {
     const keys = Object.keys(variants);
     if (keys.length > 1) conflicts.push({ key: k, school: g[0].v.school, grade: g[0].v.grade, variants, keys });
   });
+
+  // ----- 학교 일정으로 채우기 -----
+  // 학교·학년은 (1) 이미 낸 값 (2) 반 명단에 적힌 값(학생 명단에서 정한 것) 순으로 본다.
+  function schedOf(st, v) {
+    const school = (v && v.school) || st.school || "";
+    const grade = (v && v.grade) || st.grade || "";
+    if (!school || !grade) return null;
+    return findSchoolTerm(sched, term, school, grade);
+  }
+  // 안 낸 학생 중 학교 일정이 있는 사람 = 바로 채울 수 있는 사람
+  const fillable = missing.map((x) => ({ ...x, s: schedOf(x.st, null) })).filter((x) => x.s);
+  // 이미 낸 사람 중 학교 일정과 다른 사람. 자동으로 덮지 않는다 —
+  // 분반마다 진짜 다를 수도 있고, 학생이 맞게 낸 걸 지워버리면 되돌릴 방법이 없다.
+  const offSched = got.map((x) => ({ ...x, s: schedOf(x.st, x.v) }))
+    .filter((x) => x.s && examSig(x.v) !== examSig(x.s));
+
+  function schedFields(st, sc, keep) {
+    return {
+      name: st.name, school: sc.school, grade: sc.grade,
+      start: sc.start, end: sc.end, math: sc.math || "",
+      // 직보를 손으로 고쳐둔 사람은 그대로 둔다 (전날이 아니면 일부러 바꾼 것)
+      prep: (keep && keep.prep && keep.prep !== dayBefore(keep.math)) ? keep.prep
+            : (sc.math ? dayBefore(sc.math) : ""),
+      // 복귀는 선생님이 학생별로 정한다. 이미 정해둔 게 있으면 안 건드린다.
+      back: (keep && keep.back) || sc.back || "",
+      note: (keep && keep.note) || "",
+      byTeacher: true, fromSchedule: true,
+    };
+  }
+  async function fillFromSchedule() {
+    if (!fillable.length || filling) return;
+    if (!confirm("학교 일정으로 " + fillable.length + "명을 채웁니다." + "\n" +
+      "이미 낸 학생은 건드리지 않아요. 계속할까요?")) return;
+    setFilling(true); setFillMsg("");
+    let n = 0;
+    try {
+      for (const x of fillable) { await saveExam(x.cls.id, term, x.st.id, schedFields(x.st, x.s, null)); n++; }
+      setFillMsg(n + "명 채웠어요 ✓");
+    } catch (e) { setFillMsg("채우다 멈췄어요 (" + n + "명까지): " + friendlyErr(e)); }
+    setFilling(false);
+  }
+  async function syncToSchedule() {
+    if (!offSched.length || filling) return;
+    if (!confirm("학교 일정과 다르게 낸 " + offSched.length + "명을 학교 일정에 맞춥니다." + "\n" +
+      "직보를 따로 고쳐둔 것과 복귀 날짜는 그대로 둡니다. 계속할까요?")) return;
+    setFilling(true); setFillMsg("");
+    let n = 0;
+    try {
+      for (const x of offSched) { await saveExam(x.cls.id, term, x.st.id, schedFields(x.st, x.s, x.v)); n++; }
+      setFillMsg(n + "명 맞췄어요 ✓");
+    } catch (e) { setFillMsg("맞추다 멈췄어요 (" + n + "명까지): " + friendlyErr(e)); }
+    setFilling(false);
+  }
 
   async function applyVariant(c, sigKey) {
     const src = c.variants[sigKey][0].v;
@@ -3186,6 +3513,40 @@ function ExamBoard({ onBack }) {
           </>)}
         </div>
         {!term && <div className="cm-hint">회차를 열면 학생 화면에 <b>내신</b> 탭이 생겨요. 담당 반 전체가 여기 모입니다.</div>}
+
+        {term && (fillable.length > 0 || offSched.length > 0 || fillMsg) && (
+          <div style={{background: "#eef1f6", border: "1px solid #d8e0ea", borderRadius: 12,
+               padding: "12px 14px", marginBottom: 12}}>
+            <div style={{fontSize: 13, color: "var(--navy)", fontWeight: 700, marginBottom: 6}}>학교 일정으로 채우기</div>
+            <div style={{fontSize: 12, color: "var(--muted)", lineHeight: 1.6, marginBottom: 8}}>
+              <b>학교 일정</b>에 적어둔 내신 기간·수학시험 날짜로 학생 것을 만들어줘요.
+              학교·학년은 학생 명단에 정해둔 값을 씁니다.
+            </div>
+            <div style={{display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center"}}>
+              {fillable.length > 0 && (
+                <button className="cm-btn cm-btn-primary" disabled={filling}
+                  style={{margin: 0, width: "auto", padding: "9px 14px", fontSize: 13}}
+                  onClick={fillFromSchedule}>
+                  {filling ? "채우는 중…" : "안 낸 학생 " + fillable.length + "명 채우기"}
+                </button>
+              )}
+              {offSched.length > 0 && (
+                <button className="cm-btn cm-btn-ghost" disabled={filling}
+                  style={{margin: 0, width: "auto", padding: "9px 14px", fontSize: 13}}
+                  onClick={syncToSchedule}>
+                  학교 일정과 다른 {offSched.length}명 맞추기
+                </button>
+              )}
+              {fillMsg && <span style={{fontSize: 13, color: fillMsg.includes("✓") ? "#3f7d5e" : "#a5322d"}}>{fillMsg}</span>}
+            </div>
+            {offSched.length > 0 && (
+              <div style={{fontSize: 11, color: "#8a7f72", marginTop: 8, lineHeight: 1.6}}>
+                다른 학생: {offSched.slice(0, 12).map((x) => x.st.name + "(" + (x.v.school || "") + ")").join(" · ")}
+                {offSched.length > 12 ? " 외 " + (offSched.length - 12) + "명" : ""}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 학생이 "기타"로 직접 넣은 학교를 공용 목록에 올린다.
             올려두면 다음부터 다른 학생도 고를 수 있어서 표기가 갈라지지 않는다. */}
@@ -4383,6 +4744,7 @@ function AdminView() {
         { key: "makeup", ico: "▷", label: "보강 관리" },
         { key: "risk", ico: "⚠", label: "위험신호" },
         { key: "report", ico: "▣", label: "학습관리 보고서" },
+        { key: "schoolcal", ico: "▦", label: "학교 일정" },
         { key: "exams", ico: "▤", label: "내신 참여표" },
         { key: "roster", ico: "☰", label: "학생 명단" },
         ...(cls ? [
@@ -4426,6 +4788,7 @@ function AdminView() {
   if (mode === "risk") return <>{homeSide}<RiskDashboard onBack={() => setMode("login")} /></>;
   if (mode === "makeup") return <>{homeSide}<MakeupCenter onBack={() => setMode("login")} /></>;
   if (mode === "report") return <>{homeSide}<ReportCenter onBack={() => setMode("login")} /></>;
+  if (mode === "schoolcal") return <>{homeSide}<SchoolTermBoard onBack={() => setMode("login")} /></>;
   if (mode === "exams") return <>{homeSide}<ExamBoard onBack={() => setMode("login")} /></>;
   if (mode === "roster") return <>{homeSide}<StudentDirectory me={me} onBack={() => setMode("login")} /></>;
 
