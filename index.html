@@ -217,6 +217,14 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 /* ===== 드래그 업로드 =====
    평소에는 테두리를 안 그린다. 파일을 끌고 들어와야 자리가 드러난다.
    터치 기기에는 드래그가 없으므로 버튼이 항상 같이 있어야 한다. */
+/* 학생 명단 표 — 칸 안에서 바로 고친다 (엑셀처럼) */
+.cm-sheet td{padding:3px;}
+.cm-sheet-in{width:100%; box-sizing:border-box; border:1px solid transparent; background:transparent;
+  border-radius:6px; padding:5px 6px; font-family:inherit; font-size:13px; color:var(--ink); outline:none;}
+.cm-sheet-in:hover{border-color:#e0d9cb; background:#fff;}
+.cm-sheet-in:focus{border-color:var(--navy); background:#fff;}
+select.cm-sheet-in{cursor:pointer; appearance:none; -webkit-appearance:none;}
+
 .cm-drop{border:1.5px dashed transparent; border-radius:12px; transition:border-color .15s, background-color .15s; padding:2px;}
 .cm-drop.over{border-color:var(--clay); background:rgba(194,112,63,.06);}
 .cm-drop-hint{display:flex; align-items:center; justify-content:center; gap:7px; color:var(--clay); font-size:13px; font-weight:500; padding:16px 10px; text-align:center;}
@@ -2344,7 +2352,10 @@ function StudentDirectory({ me, onBack }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [ver, bumpVer] = useState(0);   // 반 배정이 바뀌면 CLASSES를 다시 읽어 그린다
-  const [openUnlinked, setOpenUnlinked] = useState(false);  // 미연결 목록은 접어둔다 (수십 건이라 화면을 다 먹는다)
+  const [openUnlinked, setOpenUnlinked] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [shared, setShared] = useState([]);
+  useEffect(() => listenSchools(setShared), []);  // 미연결 목록은 접어둔다 (수십 건이라 화면을 다 먹는다)
   const backRef = useSwipeBack(onBack);
 
   const [loadErr, setLoadErr] = useState("");
@@ -2403,6 +2414,17 @@ function StudentDirectory({ me, onBack }) {
 
   if (people === null) return <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>;
   const tName = (tid) => { const t = teachers.find((x) => x.tid === tid); return t ? t.name : ""; };
+  const schoolOpts = Array.from(new Set(KNOWN_SCHOOLS.concat(shared)
+    .concat(people.map((x) => x.school).filter(Boolean)))).sort((a, b) => a.localeCompare(b, "ko"));
+
+  async function addNew() {
+    const nm = newName.trim();
+    if (!nm || busy) return;
+    setBusy(true); setMsg("");
+    try { await saveStudent(null, { name: nm, school: "", grade: "", homeroom: "" }); setNewName(""); }
+    catch (e) { setMsg("추가 실패: " + friendlyErr(e)); }
+    setBusy(false);
+  }
 
   // 반별 보기 — 어느 반에 몇 명인지 세고, 고른 반의 명단 순서대로 보여준다
   const inCls = (p, cid) => (CLASSES.find((c) => c.id === cid) || { roster: [] }).roster
@@ -2435,8 +2457,7 @@ function StudentDirectory({ me, onBack }) {
         <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10}}>
           <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 160}} placeholder="이름 · 학교로 찾기"
             value={q} onChange={(e) => setQ(e.target.value)} />
-          <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "9px 14px"}}
-            onClick={() => setOpen("new")}>+ 학생 추가</button>
+
         </div>
         <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
           <button className={"cm-ab-tab" + (clsFilter === "all" ? " on" : "")}
@@ -2460,12 +2481,6 @@ function StudentDirectory({ me, onBack }) {
           </div>
         )}
         {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"} style={{marginBottom: 8}}>{msg}</div>}
-
-        {open === "new" && (
-          <StudentEditor person={null} teachers={teachers}
-            onDone={() => setOpen(null)} onSaved={() => setOpen(null)}
-            onChanged={() => bumpVer((v) => v + 1)} />
-        )}
 
         {/* 아직 안 이어진 명단 항목 */}
         {unlinked.length > 0 && (
@@ -2507,162 +2522,176 @@ function StudentDirectory({ me, onBack }) {
           {clsFilter === "all" ? "전체" : (clsFilter === "none" ? "배정된 반이 없는 학생" : (findClass(clsFilter) || {}).name)}
           {" · "}{shown.length}명
           {clsFilter !== "all" && clsFilter !== "none" && " (명단 순서)"}
+          {" · "}<span style={{color: "#8a7f72"}}>칸을 바로 고치면 저장돼요</span>
         </div>
-        {shown.length === 0 && <div className="cm-empty">아직 없어요</div>}
-        {shown.map((p) => {
-          const inClasses = classesOfPerson(p.pid);
-          return (
-            <div key={p.pid} style={{borderBottom: "1px solid var(--line)", padding: "9px 0"}}>
-              <div style={{display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", cursor: "pointer"}}
-                onClick={() => setOpen(open === p.pid ? null : p.pid)}>
-                <strong>{p.name}</strong>
-                {p.grade && <span className="cm-chip" style={{background: "#eef1f6", color: "var(--navy)"}}>{p.grade}</span>}
-                {p.school && <span style={{fontSize: 13, color: "var(--muted)"}}>{p.school}</span>}
-                {p.homeroom && <span className="cm-chip" style={{background: "#e6f0e9", color: "#3f7d5e"}}>담임 {tName(p.homeroom)}</span>}
-                <span style={{marginLeft: "auto", fontSize: 12, color: "var(--muted)"}}>
-                  {inClasses.length ? inClasses.map((x) => x.cls.name).join(" · ") : "배정된 반 없음"}
-                  {" "}{open === p.pid ? "▾" : "▸"}
-                </span>
-              </div>
-              {open === p.pid && (
-                <StudentEditor person={p} teachers={teachers}
-                  onDone={() => setOpen(null)} onSaved={() => setOpen(null)}
-                  onChanged={() => bumpVer((v) => v + 1)} />
+
+        <div className="cm-ab-wrap" data-no-swipe>
+          <table className="cm-ab-table cm-sheet">
+            <thead>
+              <tr>
+                <th className="cm-ab-name" style={{minWidth: 90}}>이름</th>
+                <th style={{minWidth: 120}}>학교</th>
+                <th style={{minWidth: 64}}>학년</th>
+                <th style={{minWidth: 96}}>담임</th>
+                <th style={{minWidth: 150}}>반</th>
+                <th style={{minWidth: 44}}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.length === 0 && (
+                <tr><td colSpan={6} style={{color: "var(--muted)", padding: "14px"}}>아직 없어요</td></tr>
               )}
-            </div>
-          );
-        })}
+              {shown.map((p) => (
+                <StudentRow key={p.pid} person={p} teachers={teachers} schoolOpts={schoolOpts}
+                  expanded={open === p.pid} onToggle={() => setOpen(open === p.pid ? null : p.pid)}
+                  onChanged={() => bumpVer((v) => v + 1)}
+                  onMsg={setMsg} />
+              ))}
+              {/* 새 줄 — 이름만 치면 만들어진다 */}
+              <tr>
+                <td className="cm-ab-name" style={{padding: 3}}>
+                  <input className="cm-sheet-in" placeholder="+ 새 학생" value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addNew(); }} />
+                </td>
+                <td colSpan={5} style={{textAlign: "left", padding: "3px 6px"}}>
+                  {newName.trim()
+                    ? <button className="cm-link" disabled={busy} onClick={addNew}>이름 넣고 Enter — 또는 여기를 눌러 추가</button>
+                    : <span style={{fontSize: 12, color: "#b6ab9b"}}>이름을 치면 새 학생이 만들어져요</span>}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
 }
 
-// 학생 한 명 편집 (새로 추가도 같은 화면)
-function StudentEditor({ person, teachers, onDone, onSaved, onChanged }) {
-  const [f, setF] = useState({
-    name: (person && person.name) || "", school: (person && person.school) || "",
-    grade: (person && person.grade) || "", homeroom: (person && person.homeroom) || "",
-  });
-  const [q, setQ] = useState("");
-  const [etc, setEtc] = useState(false);
-  const [etcName, setEtcName] = useState("");
-  const [shared, setShared] = useState([]);
+// 표의 한 줄. 칸을 고치면 바로 저장한다 (엑셀처럼).
+// 고르는 칸(학교·학년·담임)은 즉시, 이름은 칸을 벗어날 때.
+function StudentRow({ person, teachers, schoolOpts, expanded, onToggle, onChanged, onMsg }) {
+  const [name, setName] = useState(person.name || "");
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [assignMsg, setAssignMsg] = useState("");
-  useEffect(() => listenSchools(setShared), []);
+  const [ok, setOk] = useState(false);
+  useEffect(() => { setName(person.name || ""); }, [person.name]);
 
-  async function toggleClass(c, inIt) {
-    if (busy || !person) return;
+  function flash() { setOk(true); setTimeout(() => setOk(false), 1200); }
+  async function patch(data) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await saveStudent(person.pid, data);
+      await syncStudentToRosters({ pid: person.pid,
+        school: data.school !== undefined ? data.school : person.school,
+        grade: data.grade !== undefined ? data.grade : person.grade });
+      flash(); onChanged && onChanged();
+    } catch (e) { onMsg("저장 실패: " + friendlyErr(e)); }
+    setBusy(false);
+  }
+  function onSchool(v) {
+    if (v === "__etc") {
+      const t = prompt("학교 이름을 입력하세요", person.school || "");
+      if (t == null || !t.trim()) return;
+      patch({ school: t.trim() });
+      return;
+    }
+    patch({ school: v });
+  }
+  async function remove() {
+    if (!confirm(person.name + " 학생 정보를 지울까요?" + "\n" +
+      "반 명단과 출결·과제 기록은 그대로 남아요. 학교·학년·담임만 사라집니다.")) return;
+    setBusy(true);
+    try { await deleteStudent(person.pid); onChanged && onChanged(); }
+    catch (e) { onMsg("삭제 실패: " + friendlyErr(e)); setBusy(false); }
+  }
+
+  const mine = classesOfPerson(person.pid);
+  const cellStyle = { padding: 3, background: ok ? "#e6f0e9" : undefined, transition: "background .4s" };
+  return (<>
+    <tr>
+      <td className="cm-ab-name" style={cellStyle}>
+        <input className="cm-sheet-in" value={name} disabled={busy}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => { const v = name.trim(); if (v && v !== person.name) patch({ name: v }); else setName(person.name || ""); }}
+          onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
+      </td>
+      <td style={cellStyle}>
+        <select className="cm-sheet-in" value={person.school || ""} disabled={busy} onChange={(e) => onSchool(e.target.value)}>
+          <option value="">—</option>
+          {schoolOpts.map((x) => <option key={x} value={x}>{x}</option>)}
+          <option value="__etc">직접 입력…</option>
+        </select>
+      </td>
+      <td style={cellStyle}>
+        <select className="cm-sheet-in" value={person.grade || ""} disabled={busy} onChange={(e) => patch({ grade: e.target.value })}>
+          <option value="">—</option>
+          {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+        </select>
+      </td>
+      <td style={cellStyle}>
+        <select className="cm-sheet-in" value={person.homeroom || ""} disabled={busy} onChange={(e) => patch({ homeroom: e.target.value })}>
+          <option value="">—</option>
+          {teachers.filter((t) => (t.status || "active") !== "pending").map((t) => (
+            <option key={t.tid} value={t.tid}>{t.name}</option>
+          ))}
+        </select>
+      </td>
+      <td style={{ ...cellStyle, textAlign: "left", fontSize: 12 }}>
+        <button className="cm-link" style={{padding: 0, textDecoration: "none"}} onClick={onToggle}>
+          {mine.length ? mine.map((x) => x.cls.name).join(" · ") : <span style={{color: "#b6ab9b"}}>없음</span>}
+          {" "}{expanded ? "▾" : "▸"}
+        </button>
+      </td>
+      <td style={cellStyle}>
+        <button className="cm-link" style={{color: "#d6453f", padding: 0}} disabled={busy} onClick={remove}>삭제</button>
+      </td>
+    </tr>
+    {expanded && (
+      <tr>
+        <td colSpan={6} style={{textAlign: "left", padding: "8px 10px", background: "#fafbfd"}}>
+          <ClassAssign person={person} onChanged={onChanged} onMsg={onMsg} />
+        </td>
+      </tr>
+    )}
+  </>);
+}
+
+// 반 배정 — 누르면 넣고 뺀다
+function ClassAssign({ person, onChanged, onMsg }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  async function toggle(c, inIt) {
+    if (busy) return;
     if (inIt) {
       if (!confirm(person.name + " 학생을 " + c.name + " 명단에서 뺄까요?" + "\n\n" +
         "출석·과제·질문 기록은 지워지지 않고 남아요. 명단·출석부에서만 사라집니다." +
         (isIndividual(c) ? "\n개별진도반이라 등원요일·교재 설정도 함께 사라져요." : ""))) return;
-      setBusy(true); setAssignMsg("");
+      setBusy(true); setNote("");
       try { await unassignFromClass(c.id, person.pid); onChanged && onChanged(); }
-      catch (e) { setAssignMsg("빼지 못했어요: " + friendlyErr(e)); }
+      catch (e) { onMsg("빼지 못했어요: " + friendlyErr(e)); }
       setBusy(false);
       return;
     }
-    setBusy(true); setAssignMsg("");
+    setBusy(true); setNote("");
     try {
-      await assignToClass(c.id, { pid: person.pid, name: f.name.trim() || person.name, school: f.school, grade: f.grade });
-      setAssignMsg(isIndividual(c)
-        ? c.name + "에 넣었어요. 등원요일·교재는 반 설정 → 학생별 설정에서 정해주세요."
-        : c.name + "에 넣었어요.");
+      await assignToClass(c.id, person);
+      setNote(isIndividual(c) ? c.name + "에 넣었어요. 등원요일·교재는 반 설정 → 학생별 설정에서 정해주세요." : "");
       onChanged && onChanged();
-    } catch (e) { setAssignMsg("넣지 못했어요: " + friendlyErr(e)); }
+    } catch (e) { onMsg("넣지 못했어요: " + friendlyErr(e)); }
     setBusy(false);
   }
-  const schoolOpts = Array.from(new Set(KNOWN_SCHOOLS.concat(shared))).sort((a, b) => a.localeCompare(b, "ko"));
-  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-
-  async function save() {
-    if (busy) return;
-    if (!f.name.trim()) { setMsg("이름을 입력해주세요"); return; }
-    setBusy(true); setMsg("");
-    try {
-      const pid = await saveStudent(person ? person.pid : null, {
-        name: f.name.trim(), school: f.school, grade: f.grade, homeroom: f.homeroom });
-      await syncStudentToRosters({ pid: pid, school: f.school, grade: f.grade });
-      onSaved();
-    } catch (e) { setMsg("저장 실패: " + friendlyErr(e)); setBusy(false); }
-  }
-  async function remove() {
-    if (!person) return;
-    if (!confirm(person.name + " 학생 정보를 지울까요?" + "\n" +
-      "반 명단과 출결·과제 기록은 그대로 남아요. 학교·학년·담임만 사라집니다.")) return;
-    setBusy(true);
-    try { await deleteStudent(person.pid); onSaved(); }
-    catch (e) { setMsg("삭제 실패: " + e.message); setBusy(false); }
-  }
-
   return (
-    <div style={{background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: "12px 14px", marginTop: 8}}>
-      <label className="cm-label" style={{marginTop: 0}}>이름</label>
-      <input className="cm-input" value={f.name} onChange={(e) => set("name", e.target.value)} />
-
-      <label className="cm-label">학교</label>
-      {f.school ? (
-        <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"}}>
-          <span className="cm-chip" style={{background: "#eef1f6", color: "var(--navy)", fontSize: 14}}>{f.school}</span>
-          <button className="cm-link" onClick={() => { set("school", ""); setQ(""); }}>바꾸기</button>
-        </div>
-      ) : (<>
-        <input className="cm-input" placeholder="학교 이름 일부 (예: 중동)" value={q} onChange={(e) => setQ(e.target.value)} />
-        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6}}>
-          {schoolOpts.filter((x) => !q.trim() || x.includes(q.trim())).slice(0, 12).map((x) => (
-            <button key={x} className="cm-ab-tab" onClick={() => { setEtc(false); set("school", x); }}>{x}</button>
-          ))}
-          <button className={"cm-ab-tab" + (etc ? " on" : "")} onClick={() => { setEtc(true); setEtcName(q.trim()); }}>기타 (직접 입력)</button>
-        </div>
-        {etc && (
-          <div style={{display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap"}}>
-            <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 140}} autoFocus placeholder="학교 이름"
-              value={etcName} onChange={(e) => setEtcName(e.target.value)} />
-            <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "8px 13px"}}
-              disabled={!etcName.trim()} onClick={() => { set("school", etcName.trim()); setEtc(false); }}>이 학교로</button>
-          </div>
-        )}
-      </>)}
-
-      <label className="cm-label">학년</label>
+    <div>
+      <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 6}}>반 배정 — 누르면 넣고 빼요</div>
       <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
-        {GRADES.map((g) => (
-          <button key={g} className={"cm-ab-tab" + (f.grade === g ? " on" : "")} onClick={() => set("grade", g)}>{g}</button>
-        ))}
-        {f.grade && <button className="cm-link" onClick={() => set("grade", "")}>지우기</button>}
+        {activeClasses().map((c) => {
+          const inIt = (c.roster || []).some((r) => r.pid === person.pid);
+          return <button key={c.id} className={"cm-ab-tab" + (inIt ? " on" : "")} disabled={busy}
+            onClick={() => toggle(c, inIt)}>{c.name}</button>;
+        })}
       </div>
-
-      {person && (<>
-        <label className="cm-label">반 배정 <span className="cm-h-hint">(누르면 넣고 빼요)</span></label>
-        <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
-          {activeClasses().map((c) => {
-            const inIt = (c.roster || []).some((r) => r.pid === person.pid);
-            return (
-              <button key={c.id} className={"cm-ab-tab" + (inIt ? " on" : "")} disabled={busy}
-                onClick={() => toggleClass(c, inIt)}>{c.name}</button>
-            );
-          })}
-        </div>
-        {assignMsg && <div className="cm-hint" style={{marginTop: 6, color: "#c2703f"}}>{assignMsg}</div>}
-      </>)}
-
-      <label className="cm-label">담임</label>
-      <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
-        {teachers.filter((t) => (t.status || "active") !== "pending").map((t) => (
-          <button key={t.tid} className={"cm-ab-tab" + (f.homeroom === t.tid ? " on" : "")}
-            onClick={() => set("homeroom", f.homeroom === t.tid ? "" : t.tid)}>{t.name}</button>
-        ))}
-      </div>
-
-      {msg && <div className="cm-err">{msg}</div>}
-      <div style={{display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap"}}>
-        <button className="cm-btn cm-btn-primary" style={{margin: 0, width: "auto", padding: "9px 16px"}}
-          disabled={busy} onClick={save}>{busy ? "저장 중..." : "저장"}</button>
-        <button className="cm-link" onClick={onDone}>취소</button>
-        {person && <button className="cm-link" style={{marginLeft: "auto", color: "#d6453f"}} disabled={busy} onClick={remove}>삭제</button>}
-      </div>
+      {note && <div className="cm-hint" style={{marginTop: 6, color: "#c2703f"}}>{note}</div>}
     </div>
   );
 }
