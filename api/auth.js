@@ -12,7 +12,9 @@
 //   { action:"login", kind:"student", name, pin }→ { token, name }
 //   { action:"register", name, pin }             → 선생님 가입 신청 (status:"pending")
 
-import { createCustomToken, verifyIdToken, getDoc, listDocs, patchDoc, getPublishedRules } from "./_google.js";
+// _google.mjs — 확장자가 .mjs여야 한다. .js로 두면 Vercel이 CJS로 require해서
+// "Cannot use import statement outside a module"로 함수 전체가 죽는다(로그인 불가).
+import { createCustomToken, verifyIdToken, getDoc, listDocs, patchDoc, getPublishedRules } from "./_google.mjs";
 
 const norm = (s) => String(s || "").replace(/\s+/g, "");
 const todayStr = () => new Date().toISOString().slice(0, 10);

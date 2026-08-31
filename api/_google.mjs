@@ -154,8 +154,7 @@ export async function getPublishedRules() {
   const rs = await fetch("https://firebaserules.googleapis.com/v1/" + relJ.rulesetName, { headers: h });
   const rsJ = await rs.json();
   if (!rs.ok) throw new Error((rsJ.error && rsJ.error.message) || ("ruleset " + rs.status));
-  const files = ((rsJ.source && rsJ.source.files) || []).map((f) => f.content || "").join("
-");
+  const files = ((rsJ.source && rsJ.source.files) || []).map((f) => f.content || "").join("\n");
   return { updated: relJ.updateTime || rsJ.createTime || "", source: files };
 }
 
