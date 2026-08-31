@@ -459,6 +459,14 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
     > 화면이 들고 있던 옛 사본으로 저장하면 그 사이 바뀐 다른 학생 내용이 날아간다
     > ([[props를 useState 초기값으로 한 번만 읽으면 덮어쓴다]]와 같은 사고).
   - `pid`가 없는 옛 항목은 예전처럼 그대로 동작한다. 한꺼번에 옮길 필요가 없다.
+  - **학생 명단이 원본이다.** 반 설정의 명단(`RosterManager`)은 그걸 비춰 보여주고
+    이 반에 넣고 빼고 순서를 정하는 것만 한다. 반 안에서 이름을 새로 만들면
+    학생 명단에 없는 사람이 생겨 두 화면이 어긋난다 — 그래서 "+ 학생 넣기"는
+    학생 명단에서 고르고, 새로 만들 때도 `saveStudent` → `assignToClass` 순서로 간다.
+  - `syncStudentToRosters()`는 **이름도 함께** 흘려보낸다. 안 그러면 학생 명단에서 고친
+    이름이 반 명단에 안 닿아 출석부·참여표가 옛 이름을 계속 쓴다.
+  - 반 설정 → "학생 명단에서 이 반 보기"는 `rosterCid`를 거쳐 `StudentDirectory`의
+    `initialCls`로 들어간다(그 반이 켜진 채로 뜬다).
 
 - **선생님 관리**(`TeacherManage`): 목록을 `listTeachers()`로 **직접 읽는다**.
   로그인 화면이 쓰는 `/api/auth {action:"teachers"}`는 로그인 전에 부르는 것이라

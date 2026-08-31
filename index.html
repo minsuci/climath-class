@@ -964,13 +964,19 @@ async function linkRosterToStudent(cid, rosterId, person) {
   await saveClassRoster(cid, next);
   cls.roster = next;
 }
-// 사람 정보가 바뀌면 그 사람이 속한 모든 반의 미러도 갱신한다
+// 사람 정보가 바뀌면 그 사람이 속한 모든 반의 미러도 갱신한다.
+// **이름도 함께 보낸다** — 이름을 안 흘려보내면 학생 명단에서 고친 이름이 반 명단에
+// 안 반영돼 두 화면이 어긋난다(출석부·참여표는 반 명단 이름을 쓴다).
 async function syncStudentToRosters(person) {
   for (const c of CLASSES) {
     const hit = (c.roster || []).some((r) => r.pid === person.pid);
     if (!hit) continue;
-    const next = c.roster.map((r) => (r.pid === person.pid
-      ? { ...r, school: person.school || "", grade: person.grade || "" } : r));
+    const next = c.roster.map((r) => {
+      if (r.pid !== person.pid) return r;
+      const n = { ...r, school: person.school || "", grade: person.grade || "" };
+      if (person.name) n.name = person.name;
+      return n;
+    });
     try { await saveClassRoster(c.id, next); c.roster = next; } catch (e) {}
   }
 }
@@ -2449,11 +2455,12 @@ function ExamForm({ cls, me }) {
 // ----- 학생 명단 (전역) -----
 // 반이 아니라 "사람"을 관리하는 곳. 학교·학년·담임을 여기서 한 번만 정하면
 // 그 학생이 속한 모든 반과 내신 참여표가 같이 따라간다.
-function StudentDirectory({ me, onBack }) {
+function StudentDirectory({ me, onBack, initialCls }) {
   const [people, setPeople] = useState(null);
   const [teachers, setTeachers] = useState([]);
   const [q, setQ] = useState("");
-  const [clsFilter, setClsFilter] = useState("all");  // "all" | 반id | "none"(배정 없음)
+  // 반 설정에서 "학생 명단에서 이 반 보기"로 들어오면 그 반이 켜진 채로 뜬다
+  const [clsFilter, setClsFilter] = useState(initialCls || "all");  // "all" | 반id | "none"(배정 없음)
   const [open, setOpen] = useState(null);      // 편집 중인 pid ("new"면 새로 추가)
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -2737,6 +2744,7 @@ function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle,
     try {
       await saveStudent(person.pid, data);
       await syncStudentToRosters({ pid: person.pid,
+        name: data.name !== undefined ? data.name : person.name,
         school: data.school !== undefined ? data.school : person.school,
         grade: data.grade !== undefined ? data.grade : person.grade });
       flash(); onChanged && onChanged();
@@ -4653,7 +4661,8 @@ function AdminView() {
   const [err, setErr] = useState("");
   const [mode, setMode] = useState("login"); // login | register | manage
   const [classView, setClassView] = useState("days"); // 반 내부 화면
-  const [dayPick, setDayPick] = useState(null); // 선택한 날짜
+  const [dayPick, setDayPick] = useState(null);      // 선택한 날짜
+  const [rosterCid, setRosterCid] = useState("");    // 반 설정에서 학생 명단으로 넘어올 때 켤 반
   const [editOrder, setEditOrder] = useState(false);
   const [orderList, setOrderList] = useState(null); // 편집 중 임시 순서
   const [orderBusy, setOrderBusy] = useState(false);
@@ -4814,7 +4823,8 @@ function AdminView() {
   if (mode === "report") return <>{homeSide}<ReportCenter onBack={() => setMode("login")} /></>;
   if (mode === "schoolcal") return <>{homeSide}<SchoolTermBoard onBack={() => setMode("login")} /></>;
   if (mode === "exams") return <>{homeSide}<ExamBoard onBack={() => setMode("login")} /></>;
-  if (mode === "roster") return <>{homeSide}<StudentDirectory me={me} onBack={() => setMode("login")} /></>;
+  if (mode === "roster") return <>{homeSide}<StudentDirectory key={"dir" + (rosterCid || "")} me={me}
+    initialCls={rosterCid} onBack={() => { setRosterCid(""); setMode("login"); }} /></>;
 
   // ---- 반 선택 ----
   if (!cls) {
@@ -4895,6 +4905,7 @@ function AdminView() {
   return <><AdminDays cls={cls} canEdit={canEdit(cls)} isOwner={me.role === "owner"} meName={me.name}
     activeView={classView} setActiveView={setClassView} selected={dayPick} setSelected={setDayPick}
     side={homeSide} onBack={() => { setCls(null); setClassView("days"); setDayPick(null); }}
+    onOpenDirectory={() => { setRosterCid(cls.id); setCls(null); setMode("roster"); }}
     onClassChanged={() => setCls(findClass(cls.id) || cls)} /></>;
 }
 
@@ -5368,31 +5379,70 @@ function StudentProgressView({ cls, me }) {
   );
 }
 
-function RosterManager({ cls, canEdit, onChanged }) {
+function RosterManager({ cls, canEdit, onChanged, onOpenDirectory }) {
   // 여기는 누를 때마다 바로 저장하므로 편집 중인 초안이 없다.
   // 대신 **밖에서 명단이 바뀌면 반드시 따라가야** 한다 — 개별진도반은 교재가
   // 이 명단 안에 들어있어서, 옛 사본으로 저장하면 학생별 설정에서 방금 저장한
   // 교재가 통째로 날아간다.
   const [roster, , , settleRoster] = useEditable(cls.roster || [], cls.id);
   const [busy, setBusy] = useState(false);
+  // 학생 정보(학교·학년·담임)는 **학생 명단이 원본**이다. 여기서는 그걸 비춰 보여주고,
+  // 이 반에 넣고 빼고 순서를 정하는 것만 한다. 반 안에서 따로 이름을 만들면
+  // 학생 명단에 없는 사람이 생겨 두 화면이 어긋난다 — 그래서 새로 만들 때도
+  // 학생 명단에 먼저 만들고(saveStudent) 이 반에 붙인다(assignToClass).
+  const [people, setPeople] = useState(null);
+  const [picking, setPicking] = useState(false);
+  const [q, setQ] = useState("");
+  useEffect(() => listenStudents(setPeople, () => setPeople([])), []);
+  const personOf = (pid) => (pid && (people || []).find((x) => x.pid === pid)) || null;
   const students = roster.filter((r) => !r.teacher);
   const teachers = roster.filter((r) => r.teacher);
+  const unlinkedN = students.filter((st) => !personOf(st.pid)).length;
   async function commit(newRoster) {
     setBusy(true);
     try { await saveClassRoster(cls.id, newRoster); cls.roster = newRoster; settleRoster(newRoster); if (onChanged) onChanged(); }
     catch (e) { alert("저장 실패: " + e.message); }
     setBusy(false);
   }
-  async function addStudent() {
-    const name = prompt("새 학생 이름");
-    if (!name || !name.trim()) return;
-    const id = "s" + Date.now().toString(36); // 시간 기반 고유 id (번호 재사용 방지)
-    await commit([...students, { id, name: name.trim() }, ...teachers]);
+  // 학생 명단에 있는 사람을 이 반에 넣는다
+  async function addExisting(person) {
+    setBusy(true);
+    try {
+      await assignToClass(cls.id, person);
+      settleRoster(cls.roster || []);
+      setPicking(false); setQ("");
+      if (onChanged) onChanged();
+    } catch (e) { alert("넣지 못했어요: " + friendlyErr(e)); }
+    setBusy(false);
   }
+  // 아예 새 학생: 학생 명단에 먼저 만들고 이 반에 붙인다
+  async function createAndAdd() {
+    const name = prompt("새 학생 이름" + "\n" + "학생 명단에도 함께 만들어져요.");
+    if (!name || !name.trim()) return;
+    setBusy(true);
+    try {
+      const pid = await saveStudent(null, { name: name.trim(), school: "", grade: "", homeroom: "" });
+      await assignToClass(cls.id, { pid: pid, name: name.trim(), school: "", grade: "" });
+      settleRoster(cls.roster || []);
+      setPicking(false); setQ("");
+      if (onChanged) onChanged();
+    } catch (e) { alert("만들지 못했어요: " + friendlyErr(e)); }
+    setBusy(false);
+  }
+  // 이름은 학생 명단이 원본이다. 이어져 있으면 거기를 고치고 모든 반에 흘려보낸다.
   async function renameStudent(st) {
-    const name = prompt("이름 수정", st.name);
+    const who = personOf(st.pid);
+    const name = prompt(who ? "이름 수정 (학생 명단과 다른 반에도 함께 반영돼요)" : "이름 수정", st.name);
     if (!name || !name.trim() || name.trim() === st.name) return;
-    await commit(roster.map((r) => (r.id === st.id ? { ...r, name: name.trim() } : r)));
+    if (!who) { await commit(roster.map((r) => (r.id === st.id ? { ...r, name: name.trim() } : r))); return; }
+    setBusy(true);
+    try {
+      await saveStudent(who.pid, { name: name.trim() });
+      await syncStudentToRosters({ pid: who.pid, name: name.trim(), school: who.school, grade: who.grade });
+      settleRoster(cls.roster || []);
+      if (onChanged) onChanged();
+    } catch (e) { alert("바꾸지 못했어요: " + friendlyErr(e)); }
+    setBusy(false);
   }
   // 선생님 항목을 보통 학생으로. teacher 키를 지우면 모든 학생 목록에 들어온다.
   async function toStudent(t) {
@@ -5416,23 +5466,79 @@ function RosterManager({ cls, canEdit, onChanged }) {
     const tmp = arr[idx]; arr[idx] = arr[ni]; arr[ni] = tmp;
     commit([...arr, ...teachers]);
   }
+  const notInClass = (people || []).filter((x) => !students.some((st) => st.pid === x.pid));
+  const picked = q.trim()
+    ? notInClass.filter((x) => String(x.name || "").replace(/\s+/g, "").includes(q.trim().replace(/\s+/g, ""))
+        || String(x.school || "").includes(q.trim()))
+    : notInClass;
+
   return (
     <div>
+      <div className="cm-hint" style={{marginBottom: 10}}>
+        학교 · 학년 · 담임은 <b>학생 명단</b>에서 정해요. 여기서는 <b>이 반에 넣고 빼고 순서만</b> 정합니다.
+        {onOpenDirectory && (<>
+          {" "}<button className="cm-link" style={{padding: 0}} onClick={onOpenDirectory}>학생 명단에서 이 반 보기 →</button>
+        </>)}
+      </div>
+      {unlinkedN > 0 && (
+        <div style={{background: "#f6e7df", border: "1px solid #e6cbb9", borderRadius: 10,
+             padding: "9px 11px", marginBottom: 10, fontSize: 12, color: "#a8562c", lineHeight: 1.55}}>
+          <b>학생 명단에 없는 사람 {unlinkedN}명</b> — 이 반에만 있어서 학교·학년·내신 참여표가 안 따라와요.
+          {onOpenDirectory && (<>
+            {" "}<button className="cm-link" style={{padding: 0, color: "#a8562c", fontWeight: 700}}
+              onClick={onOpenDirectory}>학생 명단에서 잇기 →</button>
+          </>)}
+        </div>
+      )}
       {students.length === 0 && <div className="cm-empty">학생이 없어요</div>}
-      {students.map((st, i) => (
+      {students.map((st, i) => {
+        const who = personOf(st.pid);
+        return (
         <div key={st.id} style={{display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid var(--line)"}}>
           <span style={{color: "var(--muted)", fontSize: 13, width: 22}}>{i + 1}</span>
-          <strong style={isEnded(st) ? {color: "var(--muted)"} : undefined}>{st.name}</strong>
+          <span>
+            <strong style={isEnded(st) ? {color: "var(--muted)"} : undefined}>{who ? who.name : st.name}</strong>
+            <br/>
+            <span style={{fontSize: 11, color: who ? "#8a7f72" : "#c2703f"}}>
+              {who ? ([who.school, who.grade].filter(Boolean).join(" · ") || "학교·학년 미입력")
+                   : "학생 명단에 없음"}
+            </span>
+          </span>
           {isEnded(st) && <span className="cm-chip" style={{background: "#f0ece5", color: "#7c6f5f"}}>수강 종료 {st.endDate}</span>}
           {canEdit && (<span style={{marginLeft: "auto", display: "flex", gap: 2, alignItems: "center"}}>
             <button className="cm-link" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{padding: "0 4px"}}>▲</button>
             <button className="cm-link" disabled={busy || i === students.length - 1} onClick={() => move(i, 1)} style={{padding: "0 4px"}}>▼</button>
             <button className="cm-link" disabled={busy} onClick={() => renameStudent(st)}>이름</button>
-            <button className="cm-link" disabled={busy} style={{color: "#d6453f"}} onClick={() => removeStudent(st)}>삭제</button>
+            <button className="cm-link" disabled={busy} style={{color: "#d6453f"}} onClick={() => removeStudent(st)}>빼기</button>
           </span>)}
         </div>
-      ))}
-      {canEdit && <button className="cm-link" style={{marginTop: 10}} disabled={busy} onClick={addStudent}>+ 학생 추가</button>}
+        );
+      })}
+      {canEdit && !picking && (
+        <button className="cm-link" style={{marginTop: 10}} disabled={busy || people === null}
+          onClick={() => setPicking(true)}>+ 학생 넣기</button>
+      )}
+      {canEdit && picking && (
+        <div style={{marginTop: 10, background: "#f7f4f0", border: "1px solid #e8e0d4", borderRadius: 10, padding: "10px 12px"}}>
+          <div style={{display: "flex", gap: 8, alignItems: "center", marginBottom: 8}}>
+            <input className="cm-input" style={{margin: 0, flex: 1}} placeholder="학생 명단에서 찾기 (이름 · 학교)"
+              value={q} onChange={(e) => setQ(e.target.value)} />
+            <button className="cm-link" onClick={() => { setPicking(false); setQ(""); }}>닫기</button>
+          </div>
+          {picked.length === 0
+            ? <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 8}}>
+                {notInClass.length ? "찾는 학생이 없어요" : "학생 명단에 넣을 수 있는 사람이 없어요"}
+              </div>
+            : <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, maxHeight: 190, overflowY: "auto"}}>
+                {picked.slice(0, 80).map((x) => (
+                  <button key={x.pid} className="cm-ab-tab" disabled={busy} onClick={() => addExisting(x)}>
+                    {x.name}{x.school ? <span style={{opacity: .65}}> · {x.school}</span> : null}
+                  </button>
+                ))}
+              </div>}
+          <button className="cm-link" disabled={busy} onClick={createAndAdd}>+ 명단에 없는 새 학생 만들기</button>
+        </div>
+      )}
 
       {/* 명단의 선생님 항목. 지금까지 화면에 아예 안 보여서, 왜 어떤 사람이
           출석부·내신 참여표 등에서 통째로 빠지는지 알 길이 없었다. */}
@@ -6153,7 +6259,7 @@ function useSwipeBack(onBack) {
   }, []);
 }
 
-function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, selected, setSelected, side, onBack, onClassChanged }) {
+function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, selected, setSelected, side, onBack, onClassChanged, onOpenDirectory }) {
   const [rosterVer, bumpVer] = useState(0);
   // 명단 편집기와 학생별 설정은 둘 다 cls.roster를 편집한다. 한쪽이 저장하면
   // 다른 쪽을 다시 마운트해 최신 명단을 읽게 한다 — 안 그러면 옛 사본으로 덮어쓴다.
@@ -6368,7 +6474,8 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
         )}
         <div className="cm-card">
           <h3 className="cm-h3">학생 명단</h3>
-          <RosterManager key={"rm" + cfgVer} cls={cls} canEdit={canEdit} onChanged={() => bumpVer((v) => v + 1)} />
+          <RosterManager key={"rm" + cfgVer} cls={cls} canEdit={canEdit}
+            onChanged={() => bumpVer((v) => v + 1)} onOpenDirectory={onOpenDirectory} />
         </div>
         {isIndividual(cls) ? (
           <div className="cm-card">
