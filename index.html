@@ -4997,7 +4997,6 @@ function AdminView() {
           {!editOrder && <button className="cm-link cm-home-back" onClick={logout}>로그아웃</button>}
         </div>
 
-        {!editOrder && <DefaultPinNotice />}
         {!editOrder && (<>
           <div className="cm-daylist">
             {activeClasses().map((c) => (
@@ -6048,44 +6047,6 @@ function ClassCreate({ me, onDone, onCancel }) {
 // 본인 것을 바꿀 길이 없었다. 검사와 저장은 서버(/api/auth)가 한다.
 // 초기 비번(1234)을 그대로 쓰는 학생 현황. 목록 자체가 "이 이름들은 1234로 들어간다"는
 // 지도라서 서버가 ID 토큰으로 선생님인지 확인한 뒤에만 준다.
-function DefaultPinNotice() {
-  const [data, setData] = useState(null);   // null=로딩, {total,groups}
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const u = firebase.auth().currentUser;
-        if (!u) return;
-        const idToken = await u.getIdToken();
-        const r = await authApi({ action: "defaultPinReport", idToken });
-        if (alive) setData(r);
-      } catch (e) { if (alive) setData({ total: 0, groups: [], err: e.message }); }
-    })();
-    return () => { alive = false; };
-  }, []);
-  if (!data || !data.total) return null;
-  return (
-    <div style={{background: "#f6e7df", border: "1px solid #e6cbb9", borderRadius: 12,
-                 padding: "12px 14px", marginBottom: 12}}>
-      <button className="cm-link" style={{color: "#a8562c", textDecoration: "none", padding: 0}}
-        onClick={() => setOpen((v) => !v)}>
-        {open ? "▾" : "▸"} <b>초기 비번을 그대로 쓰는 학생 {data.total}명</b>
-      </button>
-      <div style={{fontSize: 12, color: "#a8562c", marginTop: 4, lineHeight: 1.5}}>
-        이름만 알면 누구나 그 학생으로 들어갈 수 있어요. 다음 수업에 바꾸라고 알려주세요.
-        (학생이 로그인하면 바꾸라는 안내가 자동으로 떠요)
-      </div>
-      {open && data.groups.map((g) => (
-        <div key={g.cid} style={{marginTop: 10}}>
-          <div style={{fontSize: 12, color: "var(--muted)", fontWeight: 600}}>{g.cname}</div>
-          <div style={{fontSize: 14, lineHeight: 1.7}}>{g.names.join(" · ")}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function TeacherPinChange({ me, onBack }) {
   const [cur, setCur] = useState("");
   const [p1, setP1] = useState("");

@@ -179,6 +179,8 @@ async function verifyStudentPin(nm, pin, live) {
 
 // 초기 비번을 그대로 쓰는 학생 목록. 선생님만 부를 수 있다 —
 // 아무나 받아가면 "이 이름들은 1234로 들어간다"는 지도가 되어버린다.
+// 지금 화면에서 부르는 곳은 없다 (선생님 홈의 안내 배너를 없앴다).
+// 규격은 그대로 두었다 — 초기 PIN 현황이 다시 필요해지면 붙이면 된다.
 async function defaultPinReport(res, { idToken }) {
   const claims = await verifyIdToken(idToken);
   if (!claims || (claims.role !== "teacher" && claims.role !== "owner")) {
@@ -275,6 +277,7 @@ async function rulesCheck(res) {
   try {
     const r = await getPublishedRules();
     const has = (needle) => r.source.indexOf(needle) >= 0;
+    const count = (needle) => r.source.split(needle).length - 1;
     res.status(200).json({
       updated: r.updated,
       항목: {
@@ -283,6 +286,12 @@ async function rulesCheck(res) {
         "appConfig(회차·학교목록)": has("match /appConfig/"),
         "config/flyer(안내문 초안)": has("match /config/flyer"),
         "익명차단(role 확인)": has("request.auth.token.role"),
+        "반 생성(선생님 누구나)": has("request.resource.data.createdBy"),
+        "반 삭제(관리자만)": has("allow delete: if isOwner()"),
+        // 콘솔에 붙여넣을 때 전체 교체가 안 되면 옛 규칙이 아래에 남는다.
+        // 그러면 같은 블록이 두 번 들어가고, Firestore는 규칙을 OR로 합치므로
+        // 옛 허용이 새 제한을 덮어쓴다 — 통과한 것처럼 보이면서 실제로는 다 열린다.
+        "중복 없음(전체 교체됨)": count("match /databases/") === 1 && count("match /classes/") === 1,
       },
       길이: r.source.length,
     });
