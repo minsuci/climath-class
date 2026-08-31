@@ -3270,6 +3270,7 @@ function ExamBoard({ onBack }) {
   const [shared, setShared] = useState([]);
   const [entry, setEntry] = useState(null);   // 대신 입력 중인 {cid, st, cur}
   const [sched, setSched] = useState({});     // 학교 일정 (appConfig/schoolTerms)
+  const [people, setPeople] = useState([]);   // 학생 명단 (students) — 이름·학교·학년의 원본
   const [filling, setFilling] = useState(false);
   const [fillMsg, setFillMsg] = useState("");
   const backRef = useSwipeBack(onBack);
@@ -3283,6 +3284,7 @@ function ExamBoard({ onBack }) {
   const classes = activeClasses();
   useEffect(() => listenSchools(setShared), []);
   useEffect(() => listenSchoolTerms(setSched), []);
+  useEffect(() => listenStudents(setPeople, () => setPeople([])), []);
 
   useEffect(() => listenExamTerm((t) => { setTerm(t); setDraft(t); }), []);
   useEffect(() => {
@@ -3291,17 +3293,35 @@ function ExamBoard({ onBack }) {
     return () => unsubs.forEach((u) => u && u());
   }, [term, classes.map((c) => c.id).join(",")]);
 
+  // 이름·학교·학년은 **학생 명단이 원본**이다. 반 명단(roster)에도 같은 값이 적혀 있지만
+  // 그건 학생 화면용 사본이라 이어지지 않은 사람에게는 없거나 낡아 있다.
+  // 여기서 사람 문서로 한 번 풀어서 보지 않으면, 학생 명단에서 고친 것이 이 화면에 안 닿는다.
+  const personOf = (pid) => (pid && people.find((x) => x.pid === pid)) || null;
+  function whoOf(st, v) {
+    const w = personOf(st.pid);
+    return {
+      name: (w && w.name) || st.name || (v && v.name) || "",
+      school: (w && w.school) || (v && v.school) || st.school || "",
+      grade: (w && w.grade) || (v && v.grade) || st.grade || "",
+      linked: !!w,
+    };
+  }
+
   // 반을 가로질러 모은다
   const got = [];
   const missing = [];
   classes.forEach((c) => {
     const m = byClass[c.id] || {};
     (c.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => {
-      if (m[st.id]) got.push({ cls: c, st, v: m[st.id] });
-      else missing.push({ cls: c, st });
+      if (m[st.id]) got.push({ cls: c, st, v: m[st.id], w: whoOf(st, m[st.id]) });
+      else missing.push({ cls: c, st, w: whoOf(st, null) });
     });
   });
   const inGrade = got.filter((x) => (x.v.grade || "") === grade);
+  // 안 낸 학생도 학년 탭을 따라간다. 전부 한 덩어리로 늘어놓으면 서른 명이 벽이 되고,
+  // 학생 명단에서 학년을 채워도 화면이 안 변해 "고쳐도 반영이 안 된다"로 보인다.
+  const missGrade = missing.filter((x) => x.w.grade === grade);
+  const missNoGrade = missing.filter((x) => !x.w.grade);
 
   // 명단에서 안 잡히는 제출 — 그냥 두면 낸 사람은 냈다고 생각하는데 화면엔 없다.
   // 선생님 항목(teacher:true), 수강 종료, 명단에서 빠진 학생, id가 어긋난 경우가 여기 걸린다.
@@ -3344,22 +3364,22 @@ function ExamBoard({ onBack }) {
 
   // ----- 학교 일정으로 채우기 -----
   // 학교·학년은 (1) 이미 낸 값 (2) 반 명단에 적힌 값(학생 명단에서 정한 것) 순으로 본다.
-  function schedOf(st, v) {
-    const school = (v && v.school) || st.school || "";
-    const grade = (v && v.grade) || st.grade || "";
-    if (!school || !grade) return null;
-    return findSchoolTerm(sched, term, school, grade);
+  function schedOf(w) {
+    if (!w.school || !w.grade) return null;
+    return findSchoolTerm(sched, term, w.school, w.grade);
   }
   // 안 낸 학생 중 학교 일정이 있는 사람 = 바로 채울 수 있는 사람
-  const fillable = missing.map((x) => ({ ...x, s: schedOf(x.st, null) })).filter((x) => x.s);
+  const fillable = missing.map((x) => ({ ...x, s: schedOf(x.w) })).filter((x) => x.s);
   // 이미 낸 사람 중 학교 일정과 다른 사람. 자동으로 덮지 않는다 —
   // 분반마다 진짜 다를 수도 있고, 학생이 맞게 낸 걸 지워버리면 되돌릴 방법이 없다.
-  const offSched = got.map((x) => ({ ...x, s: schedOf(x.st, x.v) }))
-    .filter((x) => x.s && examSig(x.v) !== examSig(x.s));
+  // 학교·학년이 학생 명단과 어긋난 것도 여기 걸린다 (명단이 원본이므로 그쪽으로 맞춘다).
+  const offSched = got.map((x) => ({ ...x, s: schedOf(x.w) }))
+    .filter((x) => x.s && (examSig(x.v) !== examSig(x.s)
+      || x.v.school !== x.s.school || x.v.grade !== x.s.grade));
 
-  function schedFields(st, sc, keep) {
+  function schedFields(w, sc, keep) {
     return {
-      name: st.name, school: sc.school, grade: sc.grade,
+      name: w.name, school: sc.school, grade: sc.grade,
       start: sc.start, end: sc.end, math: sc.math || "",
       // 직보를 손으로 고쳐둔 사람은 그대로 둔다 (전날이 아니면 일부러 바꾼 것)
       prep: (keep && keep.prep && keep.prep !== dayBefore(keep.math)) ? keep.prep
@@ -3377,7 +3397,7 @@ function ExamBoard({ onBack }) {
     setFilling(true); setFillMsg("");
     let n = 0;
     try {
-      for (const x of fillable) { await saveExam(x.cls.id, term, x.st.id, schedFields(x.st, x.s, null)); n++; }
+      for (const x of fillable) { await saveExam(x.cls.id, term, x.st.id, schedFields(x.w, x.s, null)); n++; }
       setFillMsg(n + "명 채웠어요 ✓");
     } catch (e) { setFillMsg("채우다 멈췄어요 (" + n + "명까지): " + friendlyErr(e)); }
     setFilling(false);
@@ -3389,7 +3409,7 @@ function ExamBoard({ onBack }) {
     setFilling(true); setFillMsg("");
     let n = 0;
     try {
-      for (const x of offSched) { await saveExam(x.cls.id, term, x.st.id, schedFields(x.st, x.s, x.v)); n++; }
+      for (const x of offSched) { await saveExam(x.cls.id, term, x.st.id, schedFields(x.w, x.s, x.v)); n++; }
       setFillMsg(n + "명 맞췄어요 ✓");
     } catch (e) { setFillMsg("맞추다 멈췄어요 (" + n + "명까지): " + friendlyErr(e)); }
     setFilling(false);
@@ -3631,7 +3651,12 @@ function ExamBoard({ onBack }) {
           <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, marginTop: 10}}>
             {GRADES.map((g) => {
               const n = got.filter((x) => (x.v.grade || "") === g).length;
-              return <button key={g} className={"cm-ab-tab" + (grade === g ? " on" : "")} onClick={() => setGrade(g)}>{g} {n}</button>;
+              const mn = missing.filter((x) => x.w.grade === g).length;
+              return (
+                <button key={g} className={"cm-ab-tab" + (grade === g ? " on" : "")} onClick={() => setGrade(g)}>
+                  {g} {n}{mn ? <span style={{color: "#c2703f"}}> · 안 냄 {mn}</span> : null}
+                </button>
+              );
             })}
           </div>
 
@@ -3665,11 +3690,11 @@ function ExamBoard({ onBack }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {inGrade.map(({ cls, st, v }) => {
+                  {inGrade.map(({ cls, st, v, w }) => {
                     const cnt = attendCount(cls, st, v);
                     return (
                     <tr key={cls.id + st.id}>
-                      <td className="cm-ab-name">{st.name}<br/><span style={{fontSize: 10, color: "#8a7f72"}}>{v.school} · {cls.name}</span></td>
+                      <td className="cm-ab-name">{w.name}<br/><span style={{fontSize: 10, color: "#8a7f72"}}>{v.school} · {cls.name}</span></td>
                       {strip.map((d) => {
                         const m = markOf(v, d);
                         const classDay = isClassDay(cls, st, d, v);
@@ -3713,18 +3738,21 @@ function ExamBoard({ onBack }) {
                   <th style={{minWidth: 118}}>복귀 <span style={{fontWeight: 400, color: "#8a7f72"}}>(선생님이 정함)</span></th><th>비고</th>
                 </tr></thead>
                 <tbody>
-                  {inGrade.map(({ cls, st, v }) => (
+                  {inGrade.map(({ cls, st, v, w }) => (
                     <tr key={cls.id + st.id}>
-                      <td className="cm-ab-name">{st.name}
+                      <td className="cm-ab-name">{w.name}
                         <br/><button className="cm-link" style={{padding: 0, fontSize: 11}}
                           onClick={() => setEntry({ cls, st, cur: v })}>고치기</button>
                         <span style={{fontSize: 11, color: "#ded5c7"}}> · </span>
                         <button className="cm-link" style={{padding: 0, fontSize: 11, color: "#d6453f"}}
-                          disabled={filling} onClick={() => removeExam(cls, st.id, st.name)}>지우기</button>
+                          disabled={filling} onClick={() => removeExam(cls, st.id, w.name)}>지우기</button>
                         {v.byTeacher && <span style={{fontSize: 10, color: "#8a7f72"}}> · 대신 입력</span>}
                       </td>
                       <td>{cls.name}</td>
-                      <td>{v.school}</td>
+                      <td style={w.school && v.school !== w.school ? {background: "#f6e7df", color: "#a8562c"} : undefined}
+                        title={w.school && v.school !== w.school ? "학생 명단에는 " + w.school : undefined}>
+                        {v.school}{w.school && v.school !== w.school ? " ⚠" : ""}
+                      </td>
                       <td>{v.start && v.end ? shortDate(v.start) + "~" + shortDate(v.end) : "-"}</td>
                       <td>{v.math ? shortDate(v.math) : "-"}</td>
                       <td>{v.prep ? shortDate(v.prep) : "-"}</td>
@@ -3765,22 +3793,54 @@ function ExamBoard({ onBack }) {
           <div style={{marginTop: 14, background: missing.length ? "#f6e7df" : "#e6f0e9",
                border: "1px solid " + (missing.length ? "#e6cbb9" : "#cfe0d5"), borderRadius: 12, padding: "12px 14px"}}>
             <div style={{fontSize: 14, color: missing.length ? "#a8562c" : "#3f7d5e", lineHeight: 1.6}}>
-              {missing.length
-                ? <><b>아직 안 낸 학생 {missing.length}명</b> <span style={{fontSize: 12, opacity: .8}}>(담당 반 전체 · 이름을 누르면 대신 넣을 수 있어요)</span>
-                     <br/>
-                     <span style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6}}>
-                       {missing.map((x) => (
-                         <button key={x.cls.id + x.st.id} className="cm-ab-tab"
-                           onClick={() => setEntry({ cls: x.cls, st: x.st, cur: null })}>
-                           {x.st.name} <span style={{opacity: .7}}>({x.cls.name})</span>
-                         </button>
-                       ))}
-                     </span></>
-                : <b>담당 반 전원 제출 완료 ✓</b>}
+              {missing.length ? (<>
+                <b>{grade} 아직 안 낸 학생 {missGrade.length}명</b>
+                <span style={{fontSize: 12, opacity: .8}}> (전체 {missing.length}명 · 이름을 누르면 대신 넣을 수 있어요)</span>
+                {missGrade.length > 0 && <MissingChips list={missGrade} onPick={setEntry} />}
+                {missNoGrade.length > 0 && (<>
+                  <div style={{fontSize: 13, fontWeight: 700, marginTop: 12}}>
+                    학년을 모르는 학생 {missNoGrade.length}명
+                    <span style={{fontSize: 12, fontWeight: 400, opacity: .8}}> — 학생 명단에서 학년을 넣으면 위 학년별로 들어가요</span>
+                  </div>
+                  <MissingChips list={missNoGrade} onPick={setEntry} />
+                </>)}
+              </>) : <b>담당 반 전원 제출 완료 ✓</b>}
             </div>
           </div>
         </>)}
       </div>
+    </div>
+  );
+}
+
+// 안 낸 학생 칩. 반별로 묶어서 보여준다 — 서른 개를 한 줄로 늘어놓으면 벽이 된다.
+// 학생 명단에 없는 사람은 표시해둔다. 그 사람은 학교 일정으로 채울 수도 없다.
+function MissingChips({ list, onPick }) {
+  const byCls = [];
+  list.forEach((x) => {
+    let g = byCls.find((y) => y.cls.id === x.cls.id);
+    if (!g) { g = { cls: x.cls, items: [] }; byCls.push(g); }
+    g.items.push(x);
+  });
+  return (
+    <div style={{marginTop: 6}}>
+      {byCls.map((g) => (
+        <div key={g.cls.id} style={{marginBottom: 6}}>
+          <div style={{fontSize: 11, opacity: .75, marginBottom: 3}}>{g.cls.name} · {g.items.length}명</div>
+          <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+            {g.items.map((x) => (
+              <button key={x.cls.id + x.st.id} className="cm-ab-tab"
+                title={x.w.linked ? [x.w.school, x.w.grade].filter(Boolean).join(" · ") : "학생 명단에 없어요"}
+                onClick={() => onPick({ cls: x.cls, st: x.st, cur: null })}>
+                {x.w.name}
+                {x.w.linked
+                  ? (x.w.school ? <span style={{opacity: .6}}> · {x.w.school}</span> : null)
+                  : <span style={{color: "#a5322d"}}> · 명단 없음</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -5444,6 +5504,14 @@ function RosterManager({ cls, canEdit, onChanged, onOpenDirectory }) {
     } catch (e) { alert("바꾸지 못했어요: " + friendlyErr(e)); }
     setBusy(false);
   }
+  // 반대로, 학생으로 들어가 있는 선생님을 선생님 항목으로. 이게 없어서 출석부·내신
+  // 참여표에 선생님 이름이 "아직 안 낸 학생"으로 계속 떴다.
+  async function toTeacher(st) {
+    if (!confirm(st.name + " 님을 선생님 항목으로 바꿀까요?" + "\n\n" +
+      "출석부 · 과제 · 점수 · 보고서 · 내신 참여표의 학생 목록에서 빠져요.\n" +
+      "지금까지 쌓인 기록은 지워지지 않습니다.")) return;
+    await commit(roster.map((r) => (r.id === st.id ? { ...r, teacher: true } : r)));
+  }
   // 선생님 항목을 보통 학생으로. teacher 키를 지우면 모든 학생 목록에 들어온다.
   async function toStudent(t) {
     if (!confirm(t.name + " 님을 이 반의 학생으로 바꿀까요?" + "\n\n" +
@@ -5509,6 +5577,7 @@ function RosterManager({ cls, canEdit, onChanged, onOpenDirectory }) {
             <button className="cm-link" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{padding: "0 4px"}}>▲</button>
             <button className="cm-link" disabled={busy || i === students.length - 1} onClick={() => move(i, 1)} style={{padding: "0 4px"}}>▼</button>
             <button className="cm-link" disabled={busy} onClick={() => renameStudent(st)}>이름</button>
+            <button className="cm-link" disabled={busy} onClick={() => toTeacher(st)}>선생님</button>
             <button className="cm-link" disabled={busy} style={{color: "#d6453f"}} onClick={() => removeStudent(st)}>빼기</button>
           </span>)}
         </div>
