@@ -224,6 +224,13 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-sheet-in:hover{border-color:#e0d9cb; background:#fff;}
 .cm-sheet-in:focus{border-color:var(--navy); background:#fff;}
 select.cm-sheet-in{cursor:pointer; appearance:none; -webkit-appearance:none;}
+/* 폭을 선언한 대로 지킨다. auto로 두면 학교 select의 가장 긴 항목이 열을 밀어
+   이름 칸까지 넓어졌다. 좁은 화면에선 눌러 찌그러지지 말고 가로로 넘기게 둔다. */
+.cm-sheet{table-layout:fixed; width:100%; min-width:600px;}
+.cm-sheet th.cm-sort{cursor:pointer; user-select:none;}
+.cm-sheet th.cm-sort:hover{background:#efe9e0;}
+.cm-sheet-ar{font-size:9px; color:var(--navy);}
+.cm-sheet-ar.off{color:#cec5b7;}
 
 .cm-drop{border:1.5px dashed transparent; border-radius:12px; transition:border-color .15s, background-color .15s; padding:2px;}
 .cm-drop.over{border-color:var(--clay); background:rgba(194,112,63,.06);}
@@ -2354,6 +2361,7 @@ function StudentDirectory({ me, onBack }) {
   const [ver, bumpVer] = useState(0);   // 반 배정이 바뀌면 CLASSES를 다시 읽어 그린다
   const [openUnlinked, setOpenUnlinked] = useState(false);
   const [newName, setNewName] = useState("");
+  const [sort, setSort] = useState(null);      // {key, dir} — null이면 원래 순서
   const [shared, setShared] = useState([]);
   useEffect(() => listenSchools(setShared), []);  // 미연결 목록은 접어둔다 (수십 건이라 화면을 다 먹는다)
   const backRef = useSwipeBack(onBack);
@@ -2442,6 +2450,40 @@ function StudentDirectory({ me, onBack }) {
   }
   if (q.trim()) shown = shown.filter((p) => norm(p.name).includes(norm(q)) || String(p.school || "").includes(q.trim()));
 
+  // 열 머리를 누르면 오름차순 → 내림차순 → 원래 순서로 돈다.
+  // 빈 칸은 방향과 상관없이 늘 맨 아래 — 안 채운 학생을 찾으려고 정렬하는 게 아니니까.
+  // 학년은 글자 순(고1<고2<고3<중3)이 아니라 학년 순으로 센다.
+  if (sort) {
+    const gi = (g) => { const i = GRADES.indexOf(g); return i < 0 ? 99 : i; };
+    const keyOf = (p) => {
+      if (sort.key === "name") return p.name || "";
+      if (sort.key === "school") return p.school || "";
+      if (sort.key === "grade") return p.grade ? String(100 + gi(p.grade)) : "";
+      if (sort.key === "homeroom") return tName(p.homeroom);
+      return classesOfPerson(p.pid).map((x) => x.cls.name).join(" · ");
+    };
+    const byName = (a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ko");
+    shown = shown.slice().sort((a, b) => {
+      const x = keyOf(a), y = keyOf(b);
+      if (!x && !y) return byName(a, b);
+      if (!x) return 1;
+      if (!y) return -1;
+      const c = x.localeCompare(y, "ko");
+      return (sort.dir === "desc" ? -c : c) || byName(a, b);
+    });
+  }
+  const sortTh = (key, label, w) => {
+    const on = sort && sort.key === key;
+    return (
+      <th className={"cm-sort" + (key === "name" ? " cm-ab-name" : "")} style={{width: w}}
+        onClick={() => setSort((v) => (!v || v.key !== key)
+          ? { key: key, dir: "asc" }
+          : (v.dir === "asc" ? { key: key, dir: "desc" } : null))}>
+        {label} <span className={"cm-sheet-ar" + (on ? "" : " off")}>{on ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+      </th>
+    );
+  };
+
   return (
     <div ref={backRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-card">
@@ -2529,17 +2571,19 @@ function StudentDirectory({ me, onBack }) {
           <table className="cm-ab-table cm-sheet">
             <thead>
               <tr>
-                <th className="cm-ab-name" style={{minWidth: 90}}>이름</th>
-                <th style={{minWidth: 120}}>학교</th>
-                <th style={{minWidth: 64}}>학년</th>
-                <th style={{minWidth: 96}}>담임</th>
-                <th style={{minWidth: 150}}>반</th>
-                <th style={{minWidth: 44}}></th>
+                {sortTh("name", "이름", 88)}
+                {sortTh("school", "학교", 132)}
+                {sortTh("grade", "학년", 62)}
+                {sortTh("homeroom", "담임", 92)}
+                {sortTh("cls", "반", 240)}
+                <th style={{width: 52}}></th>
+                {/* 남는 자리를 먹는 빈 열 — 없으면 반 칸이 화면 끝까지 늘어난다 */}
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {shown.length === 0 && (
-                <tr><td colSpan={6} style={{color: "var(--muted)", padding: "14px"}}>아직 없어요</td></tr>
+                <tr><td colSpan={7} style={{color: "var(--muted)", padding: "14px"}}>아직 없어요</td></tr>
               )}
               {shown.map((p) => (
                 <StudentRow key={p.pid} person={p} teachers={teachers} schoolOpts={schoolOpts}
@@ -2554,7 +2598,7 @@ function StudentDirectory({ me, onBack }) {
                     onChange={(e) => setNewName(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") addNew(); }} />
                 </td>
-                <td colSpan={5} style={{textAlign: "left", padding: "3px 6px"}}>
+                <td colSpan={6} style={{textAlign: "left", padding: "3px 6px"}}>
                   {newName.trim()
                     ? <button className="cm-link" disabled={busy} onClick={addNew}>이름 넣고 Enter — 또는 여기를 눌러 추가</button>
                     : <span style={{fontSize: 12, color: "#b6ab9b"}}>이름을 치면 새 학생이 만들어져요</span>}
@@ -2637,7 +2681,7 @@ function StudentRow({ person, teachers, schoolOpts, expanded, onToggle, onChange
           ))}
         </select>
       </td>
-      <td style={{ ...cellStyle, textAlign: "left", fontSize: 12 }}>
+      <td style={{ ...cellStyle, textAlign: "left", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis" }}>
         <button className="cm-link" style={{padding: 0, textDecoration: "none"}} onClick={onToggle}>
           {mine.length ? mine.map((x) => x.cls.name).join(" · ") : <span style={{color: "#b6ab9b"}}>없음</span>}
           {" "}{expanded ? "▾" : "▸"}
@@ -2646,10 +2690,11 @@ function StudentRow({ person, teachers, schoolOpts, expanded, onToggle, onChange
       <td style={cellStyle}>
         <button className="cm-link" style={{color: "#d6453f", padding: 0}} disabled={busy} onClick={remove}>삭제</button>
       </td>
+      <td style={cellStyle}></td>
     </tr>
     {expanded && (
       <tr>
-        <td colSpan={6} style={{textAlign: "left", padding: "8px 10px", background: "#fafbfd"}}>
+        <td colSpan={7} style={{textAlign: "left", padding: "8px 10px", background: "#fafbfd"}}>
           <ClassAssign person={person} onChanged={onChanged} onMsg={onMsg} />
         </td>
       </tr>
