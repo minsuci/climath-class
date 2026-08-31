@@ -231,6 +231,8 @@ select.cm-sheet-in{cursor:pointer; appearance:none; -webkit-appearance:none;}
 .cm-sheet th.cm-sort:hover{background:#efe9e0;}
 .cm-sheet-ar{font-size:9px; color:var(--navy);}
 .cm-sheet-ar.off{color:#cec5b7;}
+/* 아는 학교가 아니면 표시해둔다 — "경기"처럼 후보가 갈려 못 맞춘 것도 여기 걸린다 */
+.cm-sheet-in.odd{border-color:#e0b489; background:#fffaf3;}
 
 .cm-drop{border:1.5px dashed transparent; border-radius:12px; transition:border-color .15s, background-color .15s; padding:2px;}
 .cm-drop.over{border-color:var(--clay); background:rgba(194,112,63,.06);}
@@ -672,6 +674,29 @@ async function removeSchoolFromList(name) {
   await schoolsDoc().set({ list: firebase.firestore.FieldValue.arrayRemove(name) }, { merge: true });
 }
 
+// 친 학교 이름을 아는 이름으로 맞춰준다.
+// 34개를 훑어 고르는 것보다 치는 게 빠르다. 대신 그냥 두면 "중동고/중동고등학교/중동"이
+// 섞여 같은 학교인지 판별이 안 되므로, 다 치고 칸을 벗어날 때 맞춘다.
+//   숙명 · 숙명여 · 숙명여자고등학교 → 숙명여고
+// 후보가 둘 이상이면 건드리지 않는다. 엉뚱한 학교로 바꾸는 게 오타보다 나쁘다.
+function matchSchool(typed, opts) {
+  const raw = String(typed || "").trim();
+  if (!raw) return "";
+  const norm = (x) => String(x || "").replace(/\s+/g, "")
+    .replace(/등학교$/, "").replace(/학교$/, "")   // 중동고등학교 → 중동고
+    .replace(/자/g, "");                            // 숙명여자고 → 숙명여고
+  const n = norm(raw);
+  const list = opts || [];
+  if (!n) return raw;
+  const exact = list.filter((x) => norm(x) === n);
+  if (exact.length) return exact[0];
+  const pre = list.filter((x) => norm(x).indexOf(n) === 0);
+  if (pre.length === 1) return pre[0];
+  const has = list.filter((x) => norm(x).indexOf(n) >= 0);
+  if (has.length === 1) return has[0];
+  return raw;
+}
+
 function listenExamTerm(cb) {
   return examTermDoc().onSnapshot((d) => cb(d.exists ? (d.data().term || "") : ""), () => cb(""));
 }
@@ -691,8 +716,9 @@ function dayBefore(d) {
   return ymd(x);
 }
 const GRADES = ["중3", "고1", "고2", "고3"];
-// 학교는 고르게 한다. 자유 입력으로 두면 "중동고/중동고등학교/중동"이 섞여
-// 같은 학교인지 판별 자체가 안 되고, 일정 어긋남도 못 잡는다.
+// 아는 학교 목록. 학생 화면에서는 이 중에서 고르게 하고, 선생님 명단 표에서는
+// 치게 하되 matchSchool()로 이 이름에 맞춘다 — 자유 입력을 그대로 두면
+// "중동고/중동고등학교/중동"이 섞여 같은 학교인지 판별이 안 되고 일정 어긋남도 못 잡는다.
 // 초기 목록은 쓰던 시트(26학사일정)에서 옮겨왔다. 여기 없는 학교는 직접 입력하면
 // 그 반의 목록에 자동으로 더해진다.
 const KNOWN_SCHOOLS = [
@@ -2422,7 +2448,11 @@ function StudentDirectory({ me, onBack }) {
 
   if (people === null) return <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>;
   const tName = (tid) => { const t = teachers.find((x) => x.tid === tid); return t ? t.name : ""; };
-  const schoolOpts = Array.from(new Set(KNOWN_SCHOOLS.concat(shared)
+  // curated = 우리가 아는 학교(기본 목록 + 선생님이 올린 것). "목록에 없어요" 판정은 이것만 본다.
+  // schoolOpts = 거기에 이미 쓰이는 학교까지 더한 것. 고르는 목록과 이름 맞추기에 쓴다.
+  // 판정까지 schoolOpts로 하면 오타를 저장하는 순간 그 오타가 "아는 학교"가 돼 표시가 사라진다.
+  const curated = Array.from(new Set(KNOWN_SCHOOLS.concat(shared)));
+  const schoolOpts = Array.from(new Set(curated
     .concat(people.map((x) => x.school).filter(Boolean)))).sort((a, b) => a.localeCompare(b, "ko"));
 
   async function addNew() {
@@ -2567,6 +2597,11 @@ function StudentDirectory({ me, onBack }) {
           {" · "}<span style={{color: "#8a7f72"}}>칸을 바로 고치면 저장돼요</span>
         </div>
 
+        {/* 학교 칸은 치면서 고른다. 목록에 있는 학교는 밑에 떠서 고르면 되고,
+            대충 쳐도 matchSchool()이 아는 이름으로 맞춰준다. */}
+        <datalist id="cm-school-list">
+          {schoolOpts.map((x) => <option key={x} value={x} />)}
+        </datalist>
         <div className="cm-ab-wrap" data-no-swipe>
           <table className="cm-ab-table cm-sheet">
             <thead>
@@ -2586,7 +2621,7 @@ function StudentDirectory({ me, onBack }) {
                 <tr><td colSpan={7} style={{color: "var(--muted)", padding: "14px"}}>아직 없어요</td></tr>
               )}
               {shown.map((p) => (
-                <StudentRow key={p.pid} person={p} teachers={teachers} schoolOpts={schoolOpts}
+                <StudentRow key={p.pid} person={p} teachers={teachers} schoolOpts={schoolOpts} curated={curated}
                   expanded={open === p.pid} onToggle={() => setOpen(open === p.pid ? null : p.pid)}
                   onChanged={() => bumpVer((v) => v + 1)}
                   onMsg={setMsg} />
@@ -2614,11 +2649,13 @@ function StudentDirectory({ me, onBack }) {
 
 // 표의 한 줄. 칸을 고치면 바로 저장한다 (엑셀처럼).
 // 고르는 칸(학교·학년·담임)은 즉시, 이름은 칸을 벗어날 때.
-function StudentRow({ person, teachers, schoolOpts, expanded, onToggle, onChanged, onMsg }) {
+function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle, onChanged, onMsg }) {
   const [name, setName] = useState(person.name || "");
+  const [school, setSchool] = useState(person.school || "");
   const [busy, setBusy] = useState(false);
   const [ok, setOk] = useState(false);
   useEffect(() => { setName(person.name || ""); }, [person.name]);
+  useEffect(() => { setSchool(person.school || ""); }, [person.school]);
 
   function flash() { setOk(true); setTimeout(() => setOk(false), 1200); }
   async function patch(data) {
@@ -2633,14 +2670,11 @@ function StudentRow({ person, teachers, schoolOpts, expanded, onToggle, onChange
     } catch (e) { onMsg("저장 실패: " + friendlyErr(e)); }
     setBusy(false);
   }
-  function onSchool(v) {
-    if (v === "__etc") {
-      const t = prompt("학교 이름을 입력하세요", person.school || "");
-      if (t == null || !t.trim()) return;
-      patch({ school: t.trim() });
-      return;
-    }
-    patch({ school: v });
+  // 치는 동안은 그대로 두고, 칸을 벗어날 때 아는 이름으로 맞춰 저장한다
+  function settleSchool() {
+    const v = matchSchool(school, schoolOpts);
+    setSchool(v);
+    if (v !== (person.school || "")) patch({ school: v });
   }
   async function remove() {
     if (!confirm(person.name + " 학생 정보를 지울까요?" + "\n" +
@@ -2651,6 +2685,7 @@ function StudentRow({ person, teachers, schoolOpts, expanded, onToggle, onChange
   }
 
   const mine = classesOfPerson(person.pid);
+  const odd = !!person.school && (curated || []).indexOf(person.school) < 0;
   const cellStyle = { padding: 3, background: ok ? "#e6f0e9" : undefined, transition: "background .4s" };
   return (<>
     <tr>
@@ -2661,11 +2696,10 @@ function StudentRow({ person, teachers, schoolOpts, expanded, onToggle, onChange
           onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
       </td>
       <td style={cellStyle}>
-        <select className="cm-sheet-in" value={person.school || ""} disabled={busy} onChange={(e) => onSchool(e.target.value)}>
-          <option value="">—</option>
-          {schoolOpts.map((x) => <option key={x} value={x}>{x}</option>)}
-          <option value="__etc">직접 입력…</option>
-        </select>
+        <input className={"cm-sheet-in" + (odd ? " odd" : "")} list="cm-school-list" value={school} disabled={busy}
+          title={odd ? "아는 학교 목록에 없어요. 이름이 맞는지 확인해주세요." : undefined}
+          placeholder="—" onChange={(e) => setSchool(e.target.value)} onBlur={settleSchool}
+          onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
       </td>
       <td style={cellStyle}>
         <select className="cm-sheet-in" value={person.grade || ""} disabled={busy} onChange={(e) => patch({ grade: e.target.value })}>
