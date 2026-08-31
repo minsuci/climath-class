@@ -233,6 +233,8 @@ select.cm-sheet-in{cursor:pointer; appearance:none; -webkit-appearance:none;}
 .cm-sheet-ar.off{color:#cec5b7;}
 /* 아는 학교가 아니면 표시해둔다 — "경기"처럼 후보가 갈려 못 맞춘 것도 여기 걸린다 */
 .cm-sheet-in.odd{border-color:#e0b489; background:#fffaf3;}
+.cm-sheet-grp{background:#f2eee7 !important; font-weight:700; color:#5a5248; font-size:12px;
+  text-align:left !important; padding:6px 9px !important; position:sticky; left:0;}
 .cm-sched{table-layout:fixed; width:100%; min-width:880px;}
 .cm-sched input[type=date]{font-size:11px; padding:4px 5px;}
 
@@ -2461,6 +2463,7 @@ function StudentDirectory({ me, onBack, initialCls }) {
   const [q, setQ] = useState("");
   // 반 설정에서 "학생 명단에서 이 반 보기"로 들어오면 그 반이 켜진 채로 뜬다
   const [clsFilter, setClsFilter] = useState(initialCls || "all");  // "all" | 반id | "none"(배정 없음)
+  const [gradeF, setGradeF] = useState("all");   // "all" | 학년 | "none"(학년 없음)
   const [open, setOpen] = useState(null);      // 편집 중인 pid ("new"면 새로 추가)
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -2558,6 +2561,10 @@ function StudentDirectory({ me, onBack, initialCls }) {
     ((c && c.roster) || []).forEach((r, i) => { if (r.pid) order[r.pid] = i; });
     shown = people.filter((p) => order[p.pid] != null).sort((a, b) => order[a.pid] - order[b.pid]);
   }
+  // 학년으로 한 번 더 거른다. 고1이 대부분이라 학년을 못 고르면 목록이 늘 한 덩어리다.
+  const gradeCount = (g) => people.filter((x) => (g === "none" ? !x.grade : x.grade === g)).length;
+  if (gradeF === "none") shown = shown.filter((x) => !x.grade);
+  else if (gradeF !== "all") shown = shown.filter((x) => x.grade === gradeF);
   if (q.trim()) shown = shown.filter((p) => norm(p.name).includes(norm(q)) || String(p.school || "").includes(q.trim()));
 
   // 열 머리를 누르면 오름차순 → 내림차순 → 원래 순서로 돈다.
@@ -2582,6 +2589,36 @@ function StudentDirectory({ me, onBack, initialCls }) {
       return (sort.dir === "desc" ? -c : c) || byName(a, b);
     });
   }
+  // 학년을 안 골랐을 때는 학년별로 묶어서 보여준다. 정렬은 묶음 안에서 그대로 걸린다.
+  const groups = [];
+  if (gradeF === "all") {
+    GRADES.concat(["__none"]).forEach((g) => {
+      const rows = shown.filter((x) => (g === "__none" ? !x.grade : x.grade === g));
+      if (rows.length) groups.push({ key: g, label: g === "__none" ? "학년 없음" : g, rows: rows });
+    });
+  } else {
+    groups.push({ key: "one", label: "", rows: shown });
+  }
+
+  // 학년 없는 학생을 한 번에 넣는다. 새 학년이 올라올 때마다 한 명씩 고르면 끝이 없다.
+  async function bulkGrade(g) {
+    const list = shown.filter((x) => !x.grade);
+    if (!list.length || busy) return;
+    if (!confirm("지금 보이는 학년 없는 학생 " + list.length + "명을 " + g + "로 넣습니다." + "\n" +
+      "이미 학년이 있는 학생은 건드리지 않아요. 계속할까요?")) return;
+    setBusy(true); setMsg("");
+    let n = 0;
+    try {
+      for (const x of list) {
+        await saveStudent(x.pid, { grade: g });
+        await syncStudentToRosters({ pid: x.pid, name: x.name, school: x.school, grade: g });
+        n++;
+      }
+      setMsg(n + "명을 " + g + "로 넣었어요 ✓");
+    } catch (e) { setMsg("넣다 멈췄어요 (" + n + "명까지): " + friendlyErr(e)); }
+    setBusy(false);
+  }
+
   const sortTh = (key, label, w) => {
     const on = sort && sort.key === key;
     return (
@@ -2611,7 +2648,26 @@ function StudentDirectory({ me, onBack, initialCls }) {
             value={q} onChange={(e) => setQ(e.target.value)} />
 
         </div>
-        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
+        {/* 학년이 먼저다. 반은 그 아래에서 다시 좁힌다. */}
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center"}}>
+          <span style={{fontSize: 11, color: "var(--muted)", marginRight: 2}}>학년</span>
+          <button className={"cm-ab-tab" + (gradeF === "all" ? " on" : "")}
+            onClick={() => setGradeF("all")}>전체 {people.length}</button>
+          {/* 아직 학생이 없는 학년도 띄워둔다 — 새 학년을 받을 자리가 보여야 한다 */}
+          {GRADES.map((g) => (
+            <button key={g} className={"cm-ab-tab" + (gradeF === g ? " on" : "")}
+              onClick={() => setGradeF(g)}>{g} {gradeCount(g)}</button>
+          ))}
+          {gradeCount("none") > 0 && (
+            <button className={"cm-ab-tab" + (gradeF === "none" ? " on" : "")}
+              onClick={() => setGradeF("none")}
+              style={gradeF === "none" ? undefined : { background: "#f6e7df", color: "#c2703f", borderColor: "#e6cbb9" }}>
+              학년 없음 {gradeCount("none")}
+            </button>
+          )}
+        </div>
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, alignItems: "center"}}>
+          <span style={{fontSize: 11, color: "var(--muted)", marginRight: 2}}>반</span>
           <button className={"cm-ab-tab" + (clsFilter === "all" ? " on" : "")}
             onClick={() => setClsFilter("all")}>전체 {people.length}</button>
           {activeClasses().map((c) => (
@@ -2670,7 +2726,20 @@ function StudentDirectory({ me, onBack, initialCls }) {
           </div>
         )}
 
+        {gradeF === "none" && shown.length > 0 && (
+          <div style={{background: "#f6e7df", border: "1px solid #e6cbb9", borderRadius: 10,
+               padding: "9px 11px", marginBottom: 10, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
+            <span style={{fontSize: 12, color: "#a8562c"}}>
+              지금 보이는 <b>{shown.length}명</b>을 한 학년으로 넣기 →
+            </span>
+            {GRADES.map((g) => (
+              <button key={g} className="cm-ab-tab" disabled={busy} onClick={() => bulkGrade(g)}>{g}</button>
+            ))}
+          </div>
+        )}
+
         <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 6}}>
+          {gradeF === "all" ? "" : (gradeF === "none" ? "학년 없음 · " : gradeF + " · ")}
           {clsFilter === "all" ? "전체" : (clsFilter === "none" ? "배정된 반이 없는 학생" : (findClass(clsFilter) || {}).name)}
           {" · "}{shown.length}명
           {clsFilter !== "all" && clsFilter !== "none" && " (명단 순서)"}
@@ -2700,11 +2769,18 @@ function StudentDirectory({ me, onBack, initialCls }) {
               {shown.length === 0 && (
                 <tr><td colSpan={7} style={{color: "var(--muted)", padding: "14px"}}>아직 없어요</td></tr>
               )}
-              {shown.map((p) => (
-                <StudentRow key={p.pid} person={p} teachers={teachers} schoolOpts={schoolOpts} curated={curated}
-                  expanded={open === p.pid} onToggle={() => setOpen(open === p.pid ? null : p.pid)}
-                  onChanged={() => bumpVer((v) => v + 1)}
-                  onMsg={setMsg} />
+              {groups.map((g) => (
+                <React.Fragment key={g.key}>
+                  {g.label && (
+                    <tr><td className="cm-sheet-grp" colSpan={7}>{g.label} · {g.rows.length}명</td></tr>
+                  )}
+                  {g.rows.map((p) => (
+                    <StudentRow key={p.pid} person={p} teachers={teachers} schoolOpts={schoolOpts} curated={curated}
+                      expanded={open === p.pid} onToggle={() => setOpen(open === p.pid ? null : p.pid)}
+                      onChanged={() => bumpVer((v) => v + 1)}
+                      onMsg={setMsg} />
+                  ))}
+                </React.Fragment>
               ))}
               {/* 새 줄 — 이름만 치면 만들어진다 */}
               <tr>
