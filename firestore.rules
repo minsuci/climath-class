@@ -49,6 +49,9 @@ service cloud.firestore {
     // 본인 문서는 읽을 수 있다 — 새로고침 후 담당 반을 복구하는 데 쓴다.
     // (자기 PIN이 같이 보이지만 본인이 아는 값이라 새로 새는 것이 없다)
     // 다른 선생님 문서는 관리자만. 승인·담당배정·PIN 초기화 화면이 그걸 쓴다.
+    // 쓰기는 관리자만. 본인 문서도 못 쓴다 — classIds를 직접 쓰게 열면
+    // 아무 반 id나 적어 넣어 남의 반 편집 권한을 가져갈 수 있다.
+    // 반을 만들고 자기 담당으로 넣는 것은 /api/auth 의 claimClass 가 대신 한다.
     match /teachers/{tid} {
       allow read:  if isOwner() || (isTeacher() && tid == request.auth.token.tid);
       allow write: if isOwner();
@@ -64,7 +67,12 @@ service cloud.firestore {
       allow get:    if inClass(cid);
       allow list:   if isTeacher();
       allow update: if teaches(cid);
-      allow create, delete: if isOwner();     // 반 생성/삭제는 관리자만
+      // 반 만들기는 선생님 누구나. 단 createdBy에 자기 tid를 적어야 한다 —
+      // /api/auth 의 claimClass 가 그 값을 보고 "본인이 만든 반"일 때만
+      // 담당(classIds)에 넣어준다. 이 값을 남의 것으로 적으면 소용이 없다.
+      allow create: if isTeacher()
+                    && request.resource.data.createdBy == request.auth.token.tid;
+      allow delete: if isOwner();             // 삭제는 관리자만
 
       // ⚠ 하위 컬렉션을 하나씩 적는다. `match /{sub=**}` 로 한 번에 열면 안 된다 —
       // Firestore는 매칭되는 규칙을 OR로 합치므로, 넓은 허용이 좁은 거부를 덮어쓴다.

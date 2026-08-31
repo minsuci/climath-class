@@ -68,6 +68,7 @@ export default async function handler(req, res) {
     if (body.action === "changeTeacherPin") return await changeTeacherPin(res, body);
     if (body.action === "defaultPinReport") return await defaultPinReport(res, body);
     if (body.action === "rulesCheck") return await rulesCheck(res);
+    if (body.action === "claimClass") return await claimClass(res, body);
     if (body.action === "login" && body.kind === "teacher") return await loginTeacher(res, body);
     if (body.action === "login" && body.kind === "student") return await loginStudent(res, body);
     res.status(400).json({ error: "알 수 없는 요청입니다" });
@@ -240,6 +241,36 @@ async function changePin(res, { name, oldPin, newPin }) {
 // 지금 걸려 있는 보안 규칙에 무엇이 들어 있는지 확인한다.
 // 규칙 원문은 저장소에 공개돼 있으므로 항목 유무만 돌려줘도 새는 것이 없다.
 // 로그인 없이도 부를 수 있게 둔다 — 규칙이 안 걸려 로그인이 막혔을 때가 정작 확인이 필요한 때다.
+// 방금 만든 반을 만든 사람의 담당으로 넣는다.
+//
+// 왜 서버에서 하나: 담당 반은 teachers/{tid}.classIds 에 있고, 규칙의 teaches()가
+// 그걸 보고 쓰기 권한을 준다. 그래서 선생님이 자기 문서의 classIds를 직접 쓰게 열면
+// **아무 반 id나 적어 넣어 남의 반 편집 권한을 가져갈 수 있다.**
+// 여기서는 반 문서의 createdBy가 본인일 때만, 그 반 하나만 더한다.
+async function claimClass(res, { idToken, cid }) {
+  const claims = await verifyIdToken(idToken);
+  if (!claims || (claims.role !== "teacher" && claims.role !== "owner")) {
+    res.status(403).json({ error: "권한이 없습니다" }); return;
+  }
+  const tid = claims.tid;
+  if (!tid || !cid) { res.status(400).json({ error: "잘못된 요청입니다" }); return; }
+
+  const c = await getDoc("classes/" + cid);
+  if (!c) { res.status(404).json({ error: "없는 반입니다" }); return; }
+  if (String(c.createdBy || "") !== String(tid)) {
+    res.status(403).json({ error: "본인이 만든 반이 아닙니다" }); return;
+  }
+  const t = await getDoc("teachers/" + tid);
+  if (!t) { res.status(404).json({ error: "없는 선생님입니다" }); return; }
+
+  const ids = Array.isArray(t.classIds) ? t.classIds.slice() : [];
+  if (ids.indexOf(cid) < 0) {
+    ids.push(cid);
+    await patchDoc("teachers/" + tid, { classIds: ids });
+  }
+  res.status(200).json({ ok: true, classIds: ids });
+}
+
 async function rulesCheck(res) {
   try {
     const r = await getPublishedRules();

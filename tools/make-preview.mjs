@@ -144,7 +144,9 @@ const STUB = `
   };
 
   /* ---- 가짜 /api/auth ---- 실제 서버 로직을 아주 얇게 흉내 낸다 */
-  var TEACHERS = [{ tid: "t-owner", name: "한민수", role: "owner", status: "active", pin: "2030", classIds: [] }];
+  /* 관리자 말고 보통 선생님도 하나 둔다 — 권한이 갈리는 길(반 만들기 등)을 눌러보려면 필요하다 */
+  var TEACHERS = [{ tid: "t-owner", name: "한민수", role: "owner", status: "active", pin: "2030", classIds: [] },
+                  { tid: "t-kim", name: "김선생", role: "teacher", status: "active", pin: "1111", classIds: [] }];
   var _fetch = window.fetch.bind(window);
   var mkTok = function(uid, claims){
     return "x." + btoa(unescape(encodeURIComponent(JSON.stringify({ uid: uid, claims: claims })))) + ".y"; };
@@ -172,6 +174,19 @@ const STUB = `
       return ok({ token: mkTok("s_" + nm, { role: "student", sname: nm, cids: cids }), name: nm, cids: cids, mustChangePin: true });
     }
     if (b.action === "defaultPinReport") return ok({ total: 0, groups: [] });
+    /* 방금 만든 반을 만든 사람 담당으로. 실제 서버와 같은 검사(createdBy)를 한다 */
+    if (b.action === "claimClass") {
+      var cl = JSON.parse(atob(String(b.idToken).split(".")[1])).claims || {};
+      var doc = store["classes/" + b.cid];
+      if (!doc) return bad("없는 반입니다", 404);
+      if (String(doc.createdBy || "") !== String(cl.tid || "")) return bad("본인이 만든 반이 아닙니다", 403);
+      var tt = TEACHERS.filter(function(x){ return x.tid === cl.tid; })[0];
+      if (!tt) return bad("없는 선생님입니다", 404);
+      tt.classIds = tt.classIds || [];
+      if (tt.classIds.indexOf(b.cid) < 0) tt.classIds.push(b.cid);
+      store["teachers/" + cl.tid] = tt;
+      return ok({ ok: true, classIds: tt.classIds });
+    }
     return ok({ ok: true });
   };
 
@@ -185,9 +200,10 @@ const STUB = `
              { id:"t1", name:"한민수", teacher:true }] };
   TEACHERS[0].classIds = ["c-reg", "c-ind"];
   store["teachers/t-owner"] = TEACHERS[0];
+  store["teachers/t-kim"] = TEACHERS[1];
 
   console.log("[preview] 메모리 Firestore + 가짜 인증 사용 중 — 운영 DB에 쓰지 않습니다");
-  console.log("[preview] 선생님 한민수 / PIN 2030,  학생 PIN 1234");
+  console.log("[preview] 관리자 한민수 / PIN 2030,  선생님 김선생 / PIN 1111,  학생 PIN 1234");
 })();
 </script>`;
 

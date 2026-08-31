@@ -482,6 +482,14 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
   눌러도 표시가 안 바뀌고(안 눌리는 것처럼 보인다) 저장할 때 다른 담당까지 지운다.
   담당 반 토글은 `arrayUnion`/`arrayRemove`로 그 반 하나만 건드린다.
 
+- **반 만들기**: 선생님 누구나 만들 수 있다. 삭제는 관리자만.
+  - 반 문서에 `createdBy: <tid>`를 적는다. 규칙이 이걸 **요구**한다
+    (`request.resource.data.createdBy == request.auth.token.tid`).
+  - 만든 사람을 담당(`classIds`)에 넣는 것은 **`/api/auth {action:"claimClass"}`가 한다.**
+    선생님이 자기 `teachers` 문서를 직접 쓰게 열면 아무 반 id나 적어 넣어
+    남의 반 편집 권한을 가져갈 수 있다. 서버는 `createdBy`가 본인일 때만, 그 반 하나만 더한다.
+  - 담당 배정이 실패해도 반은 남는다. 그때는 관리자가 선생님 관리에서 넣어주면 된다.
+
 - **위험신호**: 자동 집계 아님. 선생님이 상담에 표시한 `risk`(0~3) 기준 + "상담 공백"(마지막 상담 경과일) 두 축
 - **학습관리 보고서**: 출결 / 수업기록(dailyNotes) / 상담 / 종합코멘트. A4 인쇄·PDF.
   미리보기에서 수업기록 클릭 시 인라인 수정 가능. 인쇄 시 `.rp-noprint` 요소는 숨김.

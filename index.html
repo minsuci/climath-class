@@ -1058,10 +1058,22 @@ async function loadClasses() {
   CLASSES = arr;
   return arr;
 }
+// 만든 사람을 createdBy에 적는다. 규칙이 이 값을 요구하고, /api/auth 의 claimClass 가
+// 이 값을 보고 "본인이 만든 반"일 때만 담당으로 넣어준다.
 async function createClass(name, classDays, roster, books, type) {
-  const ref = await classesCol().add({ name, classDays, roster, books: books || [], type: type || "regular", time: Date.now() });
+  const claims = await authClaims();
+  const ref = await classesCol().add({ name, classDays, roster, books: books || [],
+    type: type || "regular", time: Date.now(), createdBy: (claims && claims.tid) || "" });
   await loadClasses();
   return ref.id;
+}
+// 방금 만든 반을 내 담당으로. 선생님은 자기 teachers 문서를 못 쓰므로 서버가 대신 한다.
+async function claimNewClass(cid) {
+  const u = firebase.auth().currentUser;
+  if (!u) throw new Error("로그인이 풀렸어요. 다시 들어와 주세요.");
+  const idToken = await u.getIdToken();
+  const r = await authApi({ action: "claimClass", idToken, cid });
+  return (r && r.classIds) || [];
 }
 async function saveClassRoster(cid, roster) {
   await classesCol().doc(cid).update({ roster });
@@ -4942,9 +4954,17 @@ function AdminView() {
 
   // ---- 새 반 만들기 ----
   if (mode === "newclass") return <>{homeSide}<ClassCreate me={me} onDone={async (newId) => {
-    const next = [...(me.classIds || []), newId];
-    await updateTeacher(me.tid, { classIds: next });
-    setMe({ ...me, classIds: next });
+    // 담당 배정은 서버가 한다 (선생님은 자기 teachers 문서를 못 쓴다).
+    // 실패해도 반은 이미 만들어졌으므로 그대로 두고 알려만 준다 —
+    // 관리자가 선생님 관리에서 담당을 넣어주면 된다.
+    try {
+      const ids = await claimNewClass(newId);
+      const t = { ...me, classIds: ids };
+      applyScope(t); setMe(t);
+    } catch (e) {
+      alert("반은 만들어졌는데 담당 배정에 실패했어요.\n" +
+            "관리자에게 담당 반 지정을 부탁해주세요.\n\n" + e.message);
+    }
     await refreshTeachers();
     setMode("login");
   }} onCancel={() => setMode("login")} /></>;
