@@ -2344,6 +2344,7 @@ function StudentDirectory({ me, onBack }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [ver, bumpVer] = useState(0);   // 반 배정이 바뀌면 CLASSES를 다시 읽어 그린다
+  const [openUnlinked, setOpenUnlinked] = useState(false);  // 미연결 목록은 접어둔다 (수십 건이라 화면을 다 먹는다)
   const backRef = useSwipeBack(onBack);
 
   const [loadErr, setLoadErr] = useState("");
@@ -2469,26 +2470,36 @@ function StudentDirectory({ me, onBack }) {
         {/* 아직 안 이어진 명단 항목 */}
         {unlinked.length > 0 && (
           <div style={{background: "#f6e7df", border: "1px solid #e6cbb9", borderRadius: 12, padding: "12px 14px", marginBottom: 12}}>
-            <div style={{fontWeight: 700, color: "#a8562c", fontSize: 14, marginBottom: 6}}>
-              학생 정보가 없는 명단 항목 {unlinked.length}건
-            </div>
-            <div style={{fontSize: 12, color: "#a8562c", lineHeight: 1.55, marginBottom: 8}}>
-              반에는 있는데 아직 사람 정보가 없어요. 이어주면 학교·학년·담임을 한 번만 넣으면 됩니다.
-              <b> 이름이 겹치는 학생은 자동으로 잇지 않아요</b> — 다른 사람일 수 있으니까요.
-            </div>
-            <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8}}>
-              <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "8px 13px"}}
+            <div style={{display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap"}}>
+              <button className="cm-link" style={{color: "#a8562c", textDecoration: "none", padding: 0, fontWeight: 700, fontSize: 14}}
+                onClick={() => setOpenUnlinked((v) => !v)}>
+                {openUnlinked ? "▾" : "▸"} 학생 정보가 없는 명단 항목 {unlinked.length}건
+              </button>
+              <button className="cm-btn cm-btn-ghost" style={{margin: 0, marginLeft: "auto", width: "auto", padding: "7px 12px", fontSize: 13}}
                 disabled={busy} onClick={autoLink}>이름이 같은 것끼리 잇기</button>
             </div>
-            <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
-              {unlinked.slice(0, 40).map((u) => (
-                <button key={u.cls.id + u.r.id} className="cm-ab-tab" disabled={busy}
-                  onClick={() => createFromRoster(u)}>
-                  {u.r.name} <span style={{opacity: .7}}>({u.cls.name})</span> +
-                </button>
-              ))}
-              {unlinked.length > 40 && <span style={{fontSize: 12, color: "#a8562c"}}>… 외 {unlinked.length - 40}건</span>}
-            </div>
+            {openUnlinked && (<>
+              <div style={{fontSize: 12, color: "#a8562c", lineHeight: 1.55, margin: "8px 0"}}>
+                반에는 있는데 아직 사람 정보가 없어요. 이어주면 학교·학년·담임을 한 번만 넣으면 됩니다.
+                <b> 이름이 겹치는 학생은 자동으로 잇지 않아요</b> — 다른 사람일 수 있으니까요.
+                아래 이름을 누르면 하나씩 만들어져요.
+              </div>
+              {activeClasses().map((c) => {
+                const mine = unlinked.filter((u) => u.cls.id === c.id);
+                if (!mine.length) return null;
+                return (
+                  <div key={c.id} style={{marginTop: 8}}>
+                    <div style={{fontSize: 12, color: "#a8562c", fontWeight: 700, marginBottom: 4}}>{c.name} · {mine.length}명</div>
+                    <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+                      {mine.map((u) => (
+                        <button key={u.cls.id + u.r.id} className="cm-ab-tab" disabled={busy}
+                          onClick={() => createFromRoster(u)}>{u.r.name} +</button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </>)}
           </div>
         )}
 
