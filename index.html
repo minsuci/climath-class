@@ -5902,29 +5902,68 @@ function TeacherRegister({ onDone, onCancel }) {
 function TeacherManage({ me, teachers, onRefresh, onBack }) {
   const [resetTid, setResetTid] = useState(null);
   const [newPin, setNewPin] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState("");
+  // 로그인 화면이 쓰는 목록(/api/auth teachers)에는 **담당 반이 없다** — 로그인 전에
+  // 부르는 것이라 이름·역할만 준다. 그걸 그대로 쓰면 담당 반이 항상 빈 것으로 보여
+  // 눌러도 표시가 안 바뀌고(눌리지 않는 것처럼 보인다), 저장할 때 다른 반 담당까지 지운다.
+  // 여기서는 문서를 직접 읽는다 (규칙상 관리자만 전체를 읽을 수 있다).
+  const [full, setFull] = useState(null);
+  async function reload() {
+    try { setFull(await listTeachers()); setMsg(""); }
+    catch (e) { setFull([]); setMsg("선생님 목록을 읽지 못했어요: " + friendlyErr(e)); }
+  }
+  useEffect(() => { reload(); }, []);
+  // 문서를 아직 못 읽었으면 이름만이라도 보여준다
+  const rows = full || teachers;
+  const byTid = {};
+  (full || []).forEach((t) => { byTid[t.tid] = t; });
+
   async function toggleCls(t, cid) {
+    if (busy) return;
     const has = (t.classIds || []).includes(cid);
-    const next = has ? t.classIds.filter((x) => x !== cid) : [...(t.classIds || []), cid];
-    await updateTeacher(t.tid, { classIds: next });
-    onRefresh();
+    setBusy(t.tid + cid); setMsg("");
+    try {
+      // 배열을 통째로 다시 쓰지 않는다. 화면이 들고 있던 옛 사본으로 저장하면
+      // 그 사이 다른 곳에서 바뀐 담당이 날아간다 (반 삭제·순서 편집이 같은 배열을 건드린다).
+      await updateTeacher(t.tid, { classIds: has
+        ? firebase.firestore.FieldValue.arrayRemove(cid)
+        : firebase.firestore.FieldValue.arrayUnion(cid) });
+      await reload();
+      onRefresh();
+    } catch (e) { setMsg("담당 반을 바꾸지 못했어요: " + friendlyErr(e)); }
+    setBusy("");
   }
   async function doResetPin(t) {
     if (newPin.length !== 4) return;
-    await updateTeacher(t.tid, { pin: newPin });
-    setResetTid(null); setNewPin("");
-    onRefresh();
+    setMsg("");
+    try {
+      await updateTeacher(t.tid, { pin: newPin });
+      setResetTid(null); setNewPin("");
+      await reload(); onRefresh();
+    } catch (e) { setMsg("PIN을 바꾸지 못했어요: " + friendlyErr(e)); }
   }
   async function doDelete(t) {
     if (!confirm(t.name + " 선생님 계정을 삭제할까요?")) return;
-    await deleteTeacher(t.tid);
-    onRefresh();
+    setMsg("");
+    try { await deleteTeacher(t.tid); await reload(); onRefresh(); }
+    catch (e) { setMsg("삭제하지 못했어요: " + friendlyErr(e)); }
+  }
+  async function act(fn, what) {
+    setMsg("");
+    try { await fn(); await reload(); onRefresh(); }
+    catch (e) { setMsg(what + "하지 못했어요: " + friendlyErr(e)); }
   }
   const tmBackRef = useSwipeBack(onBack);
   return (
     <div ref={tmBackRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-card">
         <h2 className="cm-h2">선생님 관리</h2>
-        {teachers.map((t) => (
+        {msg && <div className="cm-err" style={{marginBottom: 8}}>{msg}</div>}
+        {full === null && <div className="cm-hint" style={{marginBottom: 8}}>담당 반을 읽는 중…</div>}
+        {rows.map((t0) => {
+          const t = byTid[t0.tid] || t0;
+          return (
           <div key={t.tid} style={{borderBottom: "1px solid #e8e0d4", padding: "12px 0"}}>
             <div style={{display: "flex", alignItems: "center", gap: 8}}>
               <strong>{t.name}</strong>
@@ -5933,9 +5972,9 @@ function TeacherManage({ me, teachers, onRefresh, onBack }) {
               <span style={{marginLeft: "auto"}}>
                 {isPending(t) ? (<>
                   <button className="cm-link" style={{color: "var(--green)", fontWeight: 700}}
-                    onClick={async () => { await updateTeacher(t.tid, { status: "active" }); onRefresh(); }}>승인</button>
+                    onClick={() => act(() => updateTeacher(t.tid, { status: "active" }), "승인")}>승인</button>
                   <button className="cm-link" style={{color: "#d6453f"}}
-                    onClick={async () => { if (confirm(t.name + " 선생님의 등록 요청을 거절(삭제)할까요?")) { await deleteTeacher(t.tid); onRefresh(); } }}>거절</button>
+                    onClick={() => { if (confirm(t.name + " 선생님의 등록 요청을 거절(삭제)할까요?")) act(() => deleteTeacher(t.tid), "거절"); }}>거절</button>
                 </>) : (<>
                   {t.tid !== me.tid && t.role !== "owner" && <button className="cm-link" onClick={() => doDelete(t)}>삭제</button>}
                   <button className="cm-link" onClick={() => { setResetTid(resetTid === t.tid ? null : t.tid); setNewPin(""); }}>PIN 변경</button>
@@ -5950,16 +5989,22 @@ function TeacherManage({ me, teachers, onRefresh, onBack }) {
               </div>
             )}
             {t.role !== "owner" && (
-              <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8}}>
+              <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, alignItems: "center"}}>
                 {/* 종강한 반은 숨기되, 이미 담당으로 걸려 있으면 뺄 수 있도록 남겨둔다 */}
                 {CLASSES.filter((c) => !isClassEnded(c) || (t.classIds || []).includes(c.id)).map((c) => {
                   const on = (t.classIds || []).includes(c.id);
-                  return <button key={c.id} className={"cm-ab-tab" + (on ? " on" : "")} onClick={() => toggleCls(t, c.id)}>{c.name}{isClassEnded(c) ? " (종강)" : ""}</button>;
+                  return <button key={c.id} className={"cm-ab-tab" + (on ? " on" : "")}
+                    disabled={full === null || busy === t.tid + c.id}
+                    onClick={() => toggleCls(t, c.id)}>{c.name}{isClassEnded(c) ? " (종강)" : ""}</button>;
                 })}
+                <span style={{fontSize: 11, color: "var(--muted)"}}>
+                  {(t.classIds || []).length ? "담당 " + t.classIds.length + "개" : "담당 없음"}
+                </span>
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
       <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
     </div>
