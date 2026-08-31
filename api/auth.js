@@ -12,7 +12,7 @@
 //   { action:"login", kind:"student", name, pin }→ { token, name }
 //   { action:"register", name, pin }             → 선생님 가입 신청 (status:"pending")
 
-import { createCustomToken, verifyIdToken, getDoc, listDocs, patchDoc } from "./_google.js";
+import { createCustomToken, verifyIdToken, getDoc, listDocs, patchDoc, getPublishedRules } from "./_google.js";
 
 const norm = (s) => String(s || "").replace(/\s+/g, "");
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -64,6 +64,7 @@ export default async function handler(req, res) {
     if (body.action === "changePin") return await changePin(res, body);
     if (body.action === "changeTeacherPin") return await changeTeacherPin(res, body);
     if (body.action === "defaultPinReport") return await defaultPinReport(res, body);
+    if (body.action === "rulesCheck") return await rulesCheck(res);
     if (body.action === "login" && body.kind === "teacher") return await loginTeacher(res, body);
     if (body.action === "login" && body.kind === "student") return await loginStudent(res, body);
     res.status(400).json({ error: "알 수 없는 요청입니다" });
@@ -231,6 +232,29 @@ async function changePin(res, { name, oldPin, newPin }) {
   await clearFails(key);
   await patchDoc("userPins/" + encodeURIComponent(nm), { pin: String(newPin), time: Date.now() });
   res.status(200).json({ ok: true });
+}
+
+// 지금 걸려 있는 보안 규칙에 무엇이 들어 있는지 확인한다.
+// 규칙 원문은 저장소에 공개돼 있으므로 항목 유무만 돌려줘도 새는 것이 없다.
+// 로그인 없이도 부를 수 있게 둔다 — 규칙이 안 걸려 로그인이 막혔을 때가 정작 확인이 필요한 때다.
+async function rulesCheck(res) {
+  try {
+    const r = await getPublishedRules();
+    const has = (needle) => r.source.indexOf(needle) >= 0;
+    res.status(200).json({
+      updated: r.updated,
+      항목: {
+        "students(학생 명단)": has("match /students/"),
+        "exams(내신)": has("match /exams/"),
+        "appConfig(회차·학교목록)": has("match /appConfig/"),
+        "config/flyer(안내문 초안)": has("match /config/flyer"),
+        "익명차단(role 확인)": has("request.auth.token.role"),
+      },
+      길이: r.source.length,
+    });
+  } catch (e) {
+    res.status(500).json({ error: "규칙을 읽지 못했습니다: " + e.message });
+  }
 }
 
 // 선생님이 자기 PIN을 바꾼다. 관리자도 자기 것은 여기서만 바꿀 수 있다

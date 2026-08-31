@@ -109,14 +109,16 @@ export async function verifyIdToken(idToken) {
 }
 
 // ---- (2) Firestore REST ----
-let _tok = null; // { value, exp }
-async function accessToken() {
+const _toks = {}; // scope -> { value, exp }
+async function accessToken(scope) {
+  const sc = scope || "https://www.googleapis.com/auth/datastore";
   const now = Math.floor(Date.now() / 1000);
+  const _tok = _toks[sc];
   if (_tok && _tok.exp > now + 60) return _tok.value;
   const sa = serviceAccount();
   const assertion = signJwt({
     iss: sa.client_email,
-    scope: "https://www.googleapis.com/auth/datastore",
+    scope: sc,
     aud: TOKEN_URL,
     iat: now,
     exp: now + 3600,
@@ -133,8 +135,28 @@ async function accessToken() {
   if (!r.ok || !j.access_token) {
     throw new Error("구글 토큰 발급 실패: " + (j.error_description || j.error || r.status));
   }
-  _tok = { value: j.access_token, exp: now + (j.expires_in || 3600) };
-  return _tok.value;
+  _toks[sc] = { value: j.access_token, exp: now + (j.expires_in || 3600) };
+  return _toks[sc].value;
+}
+
+// ---- (3) 실제로 게시된 보안 규칙 읽기 ----
+// 규칙은 저장소에 커밋해도 콘솔에 붙여넣어야 적용된다. 그래서 "올렸나?"가 계속 헷갈렸다.
+// 지금 걸려 있는 것을 서버에서 직접 확인한다 (읽기 전용).
+export async function getPublishedRules() {
+  const sa = serviceAccount();
+  const t = await accessToken("https://www.googleapis.com/auth/firebase.readonly");
+  const h = { Authorization: "Bearer " + t };
+  const rel = await fetch(
+    "https://firebaserules.googleapis.com/v1/projects/" + sa.project_id + "/releases/cloud.firestore",
+    { headers: h });
+  const relJ = await rel.json();
+  if (!rel.ok) throw new Error((relJ.error && relJ.error.message) || ("release " + rel.status));
+  const rs = await fetch("https://firebaserules.googleapis.com/v1/" + relJ.rulesetName, { headers: h });
+  const rsJ = await rs.json();
+  if (!rs.ok) throw new Error((rsJ.error && rsJ.error.message) || ("ruleset " + rs.status));
+  const files = ((rsJ.source && rsJ.source.files) || []).map((f) => f.content || "").join("
+");
+  return { updated: relJ.updateTime || rsJ.createTime || "", source: files };
 }
 
 const docBase = () => {
