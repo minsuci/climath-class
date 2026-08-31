@@ -242,6 +242,14 @@ select.cm-sheet-in{cursor:pointer; appearance:none; -webkit-appearance:none;}
   text-align:left !important; padding:6px 9px !important; position:sticky; left:0;}
 .cm-sched{table-layout:fixed; width:100%; min-width:880px;}
 .cm-sched input[type=date]{font-size:11px; padding:4px 5px;}
+/* 날짜 칸 지우개. <input type=date>는 휴대폰에서 값을 비울 방법이 없다 —
+   달력 휠은 늘 어떤 날짜를 고르게 되어 있어서, 잘못 넣으면 되돌리지 못한다. */
+.cm-datewrap{display:flex; align-items:center; gap:1px;}
+.cm-datewrap > input{flex:1; min-width:0;}
+.cm-x{border:0; background:transparent; color:#b6ab9b; font-size:15px; line-height:1;
+  padding:0 3px; cursor:pointer; font-family:inherit; flex:none;}
+.cm-x:hover{color:#d6453f;}
+.cm-x:disabled{opacity:.4; cursor:not-allowed;}
 
 .cm-drop{border:1.5px dashed transparent; border-radius:12px; transition:border-color .15s, background-color .15s; padding:2px;}
 .cm-drop.over{border-color:var(--clay); background:rgba(194,112,63,.06);}
@@ -3330,8 +3338,12 @@ function SchoolTermRow({ term, row, cur, onMsg }) {
   const mathOut = v.math && v.start && v.end && (v.math < v.start || v.math > v.end);
   const cell = { padding: 3, background: ok ? "#e6f0e9" : undefined, transition: "background .4s" };
   const dateIn = (k) => (
-    <input type="date" className="cm-sheet-in" value={v[k] || ""} disabled={busy}
-      onChange={(e) => patch({ [k]: e.target.value })} />
+    <span className="cm-datewrap">
+      <input type="date" className="cm-sheet-in" value={v[k] || ""} disabled={busy}
+        onChange={(e) => patch({ [k]: e.target.value })} />
+      {v[k] && <button className="cm-x" title="날짜 지우기" disabled={busy}
+        onClick={() => patch({ [k]: "" })}>×</button>}
+    </span>
   );
   return (
     <tr>
@@ -3850,8 +3862,12 @@ function ExamBoard({ onBack }) {
                       <td>{v.math ? shortDate(v.math) : "-"}</td>
                       <td>{v.prep ? shortDate(v.prep) : "-"}</td>
                       <td style={{padding: "2px 3px"}}>
-                        <input type="date" value={v.back || ""} style={{fontSize: 11, border: "1px solid var(--line)", borderRadius: 6, padding: "3px 4px", fontFamily: "inherit"}}
-                          onChange={(e) => saveExam(cls.id, term, st.id, { back: e.target.value }).catch((err) => alert("저장 실패: " + err.message))} />
+                        <span className="cm-datewrap">
+                          <input type="date" value={v.back || ""} style={{fontSize: 11, border: "1px solid var(--line)", borderRadius: 6, padding: "3px 4px", fontFamily: "inherit"}}
+                            onChange={(e) => saveExam(cls.id, term, st.id, { back: e.target.value }).catch((err) => alert("저장 실패: " + err.message))} />
+                          {v.back && <button className="cm-x" title="복귀 날짜 지우기"
+                            onClick={() => saveExam(cls.id, term, st.id, { back: "" }).catch((err) => alert("지우지 못했어요: " + err.message))}>×</button>}
+                        </span>
                       </td>
                       <td style={{textAlign: "left", whiteSpace: "normal", maxWidth: 160}}>{v.note || ""}</td>
                     </tr>
