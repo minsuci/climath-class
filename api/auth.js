@@ -12,9 +12,10 @@
 //   { action:"login", kind:"student", name, pin }→ { token, name }
 //   { action:"register", name, pin }             → 선생님 가입 신청 (status:"pending")
 
-// _google.mjs — 확장자가 .mjs여야 한다. .js로 두면 Vercel이 CJS로 require해서
-// "Cannot use import statement outside a module"로 함수 전체가 죽는다(로그인 불가).
-import { createCustomToken, verifyIdToken, getDoc, listDocs, patchDoc, getPublishedRules } from "./_google.mjs";
+// _google.js 는 반드시 .js 여야 한다. Vercel이 이 파일들을 CJS로 로드하면서
+// 진입 파일의 ESM 문법만 변환해 주기 때문에, 지역 파일을 .mjs로 두면
+// require()가 ESM을 못 읽어 함수 전체가 죽는다(ERR_REQUIRE_ESM → 로그인 불가).
+import { createCustomToken, verifyIdToken, getDoc, listDocs, patchDoc, getPublishedRules } from "./_google.js";
 
 const norm = (s) => String(s || "").replace(/\s+/g, "");
 const todayStr = () => new Date().toISOString().slice(0, 10);
