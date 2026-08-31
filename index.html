@@ -653,6 +653,11 @@ const examKey = (term, sid) => String(term).replace(/[\/\s]+/g, "_") + "__" + si
 async function saveExam(cid, term, sid, data) {
   await examCol(cid).doc(examKey(term, sid)).set({ ...data, term, sid, updated: Date.now() }, { merge: true });
 }
+// 잘못 들어간 제출을 지운다. 그 회차 그 학생 것 하나만 없앤다 —
+// 학생은 다시 낼 수 있고, 출결·과제 같은 다른 기록은 건드리지 않는다.
+async function deleteExam(cid, term, sid) {
+  await examCol(cid).doc(examKey(term, sid)).delete();
+}
 function listenExams(cid, term, cb) {
   return examCol(cid).where("term", "==", term).onSnapshot((s) => {
     const m = {};
@@ -3300,7 +3305,7 @@ function ExamBoard({ onBack }) {
     Object.keys(m).forEach((sid) => {
       if (live[sid]) return;
       const who = (c.roster || []).find((r) => r.id === sid);
-      orphans.push({ cls: c, v: m[sid],
+      orphans.push({ cls: c, sid: sid, v: m[sid],
         why: !who ? "명단에 없음" : (who.teacher ? "선생님 항목" : "수강 종료") });
     });
   });
@@ -3379,6 +3384,18 @@ function ExamBoard({ onBack }) {
       for (const x of offSched) { await saveExam(x.cls.id, term, x.st.id, schedFields(x.st, x.s, x.v)); n++; }
       setFillMsg(n + "명 맞췄어요 ✓");
     } catch (e) { setFillMsg("맞추다 멈췄어요 (" + n + "명까지): " + friendlyErr(e)); }
+    setFilling(false);
+  }
+
+  // 잘못 들어간 제출 지우기. 참여표에서 사라지고 "안 낸 학생"으로 돌아간다.
+  async function removeExam(cls, sid, who) {
+    if (filling) return;
+    if (!confirm(who + " 제출을 지울까요?" + "\n\n" +
+      "이번 회차(" + term + ") 참여표에서만 사라져요. 출결·과제·점수 기록은 그대로 남고,\n" +
+      "학생이 다시 내거나 선생님이 다시 넣을 수 있어요.")) return;
+    setFilling(true); setFillMsg("");
+    try { await deleteExam(cls.id, term, sid); setFillMsg(who + " 제출을 지웠어요 ✓"); }
+    catch (e) { setFillMsg("지우지 못했어요: " + friendlyErr(e)); }
     setFilling(false);
   }
 
@@ -3693,6 +3710,9 @@ function ExamBoard({ onBack }) {
                       <td className="cm-ab-name">{st.name}
                         <br/><button className="cm-link" style={{padding: 0, fontSize: 11}}
                           onClick={() => setEntry({ cls, st, cur: v })}>고치기</button>
+                        <span style={{fontSize: 11, color: "#ded5c7"}}> · </span>
+                        <button className="cm-link" style={{padding: 0, fontSize: 11, color: "#d6453f"}}
+                          disabled={filling} onClick={() => removeExam(cls, st.id, st.name)}>지우기</button>
                         {v.byTeacher && <span style={{fontSize: 10, color: "#8a7f72"}}> · 대신 입력</span>}
                       </td>
                       <td>{cls.name}</td>
@@ -3719,11 +3739,15 @@ function ExamBoard({ onBack }) {
               </div>
               <div style={{fontSize: 12, color: "#7c6f5f", lineHeight: 1.6}}>
                 냈는데 위 표에는 안 나오는 것들이에요. 명단을 손보면 바로 올라옵니다.
+                잘못 들어간 것이면 지우세요.
                 {orphans.map((o, i) => (
                   <div key={i} style={{marginTop: 4}}>
                     · <b>{o.v.name || "(이름 없음)"}</b> {o.v.grade || ""} {o.v.school || ""}
                     {o.v.start ? " · " + shortDate(o.v.start) + "~" + shortDate(o.v.end || o.v.start) : ""}
                     <span style={{opacity: .8}}> — {o.cls.name} / {o.why}</span>
+                    {" "}<button className="cm-link" style={{padding: 0, fontSize: 11, color: "#d6453f"}}
+                      disabled={filling}
+                      onClick={() => removeExam(o.cls, o.sid, o.v.name || "이름 없는 제출")}>지우기</button>
                   </div>
                 ))}
               </div>
