@@ -348,9 +348,12 @@ function semesterSlice(text, from) {
   return text.slice(mark);
 }
 
+// 왜 못 읽었는지 화면에 보여주려고 남긴다. 조용히 null 만 돌려주면 어디서 막혔는지 알 수 없다.
+let lastDocReason = "";
 async function examFromDoc(text, school, from, to, kind) {
+  lastDocReason = "";
   const key = process.env.GEMINI_API_KEY;
-  if (!key) return null;
+  if (!key) { lastDocReason = "AI 키 없음"; return null; }
   const body = {
     system_instruction: { parts: [{ text:
       "너는 한국 고등학교 학사일정 표에서 시험 기간만 뽑아내는 도구다. " +
@@ -366,23 +369,37 @@ async function examFromDoc(text, school, from, to, kind) {
       "형식: {\"start\":\"YYYY-MM-DD\",\"end\":\"YYYY-MM-DD\",\"grades\":[\"고1\",\"고2\",\"고3\"]}\n" +
       "학년 구분이 없으면 grades 는 세 학년 모두 넣는다. 못 찾으면 {\"none\":true}\n\n" +
       "--- 원문 ---\n" + text.slice(0, 12000) + "\n--- 끝 ---" }] }],
-    generationConfig: { temperature: 0, maxOutputTokens: 200, responseMimeType: "application/json" },
+    // ⚠ gemini-2.5 계열은 답하기 전에 "생각"에 토큰을 쓴다. maxOutputTokens 가 작으면
+    // 생각만 하다 끝나서 **빈 답**이 온다(오류가 아니라 그냥 비어 있어서 알아채기 어렵다).
+    // 생각을 끄고, 상한도 넉넉히 준다.
+    generationConfig: { temperature: 0, maxOutputTokens: 800, responseMimeType: "application/json",
+                        thinkingConfig: { thinkingBudget: 0 } },
   };
   const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=" + key,
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) return null;
+  if (!r.ok) { lastDocReason = "AI 호출 실패 " + r.status; return null; }
   const j = await r.json().catch(() => null);
   const out = ((((j || {}).candidates || [])[0] || {}).content || {}).parts || [];
+  const rawTxt = out.map((x) => x.text || "").join("").trim();
+  if (!rawTxt) {
+    const fin = (((j || {}).candidates || [])[0] || {}).finishReason || "";
+    lastDocReason = "AI가 빈 답" + (fin ? " (" + fin + ")" : "");
+    return null;
+  }
   let v = null;
-  try { v = JSON.parse(out.map((x) => x.text || "").join("").trim()); } catch (e) { return null; }
-  if (!v || v.none || !v.start || !v.end) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(v.start) || !/^\d{4}-\d{2}-\d{2}$/.test(v.end)) return null;
+  try { v = JSON.parse(rawTxt); } catch (e) { lastDocReason = "AI 답을 못 읽음: " + rawTxt.slice(0, 60); return null; }
+  if (!v || v.none || !v.start || !v.end) { lastDocReason = "문서에서 못 찾음"; return null; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v.start) || !/^\d{4}-\d{2}-\d{2}$/.test(v.end)) {
+    lastDocReason = "날짜 모양이 이상함"; return null;
+  }
 
   // ---- 검증 ---- 지어낸 날짜를 걸러낸다
   const a = ymd(v.start), b = ymd(v.end);
-  if (a < from || b > to || a > b) return null;
+  if (a < from || b > to || a > b) { lastDocReason = "기간 밖: " + v.start + "~" + v.end; return null; }
   const scope = semesterSlice(text, from);
-  if (!dayHasExam(scope, v.start, kind) || !dayHasExam(scope, v.end, kind)) return null;
+  if (!dayHasExam(scope, v.start, kind) || !dayHasExam(scope, v.end, kind)) {
+    lastDocReason = "원문에 없는 날짜라 막음: " + v.start + "~" + v.end; return null;
+  }
 
   const grades = Array.isArray(v.grades) && v.grades.length ? v.grades : ["고1", "고2", "고3"];
   const byGrade = {};
@@ -446,7 +463,8 @@ export default async function handler(req, res) {
     res.status(200).json({ school, official: s.official, officeName: s.officeName,
                            byGrade, found: exams.length,
                            // 나이스에 일정이 아예 없는 학교와, 일정은 있는데 시험만 안 올린 학교는 다르다
-                           hasAny, via, docTitle, homepage: s.hmpg || "",
+                           hasAny, via, docTitle, docReason: via === "doc" ? "" : lastDocReason,
+                           homepage: s.hmpg || "",
                            truncated, hasKey: !!KEY });
   } catch (e) {
     console.error("[schedule]", e);

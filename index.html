@@ -813,6 +813,7 @@ async function runNeisPull(term, targets, from, to, kind) {
       else {
         // 문서(PDF·한글파일)에서 읽은 것은 사람이 한 번 봐야 한다
         if (r.via === "doc") fromDoc.push(school + (r.docTitle ? " (" + r.docTitle + ")" : ""));
+        else if (r.docReason) noExam.push(school + " — " + r.docReason);
         for (const t of targets.filter((x) => x.school === school)) {
           const g = r.byGrade && r.byGrade[t.grade];
           if (!g) { noExam.push(t.school + " " + t.grade); continue; }
