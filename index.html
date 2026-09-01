@@ -753,6 +753,23 @@ async function deleteSchoolTerm(term, school, grade) {
   await schoolTermsDoc().set({ [schedKey(term, school, grade)]: firebase.firestore.FieldValue.delete() },
     { merge: true });
 }
+// 나이스에서 학사일정을 받아온다. 서버가 대신 부른다 (브라우저에서 부르면 CORS에 막힌다).
+// **학교 하나에 한 번씩** 부른다 — 키가 없으면 날짜 창을 쪼개 여러 번 받아야 해서
+// 한 요청에 여러 학교를 묶으면 함수 실행 시간을 넘긴다.
+async function fetchSchoolSchedule(school, from, to, kind) {
+  const u = firebase.auth().currentUser;
+  if (!u) throw new Error("로그인이 풀렸어요. 다시 들어와 주세요.");
+  const idToken = await u.getIdToken();
+  const r = await fetch("/api/schedule", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken, school, from, to, kind }),
+  });
+  let j = null;
+  try { j = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error((j && j.error) || ("불러오지 못했어요 (" + r.status + ")"));
+  return j || {};
+}
+
 // 그 회차에 적어둔 것만 골라낸다
 function schoolTermsOf(all, term) {
   const pre = termKey(term) + "__";
@@ -3172,6 +3189,15 @@ function SchoolTermBoard({ onBack }) {
   const [msg, setMsg] = useState("");
   const [addS, setAddS] = useState("");
   const [addG, setAddG] = useState("고1");
+  // 나이스에서 불러오기
+  const today = new Date();
+  const plus = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return ymd(x); };
+  const [from, setFrom] = useState(plus(today, -7));
+  const [to, setTo] = useState(plus(today, 75));
+  const [kind, setKind] = useState("중간");
+  const [pulling, setPulling] = useState(false);
+  const [pullMsg, setPullMsg] = useState("");
+  const [diffs, setDiffs] = useState([]);      // 이미 적어둔 것과 다른 것
   const backRef = useSwipeBack(onBack);
   // 날짜 칸이 여덟이라 좁은 컬럼에 안 들어간다 (참여표·안내문과 같은 처리)
   useEffect(() => {
@@ -3210,6 +3236,59 @@ function SchoolTermBoard({ onBack }) {
   const done = list.filter((r) => { const v = all[schedKey(term, r.school, r.grade)]; return v && v.start && v.end; });
   const coveredN = done.reduce((a, r) => a + r.n, 0);
   const noSchool = people.filter((x) => !x.school || !x.grade).length;
+
+  // 학사일정에는 "2학기 중간고사"까지만 있다. 과목별 시간표는 안 들어가므로
+  // **수학 시험 날짜는 여기서 못 채운다** — 그건 계속 손으로 넣거나 학생이 낸다.
+  async function pullFromNeis() {
+    if (pulling) return;
+    const names = Array.from(new Set(list.filter((r) => r.grade !== "중3").map((r) => r.school)));
+    if (!names.length) { setMsg("불러올 학교가 없어요"); return; }
+    setPulling(true); setPullMsg(""); setDiffs([]); setMsg("");
+    let filled = 0, same = 0;
+    const notFound = [], noExam = [], noData = [], changed = [];
+    try {
+      for (let i = 0; i < names.length; i++) {
+        const school = names[i];
+        setPullMsg("불러오는 중… " + (i + 1) + "/" + names.length + " · " + school);
+        let r;
+        try { r = await fetchSchoolSchedule(school, from, to, kind); }
+        catch (e) { notFound.push(school + "(" + e.message + ")"); continue; }
+        if (r.error) { notFound.push(school); continue; }
+        if (!r.hasAny) { noData.push(school); continue; }
+        for (const row of list.filter((x) => x.school === school && x.grade !== "중3")) {
+          const g = r.byGrade && r.byGrade[row.grade];
+          if (!g) { noExam.push(row.school + " " + row.grade); continue; }
+          const cur = all[schedKey(term, row.school, row.grade)] || {};
+          if (cur.start === g.start && cur.end === g.end) { same++; continue; }
+          // 이미 적어둔 것이 다르면 덮지 않는다. 학교가 바꿨을 수도, 선생님이 맞게 고쳤을 수도 있다.
+          if (cur.start || cur.end) {
+            changed.push({ school: row.school, grade: row.grade,
+                           mine: { start: cur.start || "", end: cur.end || "" },
+                           neis: { start: g.start, end: g.end }, name: g.name });
+            continue;
+          }
+          await saveSchoolTerm(term, row.school, row.grade, { start: g.start, end: g.end });
+          filled++;
+        }
+      }
+      setDiffs(changed);
+      const bits = [];
+      if (filled) bits.push(filled + "칸 채웠어요 ✓");
+      if (same) bits.push("이미 같은 것 " + same + "칸");
+      if (changed.length) bits.push("다른 것 " + changed.length + "칸 (아래 확인)");
+      if (noExam.length) bits.push("이 기간에 시험이 안 올라온 곳: " + noExam.join(", "));
+      if (noData.length) bits.push("나이스에 학사일정을 안 올리는 학교: " + noData.join(", "));
+      if (notFound.length) bits.push("나이스에서 못 찾은 학교: " + notFound.join(", "));
+      setPullMsg(bits.join(" · ") || "가져올 게 없었어요");
+    } catch (e) { setPullMsg("불러오지 못했어요: " + friendlyErr(e)); }
+    setPulling(false);
+  }
+  async function takeNeis(d) {
+    try {
+      await saveSchoolTerm(term, d.school, d.grade, { start: d.neis.start, end: d.neis.end });
+      setDiffs((v) => v.filter((x) => !(x.school === d.school && x.grade === d.grade)));
+    } catch (e) { setMsg("바꾸지 못했어요: " + friendlyErr(e)); }
+  }
 
   async function addRow() {
     const sc = matchSchool(addS, schoolOpts);
@@ -3250,6 +3329,54 @@ function SchoolTermBoard({ onBack }) {
           <div className="cm-hint">회차를 열어야 일정을 적을 수 있어요. 일정은 회차마다 따로 저장돼요.</div>
         ) : (<>
           {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"} style={{marginBottom: 8}}>{msg}</div>}
+
+          {/* 나이스(NEIS) 학사일정 불러오기.
+              학사일정에는 "2학기 중간고사"까지만 있고 과목별 시간표는 없다 —
+              수학 시험 날짜는 여기서 못 채운다. */}
+          <div style={{background: "#eef1f6", border: "1px solid #d8e0ea", borderRadius: 12,
+               padding: "12px 14px", marginBottom: 12}}>
+            <div style={{fontSize: 13, color: "var(--navy)", fontWeight: 700, marginBottom: 6}}>
+              나이스에서 학사일정 불러오기
+            </div>
+            <div style={{fontSize: 12, color: "var(--muted)", lineHeight: 1.6, marginBottom: 8}}>
+              학교가 나이스에 올린 일정에서 <b>내신 기간</b>을 찾아 빈 칸을 채워요.
+              이미 적어둔 칸은 덮지 않고 다른 것만 알려드립니다.
+              <br/><b>수학 시험 날짜는 못 가져와요</b> — 학사일정에는 과목별 시간표가 없어요.
+            </div>
+            <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
+              <input type="date" className="cm-sheet-in" style={{width: 140}} value={from}
+                onChange={(e) => setFrom(e.target.value)} />
+              <span style={{color: "var(--muted)"}}>~</span>
+              <input type="date" className="cm-sheet-in" style={{width: 140}} value={to}
+                onChange={(e) => setTo(e.target.value)} />
+              <select className="cm-sheet-in" style={{width: 88}} value={kind} onChange={(e) => setKind(e.target.value)}>
+                <option value="중간">중간</option>
+                <option value="기말">기말</option>
+                <option value="">전부</option>
+              </select>
+              <button className="cm-btn cm-btn-primary" disabled={pulling || !list.length}
+                style={{margin: 0, width: "auto", padding: "9px 14px", fontSize: 13}}
+                onClick={pullFromNeis}>{pulling ? "불러오는 중…" : "불러오기"}</button>
+            </div>
+            {pullMsg && <div style={{fontSize: 12, marginTop: 8,
+                 color: pullMsg.includes("✓") ? "#3f7d5e" : "#a8562c", lineHeight: 1.6}}>{pullMsg}</div>}
+            {diffs.length > 0 && (
+              <div style={{marginTop: 10, borderTop: "1px solid #d8e0ea", paddingTop: 8}}>
+                <div style={{fontSize: 12, color: "#a8562c", marginBottom: 6}}>
+                  적어둔 것과 나이스가 달라요. 바꾸려면 누르세요.
+                </div>
+                {diffs.map((d) => (
+                  <div key={d.school + d.grade} style={{fontSize: 12, padding: "3px 0", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center"}}>
+                    <b>{d.school} {d.grade}</b>
+                    <span style={{color: "#8a7f72"}}>지금 {shortDate(d.mine.start) || "-"}~{shortDate(d.mine.end) || "-"}</span>
+                    <span>→ 나이스 <b>{shortDate(d.neis.start)}~{shortDate(d.neis.end)}</b></span>
+                    <span style={{color: "#b6ab9b"}}>({d.name})</span>
+                    <button className="cm-link" style={{padding: 0}} onClick={() => takeNeis(d)}>이걸로</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 6}}>
             {list.length}개 줄 · <b style={{color: "var(--navy)"}}>{done.length}개 적음</b> ·
