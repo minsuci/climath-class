@@ -132,14 +132,19 @@ async function scheduleRows(office, code, from, to, budget) {
 // 학교마다 부르는 이름이 다르다. 경기도 쪽은 "1차 지필평가 / 2차 지필평가"라고 쓴다 —
 // kind를 글자 그대로 맞추면(indexOf("중간")) 그런 학교가 통째로 빠진다.
 const KIND_RE = {
-  "중간": /(중간|1\s*차\s*지필|지필\s*평가\s*1|1\s*회\s*고사)/,
-  "기말": /(기말|2\s*차\s*지필|지필\s*평가\s*2|2\s*회\s*고사)/,
+  "중간": /(중간|1\s*차\s*(지필|정기)|지필\s*평가\s*1|1\s*[회차]\s*(고사|시험))/,
+  "기말": /(기말|2\s*차\s*(지필|정기)|지필\s*평가\s*2|2\s*[회차]\s*(고사|시험))/,
 };
+// 학교마다 부르는 말이 다르다. 중흥고는 2025년엔 "지필평가"라고 쓰다가 2026년에
+// "정기시험"으로 바꿨다 — 낱말을 좁게 잡으면 그런 학교가 통째로 사라진다.
+const EXAM_WORD = /(중간|기말|지필|고사|정기\s*시험|정기\s*평가)/;
+// ⚠ "시험"까지 넓히면 대학수학능력시험이 딸려 온다. 반드시 먼저 걸러낸다.
+const NOT_EXAM = /(모의|학력평가|수능|모평|대학수학능력|학업성취도|검정|자격)/;
 function isExam(nm, kind) {
   const s = String(nm || "");
-  if (!/(중간|기말|지필|고사)/.test(s)) return false;
-  // 모의고사·학력평가는 내신이 아니다
-  if (/(모의|학력평가|수능|모평)/.test(s)) return false;
+  if (!EXAM_WORD.test(s)) return false;
+  // 모의고사·학력평가·수능은 내신이 아니다
+  if (NOT_EXAM.test(s)) return false;
   if (/(성적|이의|발표|정정|준비|대비|안내|미실시|없음|출제|보안|연수)/.test(s)) return false;
   if (kind) { const re = KIND_RE[kind]; if (re && !re.test(s)) return false; }
   return true;
@@ -293,7 +298,10 @@ async function boardDocText(menuUrl, budget) {
   const fid = (html.match(/name="atchFileId"[^>]*value="([^"]+)"/) || [])[1];
   if (!fid) return null;
 
-  for (const sn of ["0", "1", "2"]) {
+  // ⚠ fileSn 은 **1부터** 시작한다. 0으로 부르면 빈 HTML 이 200 으로 와서
+  //    "첨부가 없다"로 잘못 읽힌다. 경기고 학사일정 PDF 가 여기서 안 잡혔다.
+  //    (실제 다운로드 경로는 /dggb/board/boardFile/downFile.do?atchFileId=…&fileSn=1)
+  for (const sn of ["1", "2", "3"]) {
     if (budget.n <= 0) break;
     budget.n--;
     try {
@@ -326,12 +334,12 @@ async function boardDocText(menuUrl, budget) {
 // **고른 시험 종류만** 본다. 아무 시험 낱말이나 받아주면, 2학기 구간의
 // "27기말고사"에 붙은 "7기말" 때문에 10월 7일이 중간고사로 통과해 버린다.
 const DAY_WORD = {
-  "중간": "(?:중간|1\\s*차\\s*지필)",
-  "기말": "(?:기말|2\\s*차\\s*지필)",
+  "중간": "(?:중간|1\\s*차\\s*(?:지필|정기))",
+  "기말": "(?:기말|2\\s*차\\s*(?:지필|정기))",
 };
 function dayHasExam(text, ymdStr, kind) {
   const d = Number(ymdStr.slice(8, 10));
-  const w = DAY_WORD[kind] || "(?:중간|기말|지필)";
+  const w = DAY_WORD[kind] || "(?:중간|기말|지필|정기)";
   return new RegExp("" + d + "\\s*(?:2?학기)?\\s*" + w).test(text);
 }
 // 검증에 쓸 구간을 학기로 좁힌다. 한 문서에 1학기·2학기가 다 들어 있어서,
