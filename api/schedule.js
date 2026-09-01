@@ -305,8 +305,12 @@ async function boardDocText(menuUrl, budget) {
     if (budget.n <= 0) break;
     budget.n--;
     try {
+      // ⚠ filePath 는 URL 인코딩해서 넘긴다. 안 하면 주소 안의 & 에서 잘려 엉뚱한 것을
+      //    변환한다 — status 의 format 이 PDF 가 아니라 TXT 로 오고 글자가 스물몇 자만 온다.
+      //    지금 서울 CMS 주소에는 & 가 없어서 우연히 되고 있을 뿐이다.
+      const inner = origin + ":443/dggb/cnvrFileDown.do?atchFileId=" + fid + ":" + sn;
       const job = SYNAP + "/job?fid=" + fid + "_" + sn +
-        "&filePath=" + origin + ":443/dggb/cnvrFileDown.do?atchFileId=" + fid + ":" + sn +
+        "&filePath=" + encodeURIComponent(inner) +
         "&convertType=1&fileType=URL&sync=true";
       const r = await fetch(job, { headers: UA, redirect: "follow" });
       const key = (r.url.match(/key=([0-9a-f]+)/) || [])[1];

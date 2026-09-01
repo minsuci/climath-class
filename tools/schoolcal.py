@@ -373,8 +373,25 @@ def main():
     for dt in sorted(found):
         print("  %s (%s)  %s" % (dt, WD[dt.weekday()], " ".join(sorted(found[dt]))))
     print("\n--- 묶으면 ---")
-    for labels, a1, b1 in group(found):
+    blocks = group(found)
+    for labels, a1, b1 in blocks:
         print("  %s ~ %s   %s" % (a1, b1, " / ".join(sorted(labels))[:70]))
+
+    # 앱의 "붙여넣기로 한 번에 넣기" 에 그대로 넣을 수 있는 줄
+    name = s["official"].replace("고등학교", "고").replace("여자고", "여고") if s else a.school
+    print("\n--- 앱에 붙여넣을 줄 (학교일정 > 붙여넣기) ---")
+    for labels, a1, b1 in blocks:
+        lab = " ".join(labels)
+        # 라벨에 (1,2) (3) 처럼 학년이 붙어 있으면 그 학년만
+        gr = re.findall(r"\(([\d,\s]+)\)", lab)
+        whos = ["전체"]
+        if gr:
+            ns = [x.strip() for x in gr[0].split(",") if x.strip() in ("1", "2", "3")]
+            if ns and len(ns) < 3:
+                whos = ["고" + n for n in ns]      # 앱은 한 줄에 학년 하나만 받는다
+        for who in whos:
+            print("  %s %s %s %s" % (name, who, a1, b1))
+    print("  ※ 1학기 것은 빼고 넣을 것.")
     return 0
 
 
