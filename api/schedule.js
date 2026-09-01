@@ -20,7 +20,9 @@ import { verifyIdToken, getDoc, patchDoc } from "./_google.js";
 const NEIS = "https://open.neis.go.kr/hub";
 const KEY = process.env.NEIS_API_KEY || "";
 const PAGE = KEY ? 1000 : 5;
-const BUDGET = KEY ? 6 : 46;      // 한 번 부를 때 쓸 수 있는 나이스 요청 수
+// 창을 쪼개 받다 보면 요청이 꽤 든다. 일정이 촘촘한 학교(단대부고는 두 달에 99건)는
+// 예산이 모자라 잘리고, 잘린 조각에 시험이 안 들어 있으면 "시험 없음"으로 잘못 보였다.
+const BUDGET = KEY ? 6 : 90;      // 한 번 부를 때 쓸 수 있는 나이스 요청 수
 
 // 짧은 이름 → 정식 이름으로 규칙만으로는 못 펴는 것들
 const ALIAS = {
@@ -83,7 +85,8 @@ async function resolveSchool(short, budget) {
   }
   if (!hit) return null;
   const found = { code: hit.SD_SCHUL_CODE, office: hit.ATPT_OFCDC_SC_CODE,
-                  official: hit.SCHUL_NM, officeName: hit.ATPT_OFCDC_SC_NM };
+                  official: hit.SCHUL_NM, officeName: hit.ATPT_OFCDC_SC_NM,
+                  hmpg: hit.HMPG_ADRES || "" };
   memo = { ...(memo || {}), [short]: found };
   await patchDoc("appConfig/neisCodes", { map: memo }).catch(() => {});
   return found;
@@ -112,27 +115,128 @@ async function scheduleRows(office, code, from, to, budget) {
     if (total > rows.length && a < b) {      // 다 못 받았으면 창을 반으로
       const m = midDay(a, b);
       stack.push([a, m], [shiftDay(m, 1), b]);
-      await sleep(70);
+      await sleep(40);
       continue;
     }
     rows.forEach((r) => {
       const k = r.AA_YMD + "|" + r.EVENT_NM;
       if (!seen[k]) { seen[k] = 1; out.push(r); }
     });
-    await sleep(70);
+    await sleep(40);
   }
   return { rows: out, truncated };
 }
 
-// "2학기 중간고사"는 잡고 "성적확인 및 이의신청"은 안 잡는다
+// "2학기 중간고사"는 잡고 "성적확인 및 이의신청"은 안 잡는다.
+//
+// 학교마다 부르는 이름이 다르다. 경기도 쪽은 "1차 지필평가 / 2차 지필평가"라고 쓴다 —
+// kind를 글자 그대로 맞추면(indexOf("중간")) 그런 학교가 통째로 빠진다.
+const KIND_RE = {
+  "중간": /(중간|1\s*차\s*지필|지필\s*평가\s*1|1\s*회\s*고사)/,
+  "기말": /(기말|2\s*차\s*지필|지필\s*평가\s*2|2\s*회\s*고사)/,
+};
 function isExam(nm, kind) {
   const s = String(nm || "");
-  if (!/(중간|기말|지필)/.test(s)) return false;
-  if (/(성적|이의|발표|정정|준비|대비|안내|미실시|없음)/.test(s)) return false;
-  if (kind && s.indexOf(kind) < 0) return false;
+  if (!/(중간|기말|지필|고사)/.test(s)) return false;
+  // 모의고사·학력평가는 내신이 아니다
+  if (/(모의|학력평가|수능|모평)/.test(s)) return false;
+  if (/(성적|이의|발표|정정|준비|대비|안내|미실시|없음|출제|보안|연수)/.test(s)) return false;
+  if (kind) { const re = KIND_RE[kind]; if (re && !re.test(s)) return false; }
   return true;
 }
 const GRADE_FIELD = { "고1": "ONE_GRADE_EVENT_YN", "고2": "TW_GRADE_EVENT_YN", "고3": "THREE_GRADE_EVENT_YN" };
+
+// ---- 학교 홈페이지에서 긁기 (나이스에 시험이 안 올라온 학교) ----
+//
+// 서울 교육청 웹호스팅을 쓰는 학교는 생김새가 같다. 메뉴 어딘가에 "월간일정 / 학사일정 /
+// 학교일정"이 있고, 그 페이지에 viewType=list 로 POST 하면 표가 그대로 온다:
+//     2026-10-01(목) 00시 | 2026-10-02(금) 23시 | 중간고사
+// 달력형은 눈으로 보라고 만든 것이라 목록형을 쓴다.
+//
+// 게시판에 PDF·한글파일·이미지로 올리는 학교(경기고·언남고·휘문고 같은)는 여기서 못 잡는다.
+// 그건 형식이 학교마다 달라서 일반화가 안 된다 — 그런 학교는 손으로 넣어야 한다.
+const UA = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36" };
+
+function monthsBetween(from, to) {
+  const out = [];
+  let y = Number(from.slice(0, 4)), m = Number(from.slice(4, 6));
+  const ey = Number(to.slice(0, 4)), em = Number(to.slice(4, 6));
+  while (y < ey || (y === ey && m <= em)) {
+    out.push([String(y), String(m).padStart(2, "0")]);
+    m++; if (m > 12) { m = 1; y++; }
+    if (out.length > 6) break;
+  }
+  return out;
+}
+const toText = (h) => h.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<style[\s\S]*?<\/style>/g, "")
+  .replace(/<[^>]+>/g, "|").replace(/&nbsp;/g, " ").replace(/[ \t\r\n]+/g, " ").replace(/\|+/g, "|");
+
+async function findScheduleMenus(base) {
+  const r = await fetch(base, { headers: UA, redirect: "follow" });
+  if (!r.ok) return [];
+  const html = await r.text();
+  const re = /href="([^"]*\/\d+\/subMenu\.do[^"]*)"[^>]*>([\s\S]{0,120}?)<\/a>/g;
+  const out = [];
+  let m;
+  while ((m = re.exec(html))) {
+    const t = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, "");
+    if (!/일정|학사|캘린더/.test(t)) continue;
+    if (/급식/.test(t)) continue;                       // 급식일정은 아니다
+    const href = m[1].startsWith("http") ? m[1] : new URL(m[1], base).toString();
+    if (out.indexOf(href) < 0) out.push(href);
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+async function homepageExams(hmpg, from, to, kind, budget) {
+  if (!hmpg) return null;
+  const base = hmpg.replace(/^http:/, "https:").replace(/\/+$/, "") + "/";
+  let menus;
+  budget.n--;
+  try { menus = await findScheduleMenus(base); } catch (e) { return null; }
+  if (!menus.length) return null;
+
+  const rows = [];
+  for (const url of menus) {
+    for (const [y, mm] of monthsBetween(from, to)) {
+      if (budget.n <= 0) break;
+      budget.n--;
+      let t = "";
+      try {
+        const body = new URLSearchParams({ viewType: "list", srhSchdulYear: y, srhSchdulMonth: mm });
+        const r = await fetch(url, { method: "POST", body,
+          headers: { ...UA, "Content-Type": "application/x-www-form-urlencoded" } });
+        t = toText(await r.text());
+      } catch (e) { continue; }
+      // 칸 사이가 "| |" 처럼 여러 개로 나오므로 구분자를 넉넉히 잡는다
+      const re = /(\d{4}-\d{2}-\d{2})\([월화수목금토일]\)[^|]*[|\s]+(\d{4}-\d{2}-\d{2})\([월화수목금토일]\)[^|]*[|\s]+([^|]{1,40})/g;
+      let m;
+      while ((m = re.exec(t))) rows.push({ s: m[1], e: m[2], nm: m[3].trim() });
+      await sleep(40);
+    }
+    if (rows.length) break;      // 쓸 만한 메뉴를 찾았으면 더 안 본다
+  }
+  if (!rows.length) return null;
+  const exams = rows.filter((r) => isExam(r.nm, kind));
+  if (!exams.length) return { hasAny: true, byGrade: {} };
+
+  // "중간고사(1,2)" 처럼 학년이 붙어 있으면 그 학년만. 없으면 전 학년.
+  const byGrade = {};
+  ["고1", "고2", "고3"].forEach((g) => {
+    const n = g.slice(1);
+    const mine = exams.filter((r) => {
+      const t = r.nm.match(/\(([\d,\s]+)\)/);
+      return t ? t[1].split(",").map((x) => x.trim()).indexOf(n) >= 0 : true;
+    });
+    if (!mine.length) return;
+    const ds = [];
+    mine.forEach((r) => { ds.push(r.s.replace(/-/g, ""), r.e.replace(/-/g, "")); });
+    ds.sort();
+    byGrade[g] = { start: dash(ds[0]), end: dash(ds[ds.length - 1]), days: mine.length, name: mine[0].nm };
+  });
+  return { hasAny: true, byGrade, viaHomepage: true };
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
@@ -167,10 +271,19 @@ export default async function handler(req, res) {
       byGrade[g] = { start: dash(ds[0]), end: dash(ds[ds.length - 1]),
                      days: ds.length, name: use[0].EVENT_NM };
     });
+    // 나이스에 시험이 없으면 학교 홈페이지를 본다
+    let viaHomepage = false, hasAny = rows.length > 0;
+    if (!Object.keys(byGrade).length) {
+      const hp = await homepageExams(s.hmpg, from, to, kind, budget);
+      if (hp && Object.keys(hp.byGrade || {}).length) {
+        Object.assign(byGrade, hp.byGrade);
+        viaHomepage = true; hasAny = true;
+      } else if (hp) hasAny = true;
+    }
     res.status(200).json({ school, official: s.official, officeName: s.officeName,
                            byGrade, found: exams.length,
                            // 나이스에 일정이 아예 없는 학교와, 일정은 있는데 시험만 안 올린 학교는 다르다
-                           hasAny: rows.length > 0,
+                           hasAny, viaHomepage, homepage: s.hmpg || "",
                            truncated, hasKey: !!KEY });
   } catch (e) {
     console.error("[schedule]", e);

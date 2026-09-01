@@ -3268,6 +3268,9 @@ function SchoolTermBoard({ onBack }) {
   const [to, setTo] = useState(plus(today, 75));
   const [kind, setKind] = useState("중간");
   const [redo, setRedo] = useState(false);     // 이미 채운 것도 다시 확인할까
+  const [paste, setPaste] = useState("");      // 붙여넣기로 한 번에 넣기
+  const [openPaste, setOpenPaste] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [job, setJob] = useState(neisSnap());  // 화면 밖에서 도는 불러오기
   useEffect(() => neisSub(setJob), []);
   const backRef = useSwipeBack(onBack);
@@ -3332,6 +3335,62 @@ function SchoolTermBoard({ onBack }) {
   async function takeNeis(d) {
     try { await neisTakeDiff(term, d); }
     catch (e) { setMsg("바꾸지 못했어요: " + friendlyErr(e)); }
+  }
+
+  // 나이스에도 홈페이지에도 안 올리는 학교가 있다(게시판에 PDF·이미지로만 올리거나 아예 없거나).
+  // 그런 학교는 손으로 넣어야 하는데, 날짜 고르개를 스무 번 누르는 것보다 한 줄씩 치는 게 빠르다.
+  //   경기고 고1 2026-10-12 2026-10-16
+  //   휘문고 전체 10/12 10/16 10/14        ← 수학시험까지, 학년 생략/전체 가능
+  function parsePaste(text) {
+    const yr = (term.match(/20\d{2}/) || [String(new Date().getFullYear())])[0];
+    const norm = (d) => {
+      const t = String(d || "").trim().replace(/\./g, "-").replace(/\//g, "-");
+      if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(t)) {
+        const [y, m, dd] = t.split("-");
+        return y + "-" + m.padStart(2, "0") + "-" + dd.padStart(2, "0");
+      }
+      if (/^\d{1,2}-\d{1,2}$/.test(t)) {
+        const [m, dd] = t.split("-");
+        return yr + "-" + m.padStart(2, "0") + "-" + dd.padStart(2, "0");
+      }
+      return "";
+    };
+    const out = [], bad = [];
+    String(text || "").split(/\r?\n/).forEach((line) => {
+      const raw = line.trim();
+      if (!raw) return;
+      const p = raw.split(/[\s,\t]+/).filter(Boolean);
+      if (p.length < 3) { bad.push(raw); return; }
+      const school = matchSchool(p[0], schoolOpts);
+      let i = 1, grades;
+      if (GRADES.indexOf(p[1]) >= 0) { grades = [p[1]]; i = 2; }
+      else if (/^(전체|전학년|공통)$/.test(p[1])) { grades = ["고1", "고2", "고3"]; i = 2; }
+      else grades = ["고1", "고2", "고3"];
+      const start = norm(p[i]), end = norm(p[i + 1]), math = norm(p[i + 2]);
+      if (!school || !start || !end) { bad.push(raw); return; }
+      grades.forEach((g) => out.push({ school, grade: g, start, end, math }));
+    });
+    return { out, bad };
+  }
+  async function applyPaste() {
+    const { out, bad } = parsePaste(paste);
+    if (!out.length) { setMsg("읽을 수 있는 줄이 없어요. 보기: 경기고 고1 2026-10-12 2026-10-16"); return; }
+    if (!confirm(out.length + "칸을 넣습니다. 이미 적힌 칸도 덮어씁니다." + "\n" +
+      out.slice(0, 6).map((x) => x.school + " " + x.grade + " " + shortDate(x.start) + "~" + shortDate(x.end)).join("\n") +
+      (out.length > 6 ? "\n… 외 " + (out.length - 6) + "칸" : ""))) return;
+    setBusy(true); setMsg("");
+    let n = 0;
+    try {
+      for (const x of out) {
+        const d = { start: x.start, end: x.end };
+        if (x.math) d.math = x.math;
+        await saveSchoolTerm(term, x.school, x.grade, d);
+        n++;
+      }
+      setMsg(n + "칸 넣었어요 ✓" + (bad.length ? " · 못 읽은 줄 " + bad.length + "개: " + bad.slice(0, 3).join(" / ") : ""));
+      setPaste("");
+    } catch (e) { setMsg("넣다 멈췄어요 (" + n + "칸까지): " + friendlyErr(e)); }
+    setBusy(false);
   }
 
   async function addRow() {
@@ -3424,6 +3483,29 @@ function SchoolTermBoard({ onBack }) {
             )}
             {!job.running && job.msg && <div style={{fontSize: 12, marginTop: 8,
                  color: job.msg.includes("✓") ? "#3f7d5e" : "#a8562c", lineHeight: 1.6}}>{job.msg}</div>}
+            <div style={{marginTop: 8, borderTop: "1px solid #d8e0ea", paddingTop: 8}}>
+              <button className="cm-link" style={{padding: 0, fontSize: 12}}
+                onClick={() => setOpenPaste((v) => !v)}>
+                {openPaste ? "▾" : "▸"} 붙여넣기로 한 번에 넣기
+                <span style={{color: "var(--muted)", fontWeight: 400}}> (나이스·홈페이지에 없는 학교)</span>
+              </button>
+              {openPaste && (<>
+                <div style={{fontSize: 11, color: "var(--muted)", margin: "6px 0", lineHeight: 1.6}}>
+                  한 줄에 하나씩. <code>학교 학년 시작 끝 [수학시험]</code><br/>
+                  학년을 <b>전체</b>로 쓰면 고1·고2·고3에 같이 들어가요. 날짜는 <code>10/12</code> 처럼 짧게 써도 돼요.
+                  <br/>여기서 넣는 건 <b>이미 적힌 칸도 덮어씁니다.</b>
+                </div>
+                <textarea className="cm-input" style={{margin: 0, minHeight: 88, fontFamily: "inherit", fontSize: 13}}
+                  placeholder={"경기고 고1 2026-10-12 2026-10-16\n휘문고 전체 10/12 10/16"}
+                  value={paste} onChange={(e) => setPaste(e.target.value)} />
+                <button className="cm-btn cm-btn-ghost" disabled={busy || !paste.trim()}
+                  style={{margin: "6px 0 0", width: "auto", padding: "8px 13px", fontSize: 13}}
+                  onClick={applyPaste}>
+                  {paste.trim() ? parsePaste(paste).out.length + "칸 넣기" : "넣기"}
+                </button>
+              </>)}
+            </div>
+
             {job.diffs.length > 0 && (
               <div style={{marginTop: 10, borderTop: "1px solid #d8e0ea", paddingTop: 8}}>
                 <div style={{fontSize: 12, color: "#a8562c", marginBottom: 6}}>
