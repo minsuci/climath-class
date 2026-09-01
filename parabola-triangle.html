@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="이차함수 그래프 위의 세 점으로 만든 삼각형의 넓이를 x좌표의 차 세 개만으로 구하는 공식 (CLIMATH 학습자료)">
+<title>이차함수 차차차 공식</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400;1,600&display=swap">
+<style>
+*,*::before,*::after{box-sizing:border-box}
+
+:root{
+  color-scheme:light;
+  --bg:#f4f6f9;
+  --panel:#ffffff;
+  --panel-2:#eef1f6;
+  --ink:#16202f;
+  --ink-soft:#5a6580;
+  --ink-faint:#8b95a9;
+  --line:#dce1ea;
+  --line-2:#c4cddb;
+  --accent:#2b56c9;
+  --accent-ink:#1e3f9c;
+  --wash:#e8edfd;
+  --pa:#2b56c9;
+  --pb:#b0600f;
+  --pc:#0c7a6f;
+  --tri-line:#2b56c9;
+  --tri-fill:rgba(43,86,201,.13);
+  --grid:rgba(43,86,201,.075);
+  --shadow:0 1px 2px rgba(22,32,47,.05),0 10px 26px -16px rgba(22,32,47,.35);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0e131b;
+    --panel:#151c26;
+    --panel-2:#1b2431;
+    --ink:#e7ecf4;
+    --ink-soft:#9aa6bb;
+    --ink-faint:#77839a;
+    --line:#26303e;
+    --line-2:#37445a;
+    --accent:#8fb0ff;
+    --accent-ink:#b9cdff;
+    --wash:#1a2236;
+    --pa:#8fb0ff;
+    --pb:#f0a95c;
+    --pc:#4fc7b4;
+    --tri-line:#8fb0ff;
+    --tri-fill:rgba(143,176,255,.16);
+    --grid:rgba(143,176,255,.08);
+    --shadow:0 1px 2px rgba(0,0,0,.45),0 12px 30px -18px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0e131b;
+  --panel:#151c26;
+  --panel-2:#1b2431;
+  --ink:#e7ecf4;
+  --ink-soft:#9aa6bb;
+  --ink-faint:#77839a;
+  --line:#26303e;
+  --line-2:#37445a;
+  --accent:#8fb0ff;
+  --accent-ink:#b9cdff;
+  --wash:#1a2236;
+  --pa:#8fb0ff;
+  --pb:#f0a95c;
+  --pc:#4fc7b4;
+  --tri-line:#8fb0ff;
+  --tri-fill:rgba(143,176,255,.16);
+  --grid:rgba(143,176,255,.08);
+  --shadow:0 1px 2px rgba(0,0,0,.45),0 12px 30px -18px rgba(0,0,0,.9);
+}
+
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--ink);
+  font-family:'IBM Plex Sans KR',system-ui,-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+  font-size:16px;
+  line-height:1.78;
+  -webkit-text-size-adjust:100%;
+}
+.wrap{max-width:720px;margin:0 auto;padding:clamp(22px,5vw,48px) clamp(16px,4.5vw,26px) 80px}
+p{margin:0 0 .9em}
+p:last-child{margin-bottom:0}
+strong{font-weight:600}
+
+/* ── 수식 조판 ───────────────────────────── */
+.mv,.mn{font-family:'IBM Plex Serif',Georgia,serif}
+.mv{font-style:italic;font-weight:500}
+.mn{font-variant-numeric:tabular-nums}
+sup,sub{font-size:.68em;line-height:0}
+.frac{display:inline-flex;flex-direction:column;align-items:center;vertical-align:-.48em;line-height:1.2;margin:0 .18em;font-family:'IBM Plex Serif',Georgia,serif}
+.frac>span{padding:0 .28em}
+.frac>span+span{border-top:1.4px solid currentColor}
+.pa{color:var(--pa)}
+.pb{color:var(--pb)}
+.pc{color:var(--pc)}
+.pa,.pb,.pc{font-weight:600}
+
+/* ── 헤더 ───────────────────────────────── */
+.hero{border-bottom:1px solid var(--line);padding-bottom:26px;margin-bottom:38px}
+.eyebrow{
+  font-size:12px;letter-spacing:.14em;font-weight:600;
+  color:var(--accent);margin:0 0 14px;
+}
+h1{
+  font-family:'Gowun Batang',Georgia,serif;font-weight:700;
+  font-size:clamp(36px,10vw,54px);line-height:1.12;margin:0 0 14px;
+  letter-spacing:.02em;text-wrap:balance;
+}
+h1 .dot{color:var(--accent);font-size:.6em;vertical-align:.18em;margin:0 .06em}
+.lead{font-size:clamp(16px,4vw,18px);color:var(--ink-soft);margin:0;text-wrap:balance}
+.hero .tag{
+  display:inline-block;margin-top:16px;padding:3px 11px;border-radius:999px;
+  background:var(--wash);color:var(--accent-ink);font-size:13px;font-weight:500;
+}
+
+/* ── 섹션 ───────────────────────────────── */
+section{margin:0 0 44px}
+h2{
+  font-family:'Gowun Batang',Georgia,serif;font-weight:700;
+  font-size:clamp(21px,5.4vw,26px);line-height:1.35;margin:0 0 16px;
+  display:flex;align-items:baseline;gap:11px;text-wrap:balance;
+}
+h2 .step{
+  flex:none;width:27px;height:27px;border-radius:50%;
+  background:var(--accent);color:var(--panel);
+  font-family:'IBM Plex Serif',Georgia,serif;font-size:14px;font-weight:600;
+  display:inline-flex;align-items:center;justify-content:center;
+  align-self:center;
+}
+h3{font-size:16px;font-weight:600;margin:26px 0 8px;color:var(--ink)}
+
+/* ── 판/카드 ────────────────────────────── */
+.panel{
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:clamp(16px,4vw,22px);box-shadow:var(--shadow);
+}
+.grid-paper{
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),
+                   linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:22px 22px;
+}
+.formula{
+  border:1.5px solid var(--accent);border-radius:14px;
+  padding:clamp(20px,5vw,30px) clamp(14px,4vw,26px);
+  text-align:center;background:var(--panel);box-shadow:var(--shadow);
+}
+.formula .eq{
+  font-family:'IBM Plex Serif',Georgia,serif;
+  font-size:clamp(19px,5.4vw,27px);line-height:1.9;
+  white-space:nowrap;overflow-x:auto;padding-bottom:4px;
+}
+.formula .cap{margin-top:14px;font-size:14px;color:var(--ink-soft)}
+.chachacha{
+  margin-top:18px;padding-top:16px;border-top:1px dashed var(--line-2);
+  font-family:'Gowun Batang',Georgia,serif;font-size:18px;letter-spacing:.02em;
+}
+.chachacha b{color:var(--accent);font-weight:700}
+
+.note{
+  border-left:3px solid var(--accent);background:var(--panel-2);
+  padding:14px 16px;border-radius:0 10px 10px 0;font-size:15px;
+}
+.note b{color:var(--accent-ink)}
+
+ul.plain{margin:0;padding-left:1.15em}
+ul.plain li{margin:.35em 0}
+ul.plain li::marker{color:var(--ink-faint)}
+
+/* ── 그래프 ─────────────────────────────── */
+figure{margin:0}
+.fig{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;box-shadow:var(--shadow)}
+svg.scene{display:block;width:100%;height:auto}
+.scene .ax{stroke:var(--line-2);stroke-width:1.4}
+.scene .curve{fill:none;stroke:var(--accent);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.scene .tri{fill:var(--tri-fill);stroke:var(--tri-line);stroke-width:1.8;stroke-linejoin:round}
+.scene .drop{stroke-width:1.4;stroke-dasharray:3 4;opacity:.85}
+.scene .dim{opacity:.36}
+.scene .lb{font-family:'IBM Plex Serif',Georgia,serif;font-style:italic;font-size:17px;font-weight:600}
+.scene .cap{font-family:'IBM Plex Sans KR',sans-serif;font-size:13px;fill:var(--ink-faint);font-style:normal}
+.scene .pa{stroke:var(--pa);fill:var(--pa)}
+.scene .pb{stroke:var(--pb);fill:var(--pb)}
+.scene .pc{stroke:var(--pc);fill:var(--pc)}
+.scene text.pa{stroke:none}
+.scene text.pb{stroke:none}
+.scene text.pc{stroke:none}
+.scene .pt{stroke:var(--panel);stroke-width:2}
+.figcap{margin-top:10px;font-size:13.5px;color:var(--ink-faint);text-align:center}
+
+.minis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media (max-width:520px){.minis{grid-template-columns:1fr;max-width:280px;margin:0 auto}}
+.mini{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 6px 8px;text-align:center}
+.mini svg{display:block;width:100%;height:auto}
+.mini figcaption{font-size:13px;color:var(--ink-soft);margin-top:2px}
+.mini .c1{stroke:var(--accent)}
+.mini .c2{stroke:var(--pb)}
+
+/* ── 슬라이더 ───────────────────────────── */
+.controls{display:grid;grid-template-columns:repeat(2,1fr);gap:12px 18px;margin-top:16px}
+@media (max-width:520px){.controls{grid-template-columns:1fr}}
+.ctl label{display:flex;justify-content:space-between;align-items:baseline;font-size:14px;color:var(--ink-soft);margin-bottom:2px}
+.ctl label .val{font-family:'IBM Plex Serif',Georgia,serif;font-weight:600;font-size:16px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.ctl input[type=range]{width:100%;accent-color:var(--accent);margin:0}
+.ctl.a label .val{color:var(--accent)}
+.ctl.p label .val{color:var(--pa)}
+.ctl.q label .val{color:var(--pb)}
+.ctl.r label .val{color:var(--pc)}
+
+.calc{margin-top:18px;border-top:1px solid var(--line);padding-top:16px;text-align:center}
+.diffs{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:12px}
+.diffs span{
+  background:var(--panel-2);border:1px solid var(--line);border-radius:999px;
+  padding:3px 12px;font-family:'IBM Plex Serif',Georgia,serif;font-size:15px;
+  font-variant-numeric:tabular-nums;
+}
+.calc .line{font-family:'IBM Plex Serif',Georgia,serif;font-size:clamp(16px,4.4vw,20px);font-variant-numeric:tabular-nums;line-height:1.9}
+.calc .res{font-size:clamp(19px,5vw,24px);font-weight:600;color:var(--accent)}
+.calc .check{margin-top:8px;font-family:'IBM Plex Sans KR',sans-serif;font-size:13.5px;color:var(--ink-faint)}
+.calc .warn{color:var(--pb);font-size:14px;margin-top:6px}
+
+/* ── 예제 · 접기 ────────────────────────── */
+.ex{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:clamp(15px,4vw,20px);box-shadow:var(--shadow)}
+.ex+.ex{margin-top:14px}
+.ex .q{font-weight:600;margin:0 0 4px}
+.ex .q .no{color:var(--accent);font-family:'IBM Plex Serif',Georgia,serif;margin-right:6px}
+details{margin-top:10px;border-top:1px dashed var(--line-2);padding-top:10px}
+details[open]{padding-bottom:2px}
+summary{
+  cursor:pointer;list-style:none;font-size:14px;font-weight:600;color:var(--accent);
+  display:inline-flex;align-items:center;gap:6px;border-radius:6px;
+}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"▸";transition:transform .18s ease;display:inline-block}
+details[open] summary::before{transform:rotate(90deg)}
+details .body{margin-top:10px;font-size:15px;color:var(--ink-soft)}
+details .body .step-eq{font-family:'IBM Plex Serif',Georgia,serif;color:var(--ink);overflow-x:auto;padding:2px 0}
+@media (prefers-reduced-motion:reduce){summary::before{transition:none}}
+
+.check-list{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:clamp(16px,4vw,20px)}
+.check-list h2{margin-bottom:10px}
+.check-list li{margin:.4em 0}
+
+footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-faint);text-align:center}
+
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <p class="eyebrow">CLIMATH 수학노트 · 이차함수</p>
+  <h1>차<span class="dot">·</span>차<span class="dot">·</span>차</h1>
+  <p class="lead">포물선 위에 찍은 세 점으로 만든 삼각형. <span class="mv">y</span>좌표를 하나도 구하지 않고 넓이를 구하는 방법.</p>
+  <span class="tag">중3 ~ 고1 · 이차함수</span>
+</header>
+
+<section>
+  <h2><span class="step">1</span>먼저, 이차함수를 한 번만 짚고</h2>
+  <p><span class="mn"><span class="mv">y</span> = <span class="mv">a</span><span class="mv">x</span><sup>2</sup> + <span class="mv">b</span><span class="mv">x</span> + <span class="mv">c</span></span> &nbsp;(<span class="mv">a</span> ≠ 0)의 그래프는 <strong>포물선</strong>이야. 여기서 세 글자가 하는 일이 서로 달라.</p>
+
+  <div class="minis" style="margin:18px 0">
+    <figure class="mini"><svg class="scene" id="m1" aria-label="a가 0보다 큰 포물선"></svg><figcaption><span class="mv">a</span> &gt; 0<br>아래로 볼록</figcaption></figure>
+    <figure class="mini"><svg class="scene" id="m2" aria-label="a가 0보다 작은 포물선"></svg><figcaption><span class="mv">a</span> &lt; 0<br>위로 볼록</figcaption></figure>
+    <figure class="mini"><svg class="scene" id="m3" aria-label="a의 절댓값이 큰 포물선과 작은 포물선 비교"></svg><figcaption>|<span class="mv">a</span>|가 클수록<br>폭이 좁다</figcaption></figure>
+  </div>
+
+  <ul class="plain">
+    <li><strong><span class="mv">a</span> 는 모양을 정한다.</strong> 볼록한 방향과 벌어진 폭.</li>
+    <li><strong><span class="mv">b</span>, <span class="mv">c</span> 는 위치만 정한다.</strong> 포물선을 좌우·위아래로 밀 뿐, 모양은 그대로다.</li>
+  </ul>
+  <p style="margin-top:14px">밀어도 모양이 안 변한다는 것 &mdash; 이게 오늘 공식의 전부야. 넓이는 <em>모양</em>만 따라가거든.</p>
+</section>
+
+<section>
+  <h2><span class="step">2</span>이 공식이 대신 해주는 계산</h2>
+  <p>포물선 위에 점 셋을 찍고 이으면 삼각형이 하나 생겨. 넓이를 구하려면 보통은 세 점의 <span class="mv">y</span>좌표를 전부 계산하고, 그걸 좌표평면 넓이 공식에 넣어야 해. 세 번 대입하고 한 번 정리 &mdash; 시험에서 시간이 제일 많이 새는 자리야.</p>
+  <p>그런데 <strong>세 점의 <span class="mv">x</span>좌표만</strong> 있으면 곧바로 답이 나와.</p>
+
+  <figure style="margin:20px 0">
+    <div class="fig grid-paper"><svg class="scene" id="fig1" aria-label="포물선 위의 세 점 알파 베타 감마로 만든 삼각형"></svg></div>
+    <figcaption class="figcap">세 점의 <span class="mv">x</span>좌표를 <span class="pa">α</span>, <span class="pb">β</span>, <span class="pc">γ</span> 라고 하자</figcaption>
+  </figure>
+
+  <div class="formula" style="margin-top:22px">
+    <div class="eq">
+      <span class="mv">S</span> =
+      <span class="frac"><span>|<span class="mv">a</span>|</span><span>2</span></span>
+      × |<span class="pa">α</span>−<span class="pb">β</span>|
+      × |<span class="pb">β</span>−<span class="pc">γ</span>|
+      × |<span class="pc">γ</span>−<span class="pa">α</span>|
+    </div>
+    <p class="cap"><span class="mv">a</span> 는 <span class="mv">x</span><sup>2</sup>의 계수, <span class="pa">α</span> <span class="pb">β</span> <span class="pc">γ</span> 는 세 점의 <span class="mv">x</span>좌표</p>
+    <p class="chachacha"><span class="mv">x</span>좌표끼리의 <b>차</b>를 <b>차</b>례로 세 번 곱한다 &rarr; <b>차 · 차 · 차</b></p>
+  </div>
+
+  <div class="note" style="margin-top:20px">
+    <b>여기서 확인할 것 세 가지</b>
+    <ul class="plain" style="margin-top:6px">
+      <li><span class="mv">y</span>좌표는 <strong>한 번도 안 구한다.</strong></li>
+      <li><span class="mv">b</span>, <span class="mv">c</span> 도 <strong>안 쓴다.</strong> 필요한 건 <span class="mv">a</span> 하나.</li>
+      <li>절댓값이라 <strong>세 점의 순서는 상관없다.</strong> 아무 순서로 빼도 답은 같다.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2><span class="step">3</span>직접 움직여 보기</h2>
+  <p>슬라이더로 <span class="mv">a</span> 와 세 <span class="mv">x</span>좌표를 바꿔 봐. 차 세 개가 어떻게 바뀌는지 눈으로 따라가면 공식이 그냥 외워진다.</p>
+  <div class="panel grid-paper" style="margin-top:16px">
+    <svg class="scene" id="play" aria-label="슬라이더로 조절하는 포물선과 삼각형"></svg>
+    <div class="controls">
+      <div class="ctl a"><label for="s-a"><span><span class="mv">a</span> (<span class="mv">x</span><sup>2</sup>의 계수)</span><span class="val" id="v-a">1</span></label><input id="s-a" type="range" min="-2" max="2" step="0.25" value="1"></div>
+      <div class="ctl p"><label for="s-p"><span><span class="mv">α</span></span><span class="val" id="v-p">−3</span></label><input id="s-p" type="range" min="-5" max="5" step="0.5" value="-3"></div>
+      <div class="ctl q"><label for="s-q"><span><span class="mv">β</span></span><span class="val" id="v-q">1</span></label><input id="s-q" type="range" min="-5" max="5" step="0.5" value="1"></div>
+      <div class="ctl r"><label for="s-r"><span><span class="mv">γ</span></span><span class="val" id="v-r">4</span></label><input id="s-r" type="range" min="-5" max="5" step="0.5" value="4"></div>
+    </div>
+    <div class="calc">
+      <div class="diffs" id="diffs"></div>
+      <div class="line" id="line1"></div>
+      <div class="line res" id="line2"></div>
+      <div class="check" id="check"></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="step">4</span>왜 <span class="mv">b</span>, <span class="mv">c</span> 는 안 들어갈까</h2>
+  <p><span class="mv">b</span> 와 <span class="mv">c</span> 를 바꾸면 포물선이 <strong>움직이기만</strong> 해. 그러면 그 위에 얹힌 세 점도 통째로 같이 움직이고, 삼각형은 <strong>평행이동한 합동인 삼각형</strong>이 돼. 모양이 같으니 넓이도 같지. 그래서 공식에 <span class="mv">b</span>, <span class="mv">c</span> 가 낄 자리가 없어.</p>
+  <figure style="margin:20px 0 0">
+    <div class="fig grid-paper"><svg class="scene" id="fig2" aria-label="평행이동해도 삼각형의 넓이가 같음을 보여주는 두 포물선"></svg></div>
+    <figcaption class="figcap">같은 <span class="mv">a</span>, 밀기만 한 포물선 &mdash; 두 삼각형은 합동, 넓이도 같다</figcaption>
+  </figure>
+  <p style="margin-top:16px"><span class="mv">x</span>좌표의 <em>차</em>를 쓰는 이유도 같아. 좌우로 밀면 <span class="pa">α</span> 도 <span class="pb">β</span> 도 똑같이 움직이니까, 둘의 <strong>차는 변하지 않거든.</strong></p>
+</section>
+
+<section>
+  <h2><span class="step">5</span>이 식이 나오는 과정</h2>
+  <p>안 봐도 문제는 풀려. 하지만 한 번 보면 "아 그래서 <span class="mv">b</span>, <span class="mv">c</span> 가 사라지는구나"가 확실해져.</p>
+  <div class="ex" style="margin-top:14px">
+    <details>
+      <summary>유도 펼쳐보기</summary>
+      <div class="body">
+        <p>세 점 <span class="mn">(<span class="pa">α</span>, <span class="mv">y</span><sub class="pa">α</sub>), (<span class="pb">β</span>, <span class="mv">y</span><sub class="pb">β</sub>), (<span class="pc">γ</span>, <span class="mv">y</span><sub class="pc">γ</sub>)</span> 의 넓이 공식(신발끈)에서 출발한다.</p>
+        <p class="step-eq"><span class="mv">S</span> = <span class="frac"><span>1</span><span>2</span></span> | <span class="pa">α</span>(<span class="mv">y</span><sub class="pb">β</sub> − <span class="mv">y</span><sub class="pc">γ</sub>) + <span class="pb">β</span>(<span class="mv">y</span><sub class="pc">γ</sub> − <span class="mv">y</span><sub class="pa">α</sub>) + <span class="pc">γ</span>(<span class="mv">y</span><sub class="pa">α</sub> − <span class="mv">y</span><sub class="pb">β</sub>) |</p>
+        <p style="margin-top:14px"><strong>① <span class="mv">c</span> 는 처음부터 사라진다.</strong> 식에 들어가는 건 <span class="mv">y</span>끼리의 <em>차</em>뿐인데, 두 <span class="mv">y</span> 모두에 <span class="mv">c</span> 가 똑같이 붙어 있어서 빼는 순간 없어진다.</p>
+        <p class="step-eq"><span class="mv">y</span><sub class="pb">β</sub> − <span class="mv">y</span><sub class="pc">γ</sub> = <span class="mv">a</span>(<span class="pb">β</span><sup>2</sup>−<span class="pc">γ</span><sup>2</sup>) + <span class="mv">b</span>(<span class="pb">β</span>−<span class="pc">γ</span>)</p>
+        <p style="margin-top:14px"><strong>② <span class="mv">b</span> 가 붙은 부분은 0이 된다.</strong></p>
+        <p class="step-eq"><span class="mv">b</span> { <span class="pa">α</span>(<span class="pb">β</span>−<span class="pc">γ</span>) + <span class="pb">β</span>(<span class="pc">γ</span>−<span class="pa">α</span>) + <span class="pc">γ</span>(<span class="pa">α</span>−<span class="pb">β</span>) } = <span class="mv">b</span> · 0 = 0</p>
+        <p style="margin-top:14px"><strong>③ 남는 건 <span class="mv">a</span> 가 붙은 부분뿐.</strong> 정리하면 딱 차 세 개의 곱이 된다.</p>
+        <p class="step-eq"><span class="mv">a</span> { <span class="pa">α</span>(<span class="pb">β</span><sup>2</sup>−<span class="pc">γ</span><sup>2</sup>) + <span class="pb">β</span>(<span class="pc">γ</span><sup>2</sup>−<span class="pa">α</span><sup>2</sup>) + <span class="pc">γ</span>(<span class="pa">α</span><sup>2</sup>−<span class="pb">β</span><sup>2</sup>) } = <span class="mv">a</span>(<span class="pa">α</span>−<span class="pb">β</span>)(<span class="pb">β</span>−<span class="pc">γ</span>)(<span class="pc">γ</span>−<span class="pa">α</span>)</p>
+        <p style="margin-top:14px">따라서</p>
+        <p class="step-eq"><span class="mv">S</span> = <span class="frac"><span>|<span class="mv">a</span>|</span><span>2</span></span> |<span class="pa">α</span>−<span class="pb">β</span>| |<span class="pb">β</span>−<span class="pc">γ</span>| |<span class="pc">γ</span>−<span class="pa">α</span>|</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section>
+  <h2><span class="step">6</span>예제</h2>
+
+  <div class="ex">
+    <p class="q"><span class="no">예제 1</span><span class="mn"><span class="mv">y</span> = <span class="mv">x</span><sup>2</sup> − 2<span class="mv">x</span> − 3</span> 위의 세 점 중 <span class="mv">x</span>좌표가 <span class="mn">−1, 1, 4</span> 인 점으로 만든 삼각형의 넓이는?</p>
+    <details>
+      <summary>풀이 보기</summary>
+      <div class="body">
+        <p><span class="mv">a</span> = 1 이고, 차 세 개는 <span class="mn">|−1−1| = 2</span>, <span class="mn">|1−4| = 3</span>, <span class="mn">|4−(−1)| = 5</span>.</p>
+        <p class="step-eq"><span class="mv">S</span> = <span class="frac"><span>1</span><span>2</span></span> × 2 × 3 × 5 = <strong>15</strong></p>
+        <p style="margin-top:10px">− 2<span class="mv">x</span> 도 − 3 도 쓰지 않았다는 것에 주목. 세 점의 <span class="mv">y</span>좌표(<span class="mn">0, −4, 5</span>)를 구할 필요가 없었다.</p>
+      </div>
+    </details>
+  </div>
+
+  <div class="ex">
+    <p class="q"><span class="no">예제 2</span><span class="mn"><span class="mv">y</span> = −2<span class="mv">x</span><sup>2</sup> + 5</span> 위의 세 점 중 <span class="mv">x</span>좌표가 <span class="mn">−2, 0, 3</span> 인 점으로 만든 삼각형의 넓이는?</p>
+    <details>
+      <summary>풀이 보기</summary>
+      <div class="body">
+        <p><span class="mv">a</span> = −2 이므로 <span class="mn">|<span class="mv">a</span>| = 2</span>. 차 세 개는 <span class="mn">|−2−0| = 2</span>, <span class="mn">|0−3| = 3</span>, <span class="mn">|3−(−2)| = 5</span>.</p>
+        <p class="step-eq"><span class="mv">S</span> = <span class="frac"><span>2</span><span>2</span></span> × 2 × 3 × 5 = <strong>30</strong></p>
+        <p style="margin-top:10px"><span class="mv">a</span> 가 음수여도 <strong>절댓값</strong>만 쓴다. 넓이는 음수가 될 수 없으니까.</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section>
+  <h2><span class="step">7</span>시험에 제일 자주 나오는 꼴</h2>
+  <p><strong><span class="mv">x</span>축과 만나는 두 점 + 꼭짓점</strong>으로 만든 삼각형. 꼭짓점의 <span class="mv">x</span>좌표는 두 교점의 <strong>정확히 한가운데</strong>라서, 두 교점 사이 거리를 <span class="mv">d</span> 라 하면 차 세 개가 저절로 정해져.</p>
+  <div class="formula" style="margin-top:18px">
+    <div class="eq"><span class="mv">S</span> = <span class="frac"><span>|<span class="mv">a</span>|</span><span>2</span></span> × <span class="mv">d</span> × <span class="frac"><span><span class="mv">d</span></span><span>2</span></span> × <span class="frac"><span><span class="mv">d</span></span><span>2</span></span> = <span class="frac"><span>|<span class="mv">a</span>|<span class="mv">d</span><sup>3</sup></span><span>8</span></span></div>
+    <p class="cap"><span class="mv">d</span> = 두 교점의 <span class="mv">x</span>좌표 차</p>
+  </div>
+  <div class="ex" style="margin-top:14px">
+    <details>
+      <summary>확인해 보기 &mdash; <span class="mn"><span class="mv">y</span> = <span class="mv">x</span><sup>2</sup> − 4</span></summary>
+      <div class="body">
+        <p><span class="mv">x</span>축과 만나는 점은 <span class="mn">−2, 2</span> 이므로 <span class="mn"><span class="mv">d</span> = 4</span>, 꼭짓점은 <span class="mn">(0, −4)</span>.</p>
+        <p class="step-eq">공식: <span class="frac"><span>1 × 4<sup>3</sup></span><span>8</span></span> = <strong>8</strong></p>
+        <p class="step-eq" style="margin-top:6px">눈으로: 밑변 4, 높이 4 인 삼각형 &rarr; <span class="frac"><span>1</span><span>2</span></span> × 4 × 4 = <strong>8</strong> ✓</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section>
+  <h2><span class="step">8</span>연습문제</h2>
+
+  <div class="ex">
+    <p class="q"><span class="no">1</span><span class="mn"><span class="mv">y</span> = <span class="mv">x</span><sup>2</sup></span> 위의 <span class="mv">x</span>좌표가 <span class="mn">−3, 0, 2</span> 인 세 점</p>
+    <details><summary>답</summary><div class="body"><p>차: <span class="mn">3, 2, 5</span> &rarr; <span class="mv">S</span> = <span class="frac"><span>1</span><span>2</span></span> × 3 × 2 × 5 = <strong>15</strong></p></div></details>
+  </div>
+
+  <div class="ex">
+    <p class="q"><span class="no">2</span><span class="mn"><span class="mv">y</span> = <span class="frac"><span>1</span><span>2</span></span><span class="mv">x</span><sup>2</sup> + 3<span class="mv">x</span> − 1</span> 위의 <span class="mv">x</span>좌표가 <span class="mn">−4, 2, 6</span> 인 세 점</p>
+    <details><summary>답</summary><div class="body"><p>차: <span class="mn">6, 4, 10</span> &rarr; <span class="mv">S</span> = <span class="frac"><span>1/2</span><span>2</span></span> × 6 × 4 × 10 = <strong>60</strong></p><p style="margin-top:8px">3<span class="mv">x</span> 와 −1 은 역시 쓰지 않는다.</p></div></details>
+  </div>
+
+  <div class="ex">
+    <p class="q"><span class="no">3</span><span class="mn"><span class="mv">y</span> = <span class="mv">a</span><span class="mv">x</span><sup>2</sup></span> 위의 <span class="mv">x</span>좌표가 <span class="mn">0, 2, 5</span> 인 세 점의 삼각형 넓이가 <span class="mn">30</span> 일 때, <span class="mn">|<span class="mv">a</span>|</span> 는?</p>
+    <details><summary>답</summary><div class="body"><p>차: <span class="mn">2, 3, 5</span> &rarr; <span class="mn"><span class="frac"><span>|<span class="mv">a</span>|</span><span>2</span></span> × 30 = 15|<span class="mv">a</span>| = 30</span> &rarr; <span class="mn">|<span class="mv">a</span>| = <strong>2</strong></span></p></div></details>
+  </div>
+</section>
+
+<section class="check-list">
+  <h2 style="font-size:20px"><span class="step">✓</span>풀기 전 마지막 확인</h2>
+  <ul class="plain">
+    <li><span class="mv">x</span><sup>2</sup>의 계수 <span class="mv">a</span> 를 제대로 봤나 (앞에 붙은 부호까지)</li>
+    <li>세 <span class="mv">x</span>좌표의 차를 <strong>절댓값</strong>으로 했나</li>
+    <li>맨 앞의 <span class="frac"><span>1</span><span>2</span></span> 을 빼먹지 않았나</li>
+    <li><span class="mv">y</span>좌표를 구하고 있었다면 &mdash; 멈추자. 필요 없다.</li>
+  </ul>
+</section>
+
+<footer>CLIMATH · 이차함수 삼각형 넓이 공식</footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  function fmt(n){
+    var r = Math.round(n*1000)/1000;
+    return String(r).replace("-","−");
+  }
+  function par(n){
+    return n < 0 ? "(" + fmt(n) + ")" : fmt(n);
+  }
+
+  /* ── 포물선 + 삼각형 그리기 ─────────────── */
+  function scene(el, curves, opt){
+    opt = opt || {};
+    var VW = 680, VH = opt.h || 420, PAD = 38;
+
+    var data = curves.map(function(c){
+      var h = c.h || 0, k = c.k || 0;
+      var f = function(x){ return c.a*(x-h)*(x-h) + k; };
+      var lo = Math.min.apply(null, c.xs) - 1.35;
+      var hi = Math.max.apply(null, c.xs) + 1.35;
+      var pts = [], i;
+      for(i = 0; i <= 180; i++){ var x = lo + (hi-lo)*i/180; pts.push([x, f(x)]); }
+      return { c:c, pts:pts, tri:c.xs.map(function(x){ return [x, f(x)]; }), lo:lo, hi:hi };
+    });
+
+    var xs = [], ys = [];
+    data.forEach(function(d){
+      d.pts.forEach(function(p){ xs.push(p[0]); ys.push(p[1]); });
+      d.tri.forEach(function(p){ xs.push(p[0]); ys.push(p[1]); });
+      xs.push(d.lo, d.hi); ys.push(0);
+    });
+    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+    var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    var s = Math.min((VW-2*PAD)/Math.max(x1-x0, 0.001), (VH-2*PAD-18)/Math.max(y1-y0, 0.001));
+    var cx = (x0+x1)/2, cy = (y0+y1)/2;
+    var X = function(x){ return VW/2 + (x-cx)*s; };
+    var Y = function(y){ return VH/2 - (y-cy)*s + 9; };
+
+    var ay = Y(0), out = "";
+    out += '<line class="ax" x1="14" y1="'+ay.toFixed(1)+'" x2="'+(VW-14)+'" y2="'+ay.toFixed(1)+'"/>';
+    if(X(0) > 20 && X(0) < VW-20){
+      out += '<line class="ax" x1="'+X(0).toFixed(1)+'" y1="10" x2="'+X(0).toFixed(1)+'" y2="'+(VH-10)+'"/>';
+    }
+
+    data.forEach(function(d){
+      var dim = d.c.dim ? " dim" : "";
+      out += '<polygon class="tri'+dim+'" points="'+d.tri.map(function(p){ return X(p[0]).toFixed(1)+","+Y(p[1]).toFixed(1); }).join(" ")+'"/>';
+      out += '<path class="curve'+dim+'" d="M'+d.pts.map(function(p){ return X(p[0]).toFixed(1)+" "+Y(p[1]).toFixed(1); }).join(" L")+'"/>';
+      d.tri.forEach(function(p, j){
+        var cl = ["pa","pb","pc"][j] + dim;
+        out += '<line class="drop '+cl+'" x1="'+X(p[0]).toFixed(1)+'" y1="'+Y(p[1]).toFixed(1)+'" x2="'+X(p[0]).toFixed(1)+'" y2="'+ay.toFixed(1)+'"/>';
+        out += '<circle class="pt '+cl+'" cx="'+X(p[0]).toFixed(1)+'" cy="'+Y(p[1]).toFixed(1)+'" r="6"/>';
+        if(d.c.names){
+          var ly = ay + 24 > VH-6 ? ay - 12 : ay + 24;
+          out += '<text class="lb '+cl+'" x="'+X(p[0]).toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle">'+d.c.names[j]+'</text>';
+        }
+      });
+      if(d.c.caption){
+        var mid = d.tri[1];
+        out += '<text class="cap" x="'+X(mid[0]).toFixed(1)+'" y="'+(Y(mid[1])-16).toFixed(1)+'" text-anchor="middle">'+d.c.caption+'</text>';
+      }
+    });
+
+    el.setAttribute("viewBox", "0 0 "+VW+" "+VH);
+    el.innerHTML = out;
+  }
+
+  /* ── 작은 모양 그림 ─────────────────────── */
+  function mini(el, list){
+    var VW = 200, VH = 132, PAD = 10;
+    var s = (VW-2*PAD)/5.2;
+    var X = function(x){ return VW/2 + x*s; };
+    var Y = function(y){ return VH/2 - y*s; };
+    var id = "clip-" + el.id;
+    var out = '<clipPath id="'+id+'"><rect x="2" y="2" width="'+(VW-4)+'" height="'+(VH-4)+'"/></clipPath>';
+    out += '<line class="ax" x1="6" y1="'+Y(0)+'" x2="'+(VW-6)+'" y2="'+Y(0)+'"/>';
+    out += '<line class="ax" x1="'+X(0)+'" y1="4" x2="'+X(0)+'" y2="'+(VH-4)+'"/>';
+    out += '<g clip-path="url(#'+id+')">';
+    list.forEach(function(c){
+      var pts = [], i;
+      for(i = 0; i <= 120; i++){
+        var x = -2.6 + 5.2*i/120;
+        pts.push(X(x).toFixed(1)+" "+Y(c.a*x*x).toFixed(1));
+      }
+      out += '<path class="curve '+(c.cls||"")+'" style="stroke-width:2.4" d="M'+pts.join(" L")+'"/>';
+    });
+    out += '</g>';
+    el.setAttribute("viewBox", "0 0 "+VW+" "+VH);
+    el.innerHTML = out;
+  }
+
+  mini(document.getElementById("m1"), [{a: 0.7, cls:"c1"}]);
+  mini(document.getElementById("m2"), [{a: -0.7, cls:"c1"}]);
+  mini(document.getElementById("m3"), [{a: 0.3, cls:"c1"}, {a: 1.6, cls:"c2"}]);
+
+  scene(document.getElementById("fig1"),
+        [{a: 0.5, xs: [-3.4, 0.6, 3.6], names: ["α", "β", "γ"]}],
+        {h: 360});
+
+  scene(document.getElementById("fig2"), [
+    {a: 0.5, h: -2.2, k: 0, xs: [-4.6, -1.6, 0.4], dim: true},
+    {a: 0.5, h: 2.4, k: -1.6, xs: [0, 3, 5]}
+  ], {h: 340});
+
+  /* ── 슬라이더 ───────────────────────────── */
+  var st = {a: 1, p: -3, q: 1, r: 4};
+  var ids = {a: "s-a", p: "s-p", q: "s-q", r: "s-r"};
+  var play = document.getElementById("play");
+
+  function draw(){
+    scene(play, [{a: st.a, xs: [st.p, st.q, st.r], names: ["α", "β", "γ"]}], {h: 400});
+
+    document.getElementById("v-a").textContent = fmt(st.a);
+    document.getElementById("v-p").textContent = fmt(st.p);
+    document.getElementById("v-q").textContent = fmt(st.q);
+    document.getElementById("v-r").textContent = fmt(st.r);
+
+    var d1 = Math.abs(st.p - st.q), d2 = Math.abs(st.q - st.r), d3 = Math.abs(st.r - st.p);
+    var S = Math.abs(st.a)/2 * d1 * d2 * d3;
+
+    document.getElementById("diffs").innerHTML =
+      '<span>|<b class="pa">'+fmt(st.p)+'</b> − <b class="pb">'+fmt(st.q)+'</b>| = '+fmt(d1)+'</span>' +
+      '<span>|<b class="pb">'+fmt(st.q)+'</b> − <b class="pc">'+fmt(st.r)+'</b>| = '+fmt(d2)+'</span>' +
+      '<span>|<b class="pc">'+fmt(st.r)+'</b> − <b class="pa">'+fmt(st.p)+'</b>| = '+fmt(d3)+'</span>';
+
+    document.getElementById("line1").innerHTML =
+      'S = <span class="frac"><span>' + fmt(Math.abs(st.a)) + '</span><span>2</span></span>' +
+      ' × ' + fmt(d1) + ' × ' + fmt(d2) + ' × ' + fmt(d3);
+    document.getElementById("line2").textContent = "= " + fmt(S);
+
+    // 신발끈 공식으로 교차 확인
+    var f = function(x){ return st.a*x*x; };
+    var ya = f(st.p), yb = f(st.q), yc = f(st.r);
+    var shoe = Math.abs(st.p*(yb-yc) + st.q*(yc-ya) + st.r*(ya-yb))/2;
+    var same = Math.abs(shoe - S) < 1e-9;
+
+    var ck = document.getElementById("check");
+    if(d1 === 0 || d2 === 0 || d3 === 0){
+      ck.innerHTML = '<span class="warn">두 점이 겹쳐서 삼각형이 만들어지지 않아요 (넓이 0)</span>';
+    }else{
+      ck.textContent = "y좌표를 다 구해서 신발끈 공식으로 계산해도 " + fmt(shoe) + (same ? " — 같다 ✓" : "");
+    }
+  }
+
+  Object.keys(ids).forEach(function(k){
+    var inp = document.getElementById(ids[k]);
+    inp.addEventListener("input", function(){
+      var v = parseFloat(inp.value);
+      if(k === "a" && v === 0){ v = st.a > 0 ? -0.25 : 0.25; inp.value = v; }
+      st[k] = v;
+      draw();
+    });
+  });
+
+  draw();
+})();
+</script>
+</body>
+</html>
