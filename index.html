@@ -800,7 +800,7 @@ async function runNeisPull(term, targets, from, to, kind) {
                             msg: "", diffs: [], stop: false });
   neisEmit();
   let filled = 0, same = 0;
-  const notFound = [], noExam = [], noData = [];
+  const notFound = [], noExam = [], noData = [], fromDoc = [];
   try {
     for (const school of names) {
       if (NEIS_JOB.stop) break;
@@ -811,6 +811,8 @@ async function runNeisPull(term, targets, from, to, kind) {
       if (r.error) notFound.push(school);
       else if (!r.hasAny) noData.push(school);
       else {
+        // 문서(PDF·한글파일)에서 읽은 것은 사람이 한 번 봐야 한다
+        if (r.via === "doc") fromDoc.push(school + (r.docTitle ? " (" + r.docTitle + ")" : ""));
         for (const t of targets.filter((x) => x.school === school)) {
           const g = r.byGrade && r.byGrade[t.grade];
           if (!g) { noExam.push(t.school + " " + t.grade); continue; }
@@ -833,7 +835,8 @@ async function runNeisPull(term, targets, from, to, kind) {
     if (same) bits.push("이미 같은 것 " + same + "칸");
     if (NEIS_JOB.diffs.length) bits.push("다른 것 " + NEIS_JOB.diffs.length + "칸 (아래 확인)");
     if (noExam.length) bits.push("이 기간에 시험이 안 올라온 곳: " + noExam.join(", "));
-    if (noData.length) bits.push("나이스에 학사일정을 안 올리는 학교: " + noData.join(", "));
+    if (fromDoc.length) bits.push("첨부문서에서 읽었어요 — 한 번 확인해주세요: " + fromDoc.join(", "));
+    if (noData.length) bits.push("어디에도 안 올리는 학교: " + noData.join(", "));
     if (notFound.length) bits.push("나이스에서 못 찾은 학교: " + notFound.join(", "));
     NEIS_JOB.msg = bits.join(" · ") || "가져올 게 없었어요";
   } catch (e) {
@@ -3442,8 +3445,8 @@ function SchoolTermBoard({ onBack }) {
               나이스에서 학사일정 불러오기
             </div>
             <div style={{fontSize: 12, color: "var(--muted)", lineHeight: 1.6, marginBottom: 8}}>
-              학교가 나이스에 올린 일정에서 <b>내신 기간</b>을 찾아 빈 칸을 채워요.
-              <b>이미 채운 학교는 건너뜁니다.</b> 다른 화면으로 가도 계속 돌아요.
+              <b>나이스 → 학교 홈페이지 달력 → 홈페이지에 붙은 학사일정 문서</b> 순으로 찾아
+              <b>내신 기간</b>을 채워요. <b>이미 채운 학교는 건너뜁니다.</b> 다른 화면으로 가도 계속 돌아요.
               <br/><b>수학 시험 날짜는 못 가져와요</b> — 학사일정에는 과목별 시간표가 없어요.
             </div>
             <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>

@@ -189,6 +189,7 @@ async function findScheduleMenus(base) {
   return out;
 }
 
+let lastMenus = [];
 async function homepageExams(hmpg, from, to, kind, budget) {
   if (!hmpg) return null;
   const base = hmpg.replace(/^http:/, "https:").replace(/\/+$/, "") + "/";
@@ -197,6 +198,7 @@ async function homepageExams(hmpg, from, to, kind, budget) {
   try { menus = await findScheduleMenus(base); } catch (e) { return null; }
   if (!menus.length) return null;
 
+  lastMenus = menus;
   const rows = [];
   for (const url of menus) {
     for (const [y, mm] of monthsBetween(from, to)) {
@@ -238,6 +240,156 @@ async function homepageExams(hmpg, from, to, kind, budget) {
   return { hasAny: true, byGrade, viaHomepage: true };
 }
 
+// ---- 3단계: 게시판에 붙은 문서에서 읽기 ----
+//
+// 달력 페이지가 아니라 게시판에 PDF·한글파일로만 올리는 학교가 있다(경기고·언남고).
+// 서울 교육청 CMS는 게시판도 생김새가 같아서 여기까지는 규칙으로 간다:
+//   메뉴 페이지에서 bbsId → selectBoardListAjax.do 로 글 목록 → "학사일정" 글 고르기
+//   → selectBoardDetailAjax.do 로 첨부 atchFileId → 문서뷰어(Synap)
+// 뷰어는 변환된 글자층을 thumbnailxml 로 준다. PDF를 직접 뜯지 않아도 글자가 나온다.
+//   ⚠ 목록/상세 AJAX는 **세션 쿠키가 있어야** 내용을 준다. 없으면 빈 껍데기가 온다.
+//
+// 마지막으로 그 글자에서 날짜를 뽑는 일만 남는데, 학사력은 학교마다 표 모양이 완전히
+// 달라서(월별 세로표, 일자 가로표…) 규칙으로 짜면 학교마다 깨진다. 그건 AI에게 맡기되,
+// **지어낼 수 없게 검증한다** — 답으로 준 날짜의 숫자가 원문에서 실제로 시험 낱말 바로
+// 앞에 붙어 있어야만 받아들인다.
+const SYNAP = "http://viewhosting.ssem.or.kr:8080/SynapDocViewServer";
+
+async function boardDocText(menuUrl, budget) {
+  const origin = new URL(menuUrl).origin;
+  budget.n--;
+  const first = await fetch(menuUrl, { headers: UA });
+  const cookie = (first.headers.getSetCookie ? first.headers.getSetCookie() : [])
+    .map((c) => c.split(";")[0]).join("; ");
+  const page = await first.text();
+  const bbsId = (page.match(/name="bbsId"[^>]*value="([^"]+)"/) || [])[1];
+  if (!bbsId) return null;                       // 게시판이 아니다
+  const H = { ...UA, "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+              "X-Requested-With": "XMLHttpRequest", Referer: menuUrl, Cookie: cookie };
+
+  budget.n--;
+  const list = await (await fetch(origin + "/dggb/module/board/selectBoardListAjax.do", {
+    method: "POST", headers: H,
+    body: new URLSearchParams({ bbsId, bbsTyCode: "base", pageIndex: "1",
+      customRecordCountPerPage: "30", searchCondition: "", searchKeyword: "", cmntSe: "N" }),
+  })).text();
+  const re = /fnView\('([^']+)',\s*'([^']+)'\)[^>]*>([\s\S]{0,140}?)<\/a>/g;
+  const posts = [];
+  let m;
+  while ((m = re.exec(list))) posts.push({ bbsId: m[1], nttId: m[2],
+    title: m[3].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim() });
+  const want = /학사\s*일정|학사\s*력|학사력|연간\s*일정/;
+  const yr = new Date().getFullYear();
+  const hit = posts.find((x) => want.test(x.title) && x.title.indexOf(String(yr)) >= 0)
+           || posts.find((x) => want.test(x.title));
+  if (!hit) return null;
+
+  budget.n--;
+  const html = await (await fetch(origin + "/dggb/module/board/selectBoardDetailAjax.do", {
+    method: "POST", headers: H,
+    body: new URLSearchParams({ bbsId: hit.bbsId, nttId: hit.nttId, bbsTyCode: "base",
+      pageIndex: "1", cmntSe: "N", customRecordCountPerPage: "30" }),
+  })).text();
+  const fid = (html.match(/name="atchFileId"[^>]*value="([^"]+)"/) || [])[1];
+  if (!fid) return null;
+
+  for (const sn of ["0", "1", "2"]) {
+    if (budget.n <= 0) break;
+    budget.n--;
+    try {
+      const job = SYNAP + "/job?fid=" + fid + "_" + sn +
+        "&filePath=" + origin + ":443/dggb/cnvrFileDown.do?atchFileId=" + fid + ":" + sn +
+        "&convertType=1&fileType=URL&sync=true";
+      const r = await fetch(job, { headers: UA, redirect: "follow" });
+      const key = (r.url.match(/key=([0-9a-f]+)/) || [])[1];
+      if (!key) continue;
+      const st = await (await fetch(SYNAP + "/status/" + key, { headers: UA })).json().catch(() => null);
+      const pages = Math.min((st && st.pageNum) || 1, 14);
+      let text = "";
+      for (let pg = 0; pg < pages; pg++) {
+        if (budget.n <= 0) break;
+        budget.n--;
+        const x = await (await fetch(SYNAP + "/thumbnailxml/" + key + "/" + pg + "?dpi=96", { headers: UA })).text();
+        text += x.replace(/<[^>]+>/g, " ")
+                 .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+                 .replace(/\s+/g, "");
+      }
+      if (text.length > 400 && /(고사|평가)/.test(text)) return { text, title: hit.title };
+    } catch (e) { /* 다음 첨부 */ }
+  }
+  return null;
+}
+
+// 그 날 숫자가 원문에서 정말 시험 낱말 바로 앞에 붙어 있나.
+// 앞에 다른 숫자가 없어야 한다는 조건은 못 건다 — 표에서는 날짜가 "…10 12중간고사…"
+// 처럼 줄줄이 붙어 나와서 앞 글자가 숫자인 게 정상이다.
+// **고른 시험 종류만** 본다. 아무 시험 낱말이나 받아주면, 2학기 구간의
+// "27기말고사"에 붙은 "7기말" 때문에 10월 7일이 중간고사로 통과해 버린다.
+const DAY_WORD = {
+  "중간": "(?:중간|1\\s*차\\s*지필)",
+  "기말": "(?:기말|2\\s*차\\s*지필)",
+};
+function dayHasExam(text, ymdStr, kind) {
+  const d = Number(ymdStr.slice(8, 10));
+  const w = DAY_WORD[kind] || "(?:중간|기말|지필)";
+  return new RegExp("" + d + "\\s*(?:2?학기)?\\s*" + w).test(text);
+}
+// 검증에 쓸 구간을 학기로 좁힌다. 한 문서에 1학기·2학기가 다 들어 있어서,
+// 전체를 훑으면 1학기의 "27중간고사"가 2학기 10월 7일을 통과시켜 버린다.
+function semesterSlice(text, from) {
+  const mm = Number(from.slice(4, 6));
+  const second = mm >= 8 || mm <= 2;          // 8월~2월이면 2학기
+  const mark = text.indexOf(second ? "2학기" : "1학기");
+  if (mark < 0) return text;
+  if (!second) {
+    const nxt = text.indexOf("2학기", mark);
+    return nxt > mark ? text.slice(mark, nxt) : text.slice(mark);
+  }
+  return text.slice(mark);
+}
+
+async function examFromDoc(text, school, from, to, kind) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+  const body = {
+    system_instruction: { parts: [{ text:
+      "너는 한국 고등학교 학사일정 표에서 시험 기간만 뽑아내는 도구다. " +
+      "JSON 하나만 출력한다. 설명·코드블록·군더더기 금지. " +
+      "원문에 없는 날짜는 절대 만들지 마라. 확실하지 않으면 {\"none\":true} 를 내라." }] },
+    contents: [{ role: "user", parts: [{ text:
+      school + " 학사일정 문서에서 뽑은 글자다. 표라서 칸 구분이 없어졌고 띄어쓰기도 지워졌다.\n" +
+      "여기서 " + from.slice(0, 4) + "-" + from.slice(4, 6) + "-" + from.slice(6, 8) + " 부터 " +
+      to.slice(0, 4) + "-" + to.slice(4, 6) + "-" + to.slice(6, 8) + " 사이에 있는 " +
+      (kind || "중간") + "고사(지필평가) 기간을 찾아라.\n" +
+      "시작일 = 첫 시험날, 종료일 = 마지막 시험날. 중간에 공휴일로 끊겨도 처음과 끝으로 잡는다.\n" +
+      "1학기 시험이나 모의고사·학력평가는 제외한다.\n\n" +
+      "형식: {\"start\":\"YYYY-MM-DD\",\"end\":\"YYYY-MM-DD\",\"grades\":[\"고1\",\"고2\",\"고3\"]}\n" +
+      "학년 구분이 없으면 grades 는 세 학년 모두 넣는다. 못 찾으면 {\"none\":true}\n\n" +
+      "--- 원문 ---\n" + text.slice(0, 12000) + "\n--- 끝 ---" }] }],
+    generationConfig: { temperature: 0, maxOutputTokens: 200, responseMimeType: "application/json" },
+  };
+  const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=" + key,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  const out = ((((j || {}).candidates || [])[0] || {}).content || {}).parts || [];
+  let v = null;
+  try { v = JSON.parse(out.map((x) => x.text || "").join("").trim()); } catch (e) { return null; }
+  if (!v || v.none || !v.start || !v.end) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v.start) || !/^\d{4}-\d{2}-\d{2}$/.test(v.end)) return null;
+
+  // ---- 검증 ---- 지어낸 날짜를 걸러낸다
+  const a = ymd(v.start), b = ymd(v.end);
+  if (a < from || b > to || a > b) return null;
+  const scope = semesterSlice(text, from);
+  if (!dayHasExam(scope, v.start, kind) || !dayHasExam(scope, v.end, kind)) return null;
+
+  const grades = Array.isArray(v.grades) && v.grades.length ? v.grades : ["고1", "고2", "고3"];
+  const byGrade = {};
+  grades.forEach((g) => { if (GRADE_FIELD[g]) byGrade[g] = { start: v.start, end: v.end, days: 0, name: (kind || "중간") + "고사" }; });
+  return Object.keys(byGrade).length ? byGrade : null;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
   try {
@@ -271,19 +423,30 @@ export default async function handler(req, res) {
       byGrade[g] = { start: dash(ds[0]), end: dash(ds[ds.length - 1]),
                      days: ds.length, name: use[0].EVENT_NM };
     });
-    // 나이스에 시험이 없으면 학교 홈페이지를 본다
-    let viaHomepage = false, hasAny = rows.length > 0;
-    if (!Object.keys(byGrade).length) {
+    // 나이스에 시험이 없으면 학교 홈페이지를 본다 (달력 → 게시판 문서 순)
+    let via = "", hasAny = rows.length > 0;
+    if (Object.keys(byGrade).length) via = "neis";
+    if (!via) {
+      lastMenus = [];
       const hp = await homepageExams(s.hmpg, from, to, kind, budget);
       if (hp && Object.keys(hp.byGrade || {}).length) {
-        Object.assign(byGrade, hp.byGrade);
-        viaHomepage = true; hasAny = true;
+        Object.assign(byGrade, hp.byGrade); via = "homepage"; hasAny = true;
       } else if (hp) hasAny = true;
+    }
+    let docTitle = "";
+    if (!via && lastMenus.length && budget.n > 0) {
+      for (const url of lastMenus) {
+        const doc = await boardDocText(url, budget).catch(() => null);
+        if (!doc) continue;
+        const g = await examFromDoc(doc.text, s.official, from, to, kind).catch(() => null);
+        if (g) { Object.assign(byGrade, g); via = "doc"; hasAny = true; docTitle = doc.title; break; }
+        hasAny = true;
+      }
     }
     res.status(200).json({ school, official: s.official, officeName: s.officeName,
                            byGrade, found: exams.length,
                            // 나이스에 일정이 아예 없는 학교와, 일정은 있는데 시험만 안 올린 학교는 다르다
-                           hasAny, viaHomepage, homepage: s.hmpg || "",
+                           hasAny, via, docTitle, homepage: s.hmpg || "",
                            truncated, hasKey: !!KEY });
   } catch (e) {
     console.error("[schedule]", e);
