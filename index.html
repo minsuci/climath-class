@@ -474,6 +474,8 @@ const isClassEnded = (cls) => !!(cls && cls.endDate && todayStr > cls.endDate);
 let MY_SCOPE = null;
 const inScope = (c) => !MY_SCOPE || MY_SCOPE.indexOf(c.id) >= 0;
 const activeClasses = () => CLASSES.filter((c) => !isClassEnded(c) && inScope(c));
+// 반 관리 전용 — 담당 범위를 무시하고 전부 본다. 다른 화면은 절대 이걸 쓰지 않는다.
+const allClasses = () => CLASSES.slice();
 const endedClasses = () => CLASSES.filter((c) => isClassEnded(c) && inScope(c));
 // 기간 연장: 기준일(없거나 이미 지났으면 오늘)에서 n개월 뒤
 function addMonths(baseStr, n) {
@@ -1020,8 +1022,12 @@ const setPinKept = (p) => { SESSION_PIN = p || ""; };
 let MUST_CHANGE_PIN = false;
 
 // 관리자는 전체, 일반 선생님은 담당 반만
+// 관리자도 **담당 반만** 본다. 반이 서른 개를 넘어가면 내 수업·보강·위험신호·참여표가
+// 전부 남의 반으로 가득 차서 쓸 수가 없다. 전체 반은 [반 관리] 화면에서 따로 본다.
+// ⚠ 이건 **보이는 범위**만 좁히는 것이다. 고칠 권한(canEdit)은 관리자 전부 그대로다 —
+//    반 관리에서 아무 반이나 열면 편집까지 된다.
 function applyScope(t) {
-  MY_SCOPE = (t && t.role === "owner") ? null : ((t && t.classIds) || []);
+  MY_SCOPE = (t && t.classIds) || [];
 }
 
 async function signOutAll() {
@@ -5585,7 +5591,10 @@ function AdminView() {
         ] : []),
         { sep: true },
         { key: "newclass", ico: "+", label: "새 반 만들기" },
-        ...(me.role === "owner" ? [{ key: "manage", ico: "⚙", label: "선생님 관리" }] : []),
+        ...(me.role === "owner" ? [
+          { key: "classadmin", ico: "▩", label: "반 관리" },
+          { key: "manage", ico: "⚙", label: "선생님 관리" },
+        ] : []),
         { key: "mypin", ico: "✧", label: "내 PIN 변경" },
         { key: "logout", ico: "→", label: "로그아웃" },
       ]} />
@@ -5607,6 +5616,12 @@ function AdminView() {
     await refreshTeachers();
     setMode("login");
   }} onCancel={() => setMode("login")} /></>;
+
+  // ---- 반 관리 (관리자 전용) ----
+  if (mode === "classadmin") return <>{homeSide}<ClassAdmin me={me}
+    onBack={() => setMode("login")}
+    onOpen={(c) => { setCls(c); setClassView("days"); setDayPick(null); setMode("login"); }}
+    onChanged={(ids) => { const t = { ...me, classIds: ids }; applyScope(t); setMe(t); }} /></>;
 
   // ---- 선생님 관리 (관리자 전용) ----
   if (mode === "manage") return <>{homeSide}<TeacherManage me={me} teachers={teachers} onRefresh={refreshTeachers} onBack={() => setMode("login")} /></>;
@@ -5640,7 +5655,16 @@ function AdminView() {
                 <span className="cm-day-arrow">›</span>
               </button>
             ))}
-            {activeClasses().length === 0 && <div className="cm-empty">진행 중인 반이 없어요.</div>}
+            {activeClasses().length === 0 && (
+              <div className="cm-empty">
+                담당으로 지정된 반이 없어요.
+                {me.role === "owner" && (<>
+                  <br/>
+                  <button className="cm-link" style={{padding: 0}}
+                    onClick={() => setMode("classadmin")}>반 관리에서 담당할 반 고르기 →</button>
+                </>)}
+              </div>
+            )}
           </div>
 
           {/* 종강한 반 — 접어두되 언제든 들어가서 볼 수 있다. 기록은 하나도 지워지지 않는다 */}
@@ -8749,6 +8773,158 @@ function StudentDetail({ cls, student, hwDone, questioned, canEdit, date, meName
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ===== 반 관리 (관리자 전용) =====
+// 관리자도 내 수업에는 담당 반만 나오므로, 담당을 넣고 빼는 자리가 따로 필요하다.
+// 여기만 allClasses() 를 쓴다.
+function ClassAdmin({ me, onBack, onOpen, onChanged }) {
+  const [teachers, setTeachers] = useState(null);
+  const [q, setQ] = useState("");
+  const [only, setOnly] = useState("all");     // all | mine | others
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState("");
+  const [showEnded, setShowEnded] = useState(false);
+  const backRef = useSwipeBack(onBack);
+  const reload = async () => { try { setTeachers(await listTeachers()); } catch (e) { setTeachers([]); } };
+  useEffect(() => { reload(); }, []);
+
+  const mine = me.classIds || [];
+  const teachersOf = (cid) => (teachers || []).filter((t) => (t.classIds || []).includes(cid));
+
+  async function toggleMine(c) {
+    if (busy) return;
+    const has = mine.includes(c.id);
+    setBusy(c.id); setMsg("");
+    try {
+      // 배열을 통째로 쓰지 않는다 — 그 사이 다른 곳에서 바뀐 담당이 날아간다.
+      await updateTeacher(me.tid, { classIds: has
+        ? firebase.firestore.FieldValue.arrayRemove(c.id)
+        : firebase.firestore.FieldValue.arrayUnion(c.id) });
+      onChanged(has ? mine.filter((x) => x !== c.id) : mine.concat([c.id]));
+      await reload();
+      setMsg(c.name + (has ? " — 담당에서 뺐어요 ✓" : " — 담당에 넣었어요 ✓"));
+    } catch (e) { setMsg("바꾸지 못했어요: " + friendlyErr(e)); }
+    setBusy("");
+  }
+
+  // 반이 서른 개씩 되면 하나씩 누르는 건 일이 아니다. 지금 걸러서 보이는 것만 한꺼번에.
+  async function bulkMine(add, list) {
+    if (busy || !list.length) return;
+    if (!confirm("지금 보이는 " + list.length + "개 반을 " +
+      (add ? "내 담당에 넣습니다." : "내 담당에서 뺍니다.") + "\n" +
+      (add ? "" : "반이나 기록은 지워지지 않아요. 내 화면에서만 안 보이게 됩니다.\n") +
+      "\n계속할까요?")) return;
+    setBusy("bulk"); setMsg("");
+    const ids = list.map((c) => c.id);
+    try {
+      await updateTeacher(me.tid, { classIds: add
+        ? firebase.firestore.FieldValue.arrayUnion(...ids)
+        : firebase.firestore.FieldValue.arrayRemove(...ids) });
+      const next = add ? Array.from(new Set(mine.concat(ids))) : mine.filter((x) => ids.indexOf(x) < 0);
+      onChanged(next);
+      await reload();
+      setMsg(list.length + "개 반을 담당에 " + (add ? "넣었어요 ✓" : "뺐어요 ✓"));
+    } catch (e) { setMsg("바꾸지 못했어요: " + friendlyErr(e)); }
+    setBusy("");
+  }
+
+  if (teachers === null) return <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>;
+
+  const match = (c) => {
+    if (q.trim() && String(c.name || "").indexOf(q.trim()) < 0) return false;
+    if (only === "mine") return mine.includes(c.id);
+    if (only === "others") return !mine.includes(c.id);
+    return true;
+  };
+  const all = allClasses();
+  const live = all.filter((c) => !isClassEnded(c)).filter(match);
+  const ended = all.filter((c) => isClassEnded(c)).filter(match);
+  const mineN = all.filter((c) => !isClassEnded(c) && mine.includes(c.id)).length;
+
+  const Row = ({ c, dim }) => {
+    const has = mine.includes(c.id);
+    const ts = teachersOf(c.id);
+    const nStu = (c.roster || []).filter((r) => !r.teacher).length;
+    return (
+      <div className="cm-day" style={{cursor: "default", opacity: dim ? .65 : 1}}>
+        <div className="cm-day-left" style={{minWidth: 0}}>
+          <span className="cm-day-date">{c.name}</span>
+          <span className="cm-day-sub">
+            {isIndividual(c) ? "개별진도" : "일반"} · 학생 {nStu}명
+            {c.endDate ? " · " + c.endDate + " 종강" : ""}
+            {" · 담당 "}{ts.length ? ts.map((t) => t.name).join(", ") : <span style={{color: "#c2703f"}}>없음</span>}
+          </span>
+        </div>
+        <span style={{display: "flex", gap: 6, alignItems: "center", flexShrink: 0}}>
+          <button className={"cm-ab-tab" + (has ? " on" : "")} disabled={!!busy}
+            onClick={() => toggleMine(c)}>{busy === c.id ? "…" : (has ? "내 담당 ✓" : "내 담당에 넣기")}</button>
+          <button className="cm-link" style={{padding: 0, fontSize: 12}} onClick={() => onOpen(c)}>열기 ›</button>
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div ref={backRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 10}}>
+          <h2 className="cm-h2" style={{margin: 0}}>반 관리</h2>
+          <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
+        </div>
+        <div className="cm-hint" style={{marginBottom: 10}}>
+          <b>학원의 모든 반</b>이 여기 있어요. 내 수업·보강·위험신호·내신 참여표에는
+          <b> 내 담당 반만</b> 나옵니다. 여기서 담당을 넣고 빼세요.
+          <br/>담당이 아니어도 <b>열기</b>로 들어가서 볼 수 있고, 관리자라 고치는 것도 됩니다.
+        </div>
+        <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10}}>
+          <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 150}} placeholder="반 이름으로 찾기"
+            value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
+          <button className={"cm-ab-tab" + (only === "all" ? " on" : "")}
+            onClick={() => setOnly("all")}>전체 {all.filter((c) => !isClassEnded(c)).length}</button>
+          <button className={"cm-ab-tab" + (only === "mine" ? " on" : "")}
+            onClick={() => setOnly("mine")}>내 담당 {mineN}</button>
+          <button className={"cm-ab-tab" + (only === "others" ? " on" : "")}
+            onClick={() => setOnly("others")}>담당 아님 {all.filter((c) => !isClassEnded(c)).length - mineN}</button>
+        </div>
+        {live.length > 0 && (
+          <div style={{display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10}}>
+            {live.some((c) => !mine.includes(c.id)) && (
+              <button className="cm-link" style={{padding: 0, fontSize: 12}} disabled={!!busy}
+                onClick={() => bulkMine(true, live.filter((c) => !mine.includes(c.id)))}>
+                보이는 {live.filter((c) => !mine.includes(c.id)).length}개 담당에 넣기
+              </button>
+            )}
+            {live.some((c) => mine.includes(c.id)) && (
+              <button className="cm-link" style={{padding: 0, fontSize: 12, color: "#a5322d"}} disabled={!!busy}
+                onClick={() => bulkMine(false, live.filter((c) => mine.includes(c.id)))}>
+                보이는 {live.filter((c) => mine.includes(c.id)).length}개 담당에서 빼기
+              </button>
+            )}
+          </div>
+        )}
+        {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"} style={{marginBottom: 8}}>{msg}</div>}
+
+        <div className="cm-daylist">
+          {live.map((c) => <Row key={c.id} c={c} />)}
+          {live.length === 0 && <div className="cm-empty">해당하는 반이 없어요</div>}
+        </div>
+
+        {ended.length > 0 && (<>
+          <button className="cm-link" style={{marginTop: 10}} onClick={() => setShowEnded((v) => !v)}>
+            {showEnded ? "▾" : "▸"} 종강한 반 {ended.length}개
+          </button>
+          {showEnded && (
+            <div className="cm-daylist" style={{marginTop: 6}}>
+              {ended.map((c) => <Row key={c.id} c={c} dim />)}
+            </div>
+          )}
+        </>)}
+      </div>
     </div>
   );
 }
