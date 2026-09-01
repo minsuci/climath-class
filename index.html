@@ -234,6 +234,8 @@ select.cm-sheet-in{cursor:pointer; appearance:none; -webkit-appearance:none;}
 .cm-sheet{table-layout:fixed; width:100%; min-width:600px;}
 .cm-sheet th.cm-sort{cursor:pointer; user-select:none;}
 .cm-sheet th.cm-sort:hover{background:#efe9e0;}
+.cm-ab-table th.cm-sort{cursor:pointer; user-select:none; white-space:nowrap;}
+.cm-ab-table th.cm-sort:hover{background:#efe9e0;}
 .cm-sheet-ar{font-size:9px; color:var(--navy);}
 .cm-sheet-ar.off{color:#cec5b7;}
 /* 아는 학교가 아니면 표시해둔다 — "경기"처럼 후보가 갈려 못 맞춘 것도 여기 걸린다 */
@@ -3653,6 +3655,8 @@ function ExamBoard({ onBack }) {
   const [entry, setEntry] = useState(null);   // 대신 입력 중인 {cid, st, cur}
   const [sched, setSched] = useState({});     // 학교 일정 (appConfig/schoolTerms)
   const [people, setPeople] = useState([]);   // 학생 명단 (students) — 이름·학교·학년의 원본
+  const [teachers, setTeachers] = useState([]);   // 담임 이름을 붙이려고. 이름만 온다
+  const [sort, setSort] = useState(null);         // { key, dir } · null 이면 원래 순서
   const [filling, setFilling] = useState(false);
   const [fillMsg, setFillMsg] = useState("");
   const backRef = useSwipeBack(onBack);
@@ -3667,6 +3671,11 @@ function ExamBoard({ onBack }) {
   useEffect(() => listenSchools(setShared), []);
   useEffect(() => listenSchoolTerms(setSched), []);
   useEffect(() => listenStudents(setPeople, () => setPeople([])), []);
+  // ⚠ listTeachers() 는 규칙상 **관리자만** 읽을 수 있다(teachers 문서 나열).
+  //    담임 이름은 일반 선생님도 봐야 하므로 로그인 화면이 쓰는 쪽을 쓴다 — PIN 은 안 온다.
+  useEffect(() => {
+    authApi({ action: "teachers" }).then((r) => setTeachers(r.teachers || [])).catch(() => setTeachers([]));
+  }, []);
 
   useEffect(() => listenExamTerm((t) => { setTerm(t); setDraft(t); }), []);
   useEffect(() => {
@@ -3685,6 +3694,7 @@ function ExamBoard({ onBack }) {
       name: (w && w.name) || st.name || (v && v.name) || "",
       school: (w && w.school) || (v && v.school) || st.school || "",
       grade: (w && w.grade) || (v && v.grade) || st.grade || "",
+      homeroom: (w && w.homeroom) || "",
       linked: !!w,
     };
   }
@@ -3704,6 +3714,43 @@ function ExamBoard({ onBack }) {
   // 학생 명단에서 학년을 채워도 화면이 안 변해 "고쳐도 반영이 안 된다"로 보인다.
   const missGrade = missing.filter((x) => x.w.grade === grade);
   const missNoGrade = missing.filter((x) => !x.w.grade);
+
+  // ----- 정렬 -----
+  // 열 머리를 누르면 오름 → 내림 → 원래 순서(반 차례 · 명단 차례)로 돈다.
+  // 빈 칸은 방향과 상관없이 늘 맨 아래 — 안 채운 사람을 찾으려고 정렬하는 게 아니다.
+  // 아래 두 표(달력 띠 · 상세)가 같은 목록을 쓰므로 여기서 한 번만 걸면 둘이 같이 따라간다.
+  // 따로 걸면 이름은 같은 줄에 있는데 날짜 칸이 다른 사람 것이 되어버린다.
+  const tName = (tid) => { const t = teachers.find((x) => x.tid === tid); return t ? t.name : ""; };
+  let sortedRows = inGrade;
+  if (sort) {
+    const keyOf = (x) => {
+      if (sort.key === "cls") return x.cls.name || "";
+      if (sort.key === "homeroom") return tName(x.w.homeroom);
+      if (sort.key === "start") return x.v.start || "";     // YYYY-MM-DD 라 글자 순 = 날짜 순
+      if (sort.key === "math") return x.v.math || "";
+      return "";
+    };
+    const byName = (a, b) => String(a.w.name || "").localeCompare(String(b.w.name || ""), "ko");
+    sortedRows = inGrade.slice().sort((a, b) => {
+      const ka = keyOf(a), kb = keyOf(b);
+      if (!ka && !kb) return byName(a, b);
+      if (!ka) return 1;
+      if (!kb) return -1;
+      const c = ka.localeCompare(kb, "ko");
+      return (sort.dir === "desc" ? -c : c) || byName(a, b);
+    });
+  }
+  const sortTh = (key, label, extra) => {
+    const on = sort && sort.key === key;
+    return (
+      <th className="cm-sort" style={extra}
+        onClick={() => setSort((v) => (!v || v.key !== key)
+          ? { key: key, dir: "asc" }
+          : (v.dir === "asc" ? { key: key, dir: "desc" } : null))}>
+        {label} <span className={"cm-sheet-ar" + (on ? "" : " off")}>{on ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+      </th>
+    );
+  };
 
   // 명단에서 안 잡히는 제출 — 그냥 두면 낸 사람은 냈다고 생각하는데 화면엔 없다.
   // 선생님 항목(teacher:true), 수강 종료, 명단에서 빠진 학생, id가 어긋난 경우가 여기 걸린다.
@@ -4046,6 +4093,10 @@ function ExamBoard({ onBack }) {
             <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 6}}>
               {Number(examMonth.slice(5))}월 1일 ~ {fmtDate(strip[strip.length - 1])} (마지막 복귀일까지)
               · <b>등원 회차는 {Number(examMonth.slice(5))}월 전체</b> 기준이에요
+              {sort
+                ? <> · 아래 표에서 <b>{({cls: "반", homeroom: "담임", start: "내신기간", math: "수학시험"})[sort.key]}</b>{" "}
+                    {sort.dir === "asc" ? "오름차순" : "내림차순"}으로 정렬 중 (두 표가 같이 따라가요)</>
+                : <> · 정렬은 <b>아래 표 머리글</b>을 누르세요</>}
             </div>
           )}
           {strip.length > 0 ? (
@@ -4072,7 +4123,7 @@ function ExamBoard({ onBack }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {inGrade.map(({ cls, st, v, w }) => {
+                  {sortedRows.map(({ cls, st, v, w }) => {
                     const cnt = attendCount(cls, st, v);
                     return (
                     <tr key={cls.id + st.id}>
@@ -4116,11 +4167,17 @@ function ExamBoard({ onBack }) {
             <div className="cm-ab-wrap" data-no-swipe>
               <table className="cm-ab-table">
                 <thead><tr>
-                  <th className="cm-ab-name">이름</th><th>반</th><th>학교</th><th>내신기간</th><th>수학시험</th><th>직보</th>
+                  <th className="cm-ab-name">이름</th>
+                  {sortTh("cls", "반")}
+                  {sortTh("homeroom", "담임")}
+                  <th>학교</th>
+                  {sortTh("start", "내신기간")}
+                  {sortTh("math", "수학시험")}
+                  <th>직보</th>
                   <th style={{minWidth: 118}}>복귀 <span style={{fontWeight: 400, color: "#8a7f72"}}>(선생님이 정함)</span></th><th>비고</th>
                 </tr></thead>
                 <tbody>
-                  {inGrade.map(({ cls, st, v, w }) => (
+                  {sortedRows.map(({ cls, st, v, w }) => (
                     <tr key={cls.id + st.id}>
                       <td className="cm-ab-name">{w.name}
                         <br/><button className="cm-link" style={{padding: 0, fontSize: 11}}
@@ -4131,6 +4188,7 @@ function ExamBoard({ onBack }) {
                         {v.byTeacher && <span style={{fontSize: 10, color: "#8a7f72"}}> · 대신 입력</span>}
                       </td>
                       <td>{cls.name}</td>
+                      <td style={{color: w.homeroom ? undefined : "#b9b0a2"}}>{tName(w.homeroom) || "-"}</td>
                       <td style={w.school && v.school !== w.school ? {background: "#f6e7df", color: "#a8562c"} : undefined}
                         title={w.school && v.school !== w.school ? "학생 명단에는 " + w.school : undefined}>
                         {v.school}{w.school && v.school !== w.school ? " ⚠" : ""}
