@@ -3659,6 +3659,8 @@ function ExamBoard({ onBack }) {
   const [sort, setSort] = useState(null);         // { key, dir } · null 이면 원래 순서
   const [sel, setSel] = useState({});            // 복귀일 일괄 지정 { "반id|학생id": true }
   const [backDraft, setBackDraft] = useState("");
+  const [linkMsg, setLinkMsg] = useState("");
+  const [rev, setRev] = useState(0);   // 반 명단을 고친 뒤 다시 그리게 하는 counter
   const [filling, setFilling] = useState(false);
   const [fillMsg, setFillMsg] = useState("");
   const backRef = useSwipeBack(onBack);
@@ -3764,6 +3766,25 @@ function ExamBoard({ onBack }) {
   const selRows = sortedRows.filter((x) => sel[rowKey(x)]);
   const noBack = sortedRows.filter((x) => !x.v.back);
   const allSel = sortedRows.length > 0 && selRows.length === sortedRows.length;
+
+  // ----- 학생 명단과 안 이어진 반 명단 줄 -----
+  // 참여표의 사람 목록은 학생 명단이 아니라 **반 명단**에서 나온다. 반 명단 줄이 pid 로
+  // 학생 명단 사람을 가리키는데, 그 연결이 없으면 학교·학년·담임이 안 따라오고
+  // 학년 탭 어디에도 안 잡혀 집계에서 통째로 빠진다.
+  // 학생 명단에서 사람을 지워도 반 명단 줄은 남으므로 여기서 계속 보인다.
+  const unlinked = got.concat(missing).filter((x) => !x.w.linked);
+  const peopleByName = {};
+  people.forEach((p) => { (peopleByName[normName(p.name)] = peopleByName[normName(p.name)] || []).push(p); });
+  const candOf = (x) => peopleByName[normName(x.st.name)] || [];
+  // 이름이 학생 명단에 **딱 하나** 있을 때만 자동으로 잇는다. 동명이인은 사람이 골라야 한다 —
+  // 엉뚱한 사람에게 이으면 학교·학년·내신 일정이 통째로 남의 것이 된다.
+  const autoLinkable = unlinked.filter((x) => candOf(x).length === 1);
+  const unlinkedByCls = [];
+  unlinked.forEach((x) => {
+    let g = unlinkedByCls.find((y) => y.cls.id === x.cls.id);
+    if (!g) { g = { cls: x.cls, items: [] }; unlinkedByCls.push(g); }
+    g.items.push(x);
+  });
 
   // 명단에서 안 잡히는 제출 — 그냥 두면 낸 사람은 냈다고 생각하는데 화면엔 없다.
   // 선생님 항목(teacher:true), 수강 종료, 명단에서 빠진 학생, id가 어긋난 경우가 여기 걸린다.
@@ -3876,6 +3897,62 @@ function ExamBoard({ onBack }) {
       setFillMsg(k + "명 복귀일을 " + (value ? fmtDate(value) + "로 정했어요 ✓" : "지웠어요 ✓"));
       setSel({});
     } catch (e) { setFillMsg("바꾸다 멈췄어요 (" + k + "명까지): " + friendlyErr(e)); }
+    setFilling(false);
+  }
+
+  // ----- 잇기 -----
+  async function linkOne(x) {
+    if (filling) return;
+    const cand = candOf(x);
+    if (cand.length > 1) {
+      alert(x.st.name + " 은(는) 학생 명단에 " + cand.length + "명 있어요.\n\n" +
+        "동명이인은 여기서 못 고릅니다. 학생 명단에서 직접 이어주세요.");
+      return;
+    }
+    setFilling(true); setLinkMsg("");
+    try {
+      if (!cand.length) {
+        if (!confirm(x.st.name + " 은(는) 학생 명단에 없어요.\n\n" +
+          "학생 명단에 새로 만들고 " + x.cls.name + " 의 이 줄에 이을까요?\n" +
+          "(학교·학년·담임은 나중에 학생 명단에서 넣으면 돼요)")) { setFilling(false); return; }
+        const pid = await saveStudent(null, { name: x.st.name, school: x.st.school || "",
+                                              grade: x.st.grade || "", homeroom: "" });
+        await linkRosterToStudent(x.cls.id, x.st.id, { pid: pid, school: x.st.school || "", grade: x.st.grade || "" });
+        setLinkMsg(x.st.name + " — 학생 명단에 만들고 이었어요 ✓");
+      } else {
+        await linkRosterToStudent(x.cls.id, x.st.id, cand[0]);
+        setLinkMsg(x.st.name + " 이었어요 ✓");
+      }
+      setRev((v) => v + 1);
+    } catch (e) { setLinkMsg("잇지 못했어요: " + friendlyErr(e)); }
+    setFilling(false);
+  }
+  async function linkAllSameName() {
+    if (!autoLinkable.length || filling) return;
+    if (!confirm("이름이 학생 명단과 정확히 하나 맞는 " + autoLinkable.length + "명을 잇습니다.\n" +
+      "동명이인과 명단에 아예 없는 사람은 건너뜁니다. 계속할까요?")) return;
+    setFilling(true); setLinkMsg("");
+    let k = 0;
+    try {
+      for (const x of autoLinkable) { await linkRosterToStudent(x.cls.id, x.st.id, candOf(x)[0]); k++; }
+      setLinkMsg(k + "명 이었어요 ✓");
+      setRev((v) => v + 1);
+    } catch (e) { setLinkMsg("잇다 멈췄어요 (" + k + "명까지): " + friendlyErr(e)); }
+    setFilling(false);
+  }
+  // 반 명단에 학생으로 들어간 선생님을 선생님 항목으로. 반 설정에 있는 것과 같은 동작이다.
+  async function markTeacher(x) {
+    if (filling) return;
+    if (!confirm(x.st.name + " 님을 " + x.cls.name + " 의 선생님 항목으로 바꿀까요?\n\n" +
+      "출석부 · 과제 · 점수 · 보고서 · 내신 참여표의 학생 목록에서 빠져요.\n" +
+      "지금까지 쌓인 기록은 지워지지 않습니다.")) return;
+    setFilling(true); setLinkMsg("");
+    try {
+      const next = (x.cls.roster || []).map((r) => (r.id === x.st.id ? { ...r, teacher: true } : r));
+      await saveClassRoster(x.cls.id, next);
+      setLinkMsg(x.st.name + " 님을 선생님 항목으로 바꿨어요 ✓");
+      setRev((v) => v + 1);
+    } catch (e) { setLinkMsg("바꾸지 못했어요: " + friendlyErr(e)); }
     setFilling(false);
   }
 
@@ -4022,6 +4099,57 @@ function ExamBoard({ onBack }) {
           </>)}
         </div>
         {!term && <div className="cm-hint">회차를 열면 학생 화면에 <b>내신</b> 탭이 생겨요. 담당 반 전체가 여기 모입니다.</div>}
+
+        {term && (unlinked.length > 0 || linkMsg) && (
+          <div style={{background: "#f6e7df", border: "1px solid #e6cbb9", borderRadius: 12,
+               padding: "12px 14px", marginBottom: 12}}>
+            <div style={{fontSize: 13, color: "#a8562c", fontWeight: 700, marginBottom: 6}}>
+              학생 명단에 없는 사람 {unlinked.length}명
+            </div>
+            <div style={{fontSize: 12, color: "#a8562c", opacity: .85, lineHeight: 1.6, marginBottom: 8}}>
+              반 명단에만 있고 <b>학생 명단과 안 이어진</b> 줄이에요. 학교·학년·담임이 안 따라오고,
+              <b> 학년 탭 어디에도 안 잡혀서 집계에서 빠집니다.</b>
+              학생 명단에서 사람을 지워도 반 명단 줄은 남기 때문에 여기 계속 보여요.
+            </div>
+            <div style={{display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8}}>
+              {autoLinkable.length > 0 && (
+                <button className="cm-btn cm-btn-primary" disabled={filling}
+                  style={{margin: 0, width: "auto", padding: "8px 13px", fontSize: 13}}
+                  onClick={linkAllSameName}>
+                  {filling ? "잇는 중…" : "이름이 같은 " + autoLinkable.length + "명 한 번에 잇기"}
+                </button>
+              )}
+              {linkMsg && <span style={{fontSize: 13, color: linkMsg.includes("✓") ? "#3f7d5e" : "#a5322d"}}>{linkMsg}</span>}
+            </div>
+            {unlinkedByCls.map((g) => (
+              <div key={g.cls.id} style={{marginBottom: 6}}>
+                <div style={{fontSize: 11, color: "#a8562c", opacity: .75, marginBottom: 3}}>
+                  {g.cls.name} · {g.items.length}명
+                </div>
+                <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+                  {g.items.map((x) => {
+                    const n = candOf(x).length;
+                    return (
+                      <span key={x.cls.id + x.st.id}
+                        style={{display: "inline-flex", alignItems: "center", gap: 6, background: "#fff",
+                                border: "1px solid #e6cbb9", borderRadius: 999, padding: "4px 10px"}}>
+                        <b style={{fontSize: 13}}>{x.st.name}</b>
+                        <span style={{fontSize: 11, color: "#a8562c", opacity: .8}}>
+                          {n === 0 ? "명단에 없음" : (n === 1 ? "명단에 1명" : "동명이인 " + n + "명")}
+                        </span>
+                        <button className="cm-link" style={{padding: 0, fontSize: 12}} disabled={filling}
+                          onClick={() => linkOne(x)}>{n === 0 ? "만들어 잇기" : "잇기"}</button>
+                        <span style={{color: "#ded5c7"}}>·</span>
+                        <button className="cm-link" style={{padding: 0, fontSize: 12, color: "#5a6b82"}}
+                          disabled={filling} onClick={() => markTeacher(x)}>선생님</button>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {term && (fillable.length > 0 || offSched.length > 0 || fillMsg) && (
           <div style={{background: "#eef1f6", border: "1px solid #d8e0ea", borderRadius: 12,
