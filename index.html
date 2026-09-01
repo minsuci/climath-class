@@ -3657,6 +3657,8 @@ function ExamBoard({ onBack }) {
   const [people, setPeople] = useState([]);   // 학생 명단 (students) — 이름·학교·학년의 원본
   const [teachers, setTeachers] = useState([]);   // 담임 이름을 붙이려고. 이름만 온다
   const [sort, setSort] = useState(null);         // { key, dir } · null 이면 원래 순서
+  const [sel, setSel] = useState({});            // 복귀일 일괄 지정 { "반id|학생id": true }
+  const [backDraft, setBackDraft] = useState("");
   const [filling, setFilling] = useState(false);
   const [fillMsg, setFillMsg] = useState("");
   const backRef = useSwipeBack(onBack);
@@ -3676,6 +3678,9 @@ function ExamBoard({ onBack }) {
   useEffect(() => {
     authApi({ action: "teachers" }).then((r) => setTeachers(r.teachers || [])).catch(() => setTeachers([]));
   }, []);
+  // 학년 탭이나 회차가 바뀌면 보이는 줄이 통째로 달라진다. 고른 것을 들고 있으면
+  // 지금 화면에 없는 사람에게 복귀일이 들어간다.
+  useEffect(() => { setSel({}); }, [grade, term]);
 
   useEffect(() => listenExamTerm((t) => { setTerm(t); setDraft(t); }), []);
   useEffect(() => {
@@ -3751,6 +3756,14 @@ function ExamBoard({ onBack }) {
       </th>
     );
   };
+
+  // ----- 복귀일 일괄 지정 -----
+  // 고른 줄은 **지금 보이는 목록 안에서만** 센다. sel 에 옛 열쇠가 남아 있어도
+  // 화면에 없는 사람에게는 절대 쓰지 않는다.
+  const rowKey = (x) => x.cls.id + "|" + x.st.id;
+  const selRows = sortedRows.filter((x) => sel[rowKey(x)]);
+  const noBack = sortedRows.filter((x) => !x.v.back);
+  const allSel = sortedRows.length > 0 && selRows.length === sortedRows.length;
 
   // 명단에서 안 잡히는 제출 — 그냥 두면 낸 사람은 냈다고 생각하는데 화면엔 없다.
   // 선생님 항목(teacher:true), 수강 종료, 명단에서 빠진 학생, id가 어긋난 경우가 여기 걸린다.
@@ -3841,6 +3854,28 @@ function ExamBoard({ onBack }) {
       for (const x of offSched) { await saveExam(x.cls.id, term, x.st.id, schedFields(x.w, x.s, x.v)); n++; }
       setFillMsg(n + "명 맞췄어요 ✓");
     } catch (e) { setFillMsg("맞추다 멈췄어요 (" + n + "명까지): " + friendlyErr(e)); }
+    setFilling(false);
+  }
+
+  // 복귀일은 학교가 정하는 게 아니라 선생님이 정한다. 같은 반·같은 학교 학생 여럿이
+  // 같은 날 돌아오는 게 보통이라 한 줄씩 달력을 찍는 건 손이 너무 많이 간다.
+  // 이미 적힌 날짜를 덮어쓰게 되므로 몇 명이 덮이는지 이름까지 보여주고 묻는다.
+  async function applyBackBulk(value) {
+    if (!selRows.length || filling) return;
+    const over = selRows.filter((x) => x.v.back && x.v.back !== value);
+    if (!confirm("고른 " + selRows.length + "명의 복귀일을 " +
+      (value ? fmtDate(value) + " 로 정합니다." : "지웁니다.") + "\n" +
+      (over.length ? "\n이미 다른 날짜가 적힌 " + over.length + "명도 덮어써요 — " +
+        over.slice(0, 6).map((x) => x.w.name).join(" · ") +
+        (over.length > 6 ? " 외 " + (over.length - 6) + "명" : "") + "\n" : "") +
+      "\n계속할까요?")) return;
+    setFilling(true); setFillMsg("");
+    let k = 0;
+    try {
+      for (const x of selRows) { await saveExam(x.cls.id, term, x.st.id, { back: value }); k++; }
+      setFillMsg(k + "명 복귀일을 " + (value ? fmtDate(value) + "로 정했어요 ✓" : "지웠어요 ✓"));
+      setSel({});
+    } catch (e) { setFillMsg("바꾸다 멈췄어요 (" + k + "명까지): " + friendlyErr(e)); }
     setFilling(false);
   }
 
@@ -4164,9 +4199,58 @@ function ExamBoard({ onBack }) {
           </div>
 
           {inGrade.length > 0 && (
+            <div style={{background: selRows.length ? "#eef1f6" : "#faf8f4",
+                 border: "1px solid " + (selRows.length ? "#d8e0ea" : "var(--line)"),
+                 borderRadius: 12, padding: "10px 12px", marginBottom: 8,
+                 display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center"}}>
+              <span style={{fontSize: 13, fontWeight: 700, color: "var(--navy)"}}>복귀일 한 번에 정하기</span>
+              {selRows.length === 0 ? (
+                <>
+                  <span style={{fontSize: 12, color: "var(--muted)"}}>
+                    아래 표 왼쪽 칸을 체크하고 날짜를 넣으면 고른 학생에게 한꺼번에 들어가요.
+                  </span>
+                  {noBack.length > 0 && (
+                    <button className="cm-link" style={{padding: 0, fontSize: 12}} disabled={filling}
+                      onClick={() => { const m = {}; noBack.forEach((x) => { m[rowKey(x)] = true; }); setSel(m); }}>
+                      아직 안 정한 {noBack.length}명 고르기
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span style={{fontSize: 13, color: "var(--navy)"}}><b>{selRows.length}명</b> 고름</span>
+                  <input type="date" value={backDraft} disabled={filling}
+                    style={{fontSize: 13, border: "1px solid var(--line)", borderRadius: 6,
+                            padding: "5px 6px", fontFamily: "inherit"}}
+                    onChange={(e) => setBackDraft(e.target.value)} />
+                  <button className="cm-btn cm-btn-primary" disabled={filling || !backDraft}
+                    style={{margin: 0, width: "auto", padding: "7px 12px", fontSize: 13}}
+                    onClick={() => applyBackBulk(backDraft)}>
+                    {filling ? "바꾸는 중…" : "이 날짜로 지정"}
+                  </button>
+                  <button className="cm-btn cm-btn-ghost" disabled={filling}
+                    style={{margin: 0, width: "auto", padding: "7px 12px", fontSize: 13}}
+                    onClick={() => applyBackBulk("")}>복귀일 지우기</button>
+                  <button className="cm-link" style={{padding: 0, fontSize: 12}} disabled={filling}
+                    onClick={() => setSel({})}>선택 해제</button>
+                </>
+              )}
+            </div>
+          )}
+
+          {inGrade.length > 0 && (
             <div className="cm-ab-wrap" data-no-swipe>
               <table className="cm-ab-table">
                 <thead><tr>
+                  <th style={{width: 30}}>
+                    <input type="checkbox" aria-label="보이는 학생 전체 고르기" disabled={filling}
+                      checked={allSel}
+                      ref={(el) => { if (el) el.indeterminate = selRows.length > 0 && !allSel; }}
+                      onChange={(e) => {
+                        if (!e.target.checked) { setSel({}); return; }
+                        const m = {}; sortedRows.forEach((x) => { m[rowKey(x)] = true; }); setSel(m);
+                      }} />
+                  </th>
                   <th className="cm-ab-name">이름</th>
                   {sortTh("cls", "반")}
                   {sortTh("homeroom", "담임")}
@@ -4178,7 +4262,17 @@ function ExamBoard({ onBack }) {
                 </tr></thead>
                 <tbody>
                   {sortedRows.map(({ cls, st, v, w }) => (
-                    <tr key={cls.id + st.id}>
+                    <tr key={cls.id + st.id} style={sel[cls.id + "|" + st.id] ? {background: "#eef1f6"} : undefined}>
+                      <td style={{textAlign: "center"}}>
+                        <input type="checkbox" aria-label={w.name + " 고르기"} disabled={filling}
+                          checked={!!sel[cls.id + "|" + st.id]}
+                          onChange={(e) => setSel((m) => {
+                            const k = cls.id + "|" + st.id;
+                            const nx = { ...m };
+                            if (e.target.checked) nx[k] = true; else delete nx[k];
+                            return nx;
+                          })} />
+                      </td>
                       <td className="cm-ab-name">{w.name}
                         <br/><button className="cm-link" style={{padding: 0, fontSize: 11}}
                           onClick={() => setEntry({ cls, st, cur: v })}>고치기</button>
