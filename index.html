@@ -770,6 +770,78 @@ async function fetchSchoolSchedule(school, from, to, kind) {
   return j || {};
 }
 
+// 나이스 불러오기는 **화면 밖에서 돈다.**
+// 학교마다 몇 초씩 걸려서, 화면에 매어두면 다 끝날 때까지 다른 일을 못 하고
+// 실수로 다른 메뉴를 누르면 하던 것이 통째로 날아간다.
+// 상태를 모듈에 두고 화면은 구독만 한다 — 나갔다 들어와도 이어서 보인다.
+const NEIS_JOB = { running: false, done: 0, total: 0, now: "", msg: "", diffs: [], stop: false, subs: [] };
+function neisSub(fn) {
+  NEIS_JOB.subs.push(fn);
+  fn(neisSnap());
+  return () => { const i = NEIS_JOB.subs.indexOf(fn); if (i >= 0) NEIS_JOB.subs.splice(i, 1); };
+}
+function neisSnap() {
+  const { subs, ...rest } = NEIS_JOB;
+  return { ...rest, diffs: NEIS_JOB.diffs.slice() };
+}
+function neisEmit() { const s = neisSnap(); NEIS_JOB.subs.slice().forEach((f) => { try { f(s); } catch (e) {} }); }
+function neisStop() { NEIS_JOB.stop = true; neisEmit(); }
+async function neisTakeDiff(term, d) {
+  await saveSchoolTerm(term, d.school, d.grade, { start: d.neis.start, end: d.neis.end });
+  NEIS_JOB.diffs = NEIS_JOB.diffs.filter((x) => !(x.school === d.school && x.grade === d.grade));
+  neisEmit();
+}
+
+// targets: [{school, grade, cur:{start,end}}] — 부를 학교는 호출부가 이미 골라 넘긴다
+async function runNeisPull(term, targets, from, to, kind) {
+  if (NEIS_JOB.running) return;
+  const names = Array.from(new Set(targets.map((t) => t.school)));
+  Object.assign(NEIS_JOB, { running: true, done: 0, total: names.length, now: "",
+                            msg: "", diffs: [], stop: false });
+  neisEmit();
+  let filled = 0, same = 0;
+  const notFound = [], noExam = [], noData = [];
+  try {
+    for (const school of names) {
+      if (NEIS_JOB.stop) break;
+      NEIS_JOB.now = school; neisEmit();
+      let r;
+      try { r = await fetchSchoolSchedule(school, from, to, kind); }
+      catch (e) { notFound.push(school + "(" + e.message + ")"); NEIS_JOB.done++; neisEmit(); continue; }
+      if (r.error) notFound.push(school);
+      else if (!r.hasAny) noData.push(school);
+      else {
+        for (const t of targets.filter((x) => x.school === school)) {
+          const g = r.byGrade && r.byGrade[t.grade];
+          if (!g) { noExam.push(t.school + " " + t.grade); continue; }
+          if (t.cur.start === g.start && t.cur.end === g.end) { same++; continue; }
+          // 이미 적어둔 것이 다르면 덮지 않는다. 학교가 바꿨을 수도, 선생님이 맞게 고쳤을 수도 있다.
+          if (t.cur.start || t.cur.end) {
+            NEIS_JOB.diffs.push({ school: t.school, grade: t.grade, mine: { ...t.cur },
+                                  neis: { start: g.start, end: g.end }, name: g.name });
+            continue;
+          }
+          try { await saveSchoolTerm(term, t.school, t.grade, { start: g.start, end: g.end }); filled++; }
+          catch (e) { notFound.push(t.school + "(저장 실패)"); }
+        }
+      }
+      NEIS_JOB.done++; neisEmit();
+    }
+    const bits = [];
+    if (NEIS_JOB.stop) bits.push("멈췄어요");
+    if (filled) bits.push(filled + "칸 채웠어요 ✓");
+    if (same) bits.push("이미 같은 것 " + same + "칸");
+    if (NEIS_JOB.diffs.length) bits.push("다른 것 " + NEIS_JOB.diffs.length + "칸 (아래 확인)");
+    if (noExam.length) bits.push("이 기간에 시험이 안 올라온 곳: " + noExam.join(", "));
+    if (noData.length) bits.push("나이스에 학사일정을 안 올리는 학교: " + noData.join(", "));
+    if (notFound.length) bits.push("나이스에서 못 찾은 학교: " + notFound.join(", "));
+    NEIS_JOB.msg = bits.join(" · ") || "가져올 게 없었어요";
+  } catch (e) {
+    NEIS_JOB.msg = "불러오지 못했어요: " + friendlyErr(e);
+  }
+  NEIS_JOB.running = false; NEIS_JOB.now = ""; neisEmit();
+}
+
 // 그 회차에 적어둔 것만 골라낸다
 function schoolTermsOf(all, term) {
   const pre = termKey(term) + "__";
@@ -3195,9 +3267,9 @@ function SchoolTermBoard({ onBack }) {
   const [from, setFrom] = useState(plus(today, -7));
   const [to, setTo] = useState(plus(today, 75));
   const [kind, setKind] = useState("중간");
-  const [pulling, setPulling] = useState(false);
-  const [pullMsg, setPullMsg] = useState("");
-  const [diffs, setDiffs] = useState([]);      // 이미 적어둔 것과 다른 것
+  const [redo, setRedo] = useState(false);     // 이미 채운 것도 다시 확인할까
+  const [job, setJob] = useState(neisSnap());  // 화면 밖에서 도는 불러오기
+  useEffect(() => neisSub(setJob), []);
   const backRef = useSwipeBack(onBack);
   // 날짜 칸이 여덟이라 좁은 컬럼에 안 들어간다 (참여표·안내문과 같은 처리)
   useEffect(() => {
@@ -3239,55 +3311,27 @@ function SchoolTermBoard({ onBack }) {
 
   // 학사일정에는 "2학기 중간고사"까지만 있다. 과목별 시간표는 안 들어가므로
   // **수학 시험 날짜는 여기서 못 채운다** — 그건 계속 손으로 넣거나 학생이 낸다.
-  async function pullFromNeis() {
-    if (pulling) return;
-    const names = Array.from(new Set(list.filter((r) => r.grade !== "중3").map((r) => r.school)));
-    if (!names.length) { setMsg("불러올 학교가 없어요"); return; }
-    setPulling(true); setPullMsg(""); setDiffs([]); setMsg("");
-    let filled = 0, same = 0;
-    const notFound = [], noExam = [], noData = [], changed = [];
-    try {
-      for (let i = 0; i < names.length; i++) {
-        const school = names[i];
-        setPullMsg("불러오는 중… " + (i + 1) + "/" + names.length + " · " + school);
-        let r;
-        try { r = await fetchSchoolSchedule(school, from, to, kind); }
-        catch (e) { notFound.push(school + "(" + e.message + ")"); continue; }
-        if (r.error) { notFound.push(school); continue; }
-        if (!r.hasAny) { noData.push(school); continue; }
-        for (const row of list.filter((x) => x.school === school && x.grade !== "중3")) {
-          const g = r.byGrade && r.byGrade[row.grade];
-          if (!g) { noExam.push(row.school + " " + row.grade); continue; }
-          const cur = all[schedKey(term, row.school, row.grade)] || {};
-          if (cur.start === g.start && cur.end === g.end) { same++; continue; }
-          // 이미 적어둔 것이 다르면 덮지 않는다. 학교가 바꿨을 수도, 선생님이 맞게 고쳤을 수도 있다.
-          if (cur.start || cur.end) {
-            changed.push({ school: row.school, grade: row.grade,
-                           mine: { start: cur.start || "", end: cur.end || "" },
-                           neis: { start: g.start, end: g.end }, name: g.name });
-            continue;
-          }
-          await saveSchoolTerm(term, row.school, row.grade, { start: g.start, end: g.end });
-          filled++;
-        }
-      }
-      setDiffs(changed);
-      const bits = [];
-      if (filled) bits.push(filled + "칸 채웠어요 ✓");
-      if (same) bits.push("이미 같은 것 " + same + "칸");
-      if (changed.length) bits.push("다른 것 " + changed.length + "칸 (아래 확인)");
-      if (noExam.length) bits.push("이 기간에 시험이 안 올라온 곳: " + noExam.join(", "));
-      if (noData.length) bits.push("나이스에 학사일정을 안 올리는 학교: " + noData.join(", "));
-      if (notFound.length) bits.push("나이스에서 못 찾은 학교: " + notFound.join(", "));
-      setPullMsg(bits.join(" · ") || "가져올 게 없었어요");
-    } catch (e) { setPullMsg("불러오지 못했어요: " + friendlyErr(e)); }
-    setPulling(false);
+  // 채울 게 남은 줄만 고른다. 이미 다 적힌 학교는 아예 부르지 않는다 —
+  // 학교 하나에 몇 초씩 걸려서, 다 부르면 이미 끝난 일에 시간을 다 쓴다.
+  function pullTargets() {
+    return list.filter((r) => {
+      if (r.grade === "중3") return false;
+      const cur = all[schedKey(term, r.school, r.grade)] || {};
+      return redo || !(cur.start && cur.end);
+    }).map((r) => {
+      const cur = all[schedKey(term, r.school, r.grade)] || {};
+      return { school: r.school, grade: r.grade, cur: { start: cur.start || "", end: cur.end || "" } };
+    });
+  }
+  function pullFromNeis() {
+    const t = pullTargets();
+    if (!t.length) { setMsg(redo ? "불러올 학교가 없어요" : "빈 칸이 없어요. 다시 확인하려면 아래를 켜주세요."); return; }
+    setMsg("");
+    runNeisPull(term, t, from, to, kind);
   }
   async function takeNeis(d) {
-    try {
-      await saveSchoolTerm(term, d.school, d.grade, { start: d.neis.start, end: d.neis.end });
-      setDiffs((v) => v.filter((x) => !(x.school === d.school && x.grade === d.grade)));
-    } catch (e) { setMsg("바꾸지 못했어요: " + friendlyErr(e)); }
+    try { await neisTakeDiff(term, d); }
+    catch (e) { setMsg("바꾸지 못했어요: " + friendlyErr(e)); }
   }
 
   async function addRow() {
@@ -3340,32 +3384,52 @@ function SchoolTermBoard({ onBack }) {
             </div>
             <div style={{fontSize: 12, color: "var(--muted)", lineHeight: 1.6, marginBottom: 8}}>
               학교가 나이스에 올린 일정에서 <b>내신 기간</b>을 찾아 빈 칸을 채워요.
-              이미 적어둔 칸은 덮지 않고 다른 것만 알려드립니다.
+              <b>이미 채운 학교는 건너뜁니다.</b> 다른 화면으로 가도 계속 돌아요.
               <br/><b>수학 시험 날짜는 못 가져와요</b> — 학사일정에는 과목별 시간표가 없어요.
             </div>
             <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
               <input type="date" className="cm-sheet-in" style={{width: 140}} value={from}
-                onChange={(e) => setFrom(e.target.value)} />
+                onChange={(e) => setFrom(e.target.value)} disabled={job.running} />
               <span style={{color: "var(--muted)"}}>~</span>
               <input type="date" className="cm-sheet-in" style={{width: 140}} value={to}
-                onChange={(e) => setTo(e.target.value)} />
-              <select className="cm-sheet-in" style={{width: 88}} value={kind} onChange={(e) => setKind(e.target.value)}>
+                onChange={(e) => setTo(e.target.value)} disabled={job.running} />
+              <select className="cm-sheet-in" style={{width: 88}} value={kind} disabled={job.running}
+                onChange={(e) => setKind(e.target.value)}>
                 <option value="중간">중간</option>
                 <option value="기말">기말</option>
                 <option value="">전부</option>
               </select>
-              <button className="cm-btn cm-btn-primary" disabled={pulling || !list.length}
-                style={{margin: 0, width: "auto", padding: "9px 14px", fontSize: 13}}
-                onClick={pullFromNeis}>{pulling ? "불러오는 중…" : "불러오기"}</button>
+              {job.running ? (
+                <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "9px 14px", fontSize: 13}}
+                  onClick={neisStop}>멈추기</button>
+              ) : (
+                <button className="cm-btn cm-btn-primary" disabled={!list.length}
+                  style={{margin: 0, width: "auto", padding: "9px 14px", fontSize: 13}}
+                  onClick={pullFromNeis}>불러오기{pullTargets().length ? " (" + Array.from(new Set(pullTargets().map((x) => x.school))).length + "곳)" : ""}</button>
+              )}
+              <label style={{fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 4}}>
+                <input type="checkbox" checked={redo} disabled={job.running}
+                  onChange={(e) => setRedo(e.target.checked)} />
+                이미 채운 것도 다시 확인
+              </label>
             </div>
-            {pullMsg && <div style={{fontSize: 12, marginTop: 8,
-                 color: pullMsg.includes("✓") ? "#3f7d5e" : "#a8562c", lineHeight: 1.6}}>{pullMsg}</div>}
-            {diffs.length > 0 && (
+            {job.running && (
+              <div style={{fontSize: 12, marginTop: 8, color: "var(--navy)"}}>
+                불러오는 중… {job.done}/{job.total}{job.now ? " · " + job.now : ""}
+                <div style={{height: 4, background: "#d8e0ea", borderRadius: 3, marginTop: 5, overflow: "hidden"}}>
+                  <div style={{height: "100%", width: (job.total ? Math.round(job.done / job.total * 100) : 0) + "%",
+                       background: "var(--navy)", transition: "width .25s"}} />
+                </div>
+              </div>
+            )}
+            {!job.running && job.msg && <div style={{fontSize: 12, marginTop: 8,
+                 color: job.msg.includes("✓") ? "#3f7d5e" : "#a8562c", lineHeight: 1.6}}>{job.msg}</div>}
+            {job.diffs.length > 0 && (
               <div style={{marginTop: 10, borderTop: "1px solid #d8e0ea", paddingTop: 8}}>
                 <div style={{fontSize: 12, color: "#a8562c", marginBottom: 6}}>
                   적어둔 것과 나이스가 달라요. 바꾸려면 누르세요.
                 </div>
-                {diffs.map((d) => (
+                {job.diffs.map((d) => (
                   <div key={d.school + d.grade} style={{fontSize: 12, padding: "3px 0", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center"}}>
                     <b>{d.school} {d.grade}</b>
                     <span style={{color: "#8a7f72"}}>지금 {shortDate(d.mine.start) || "-"}~{shortDate(d.mine.end) || "-"}</span>
