@@ -748,7 +748,9 @@ function listenSchoolTerms(cb) {
 // (시작 → 끝을 빠르게 이어 고치면 시작이 날아간다).
 async function saveSchoolTerm(term, school, grade, v) {
   const one = { term: term, school: school, grade: grade, updated: Date.now() };
-  ["start", "end", "math", "back"].forEach((k) => {
+  // label = 그 회차에 이 학교·학년이 실제로 보는 시험 이름("2학기 중간고사", "졸업고사").
+  // 중3은 중간 없이 졸업고사만 보는 학교가 많아서, 회차 이름만으로는 뭘 보는지 알 수 없다.
+  ["start", "end", "math", "back", "label"].forEach((k) => {
     if (v && v[k] !== undefined) one[k] = v[k];
   });
   await schoolTermsDoc().set({ [schedKey(term, school, grade)]: one }, { merge: true });
@@ -791,7 +793,7 @@ function neisSnap() {
 function neisEmit() { const s = neisSnap(); NEIS_JOB.subs.slice().forEach((f) => { try { f(s); } catch (e) {} }); }
 function neisStop() { NEIS_JOB.stop = true; neisEmit(); }
 async function neisTakeDiff(term, d) {
-  await saveSchoolTerm(term, d.school, d.grade, { start: d.neis.start, end: d.neis.end });
+  await saveSchoolTerm(term, d.school, d.grade, { start: d.neis.start, end: d.neis.end, label: d.name || "" });
   NEIS_JOB.diffs = NEIS_JOB.diffs.filter((x) => !(x.school === d.school && x.grade === d.grade));
   neisEmit();
 }
@@ -828,7 +830,7 @@ async function runNeisPull(term, targets, from, to, kind) {
                                   neis: { start: g.start, end: g.end }, name: g.name });
             continue;
           }
-          try { await saveSchoolTerm(term, t.school, t.grade, { start: g.start, end: g.end }); filled++; }
+          try { await saveSchoolTerm(term, t.school, t.grade, { start: g.start, end: g.end, label: g.name || "" }); filled++; }
           catch (e) { notFound.push(t.school + "(저장 실패)"); }
         }
       }
@@ -3334,6 +3336,9 @@ function SchoolTermBoard({ onBack }) {
   const [msg, setMsg] = useState("");
   const [addS, setAddS] = useState("");
   const [addG, setAddG] = useState("고1");
+  // 중학교와 고등학교는 따로 본다. 시험 시기가 아예 달라서(중3은 졸업고사) 한 표에
+  // 섞으면 불러오기 기간도 같이 못 잡는다.
+  const [level, setLevel] = useState("고");
   // 나이스에서 불러오기
   const today = new Date();
   const plus = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return ymd(x); };
@@ -3381,6 +3386,12 @@ function SchoolTermBoard({ onBack }) {
   const list = Object.keys(rows).map((k) => rows[k]).sort((a, b) =>
     a.school.localeCompare(b.school, "ko") || (GRADES.indexOf(a.grade) - GRADES.indexOf(b.grade)));
 
+  const isMid = (g) => String(g || "").startsWith("중");
+  const shown = list.filter((r) => isMid(r.grade) === (level === "중"));
+  const midN = list.filter((r) => isMid(r.grade)).length;
+  const highN = list.length - midN;
+  const levelGrades = GRADES.filter((g) => isMid(g) === (level === "중"));
+
   const done = list.filter((r) => { const v = all[schedKey(term, r.school, r.grade)]; return v && v.start && v.end; });
   const coveredN = done.reduce((a, r) => a + r.n, 0);
   const noSchool = people.filter((x) => !x.school || !x.grade).length;
@@ -3390,8 +3401,10 @@ function SchoolTermBoard({ onBack }) {
   // 채울 게 남은 줄만 고른다. 이미 다 적힌 학교는 아예 부르지 않는다 —
   // 학교 하나에 몇 초씩 걸려서, 다 부르면 이미 끝난 일에 시간을 다 쓴다.
   function pullTargets() {
-    return list.filter((r) => {
-      if (r.grade === "중3") return false;
+    // 지금 보고 있는 급만 부른다. 중학교와 고등학교는 시험 기간이 달라서
+    // 한 번에 부르면 어느 한쪽은 반드시 빗나간다.
+    // (예전엔 여기서 중3을 통째로 걸렀다 — 서버가 중학교를 못 찾던 때의 흔적이다)
+    return shown.filter((r) => {
       const cur = all[schedKey(term, r.school, r.grade)] || {};
       return redo || !(cur.start && cur.end);
     }).map((r) => {
@@ -3606,6 +3619,17 @@ function SchoolTermBoard({ onBack }) {
           <datalist id="cm-sched-schools">
             {schoolOpts.map((x) => <option key={x} value={x} />)}
           </datalist>
+          <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", margin: "10px 0 8px"}}>
+            <button className={"cm-ab-tab" + (level === "고" ? " on" : "")}
+              onClick={() => { setLevel("고"); setAddG("고1"); }}>고등학교 {highN}</button>
+            <button className={"cm-ab-tab" + (level === "중" ? " on" : "")}
+              onClick={() => { setLevel("중"); setAddG("중3"); }}>중학교 {midN}</button>
+            <span style={{fontSize: 11, color: "var(--muted)"}}>
+              {level === "중"
+                ? "중3은 중간 없이 졸업고사만 보는 학교가 많아요. 불러오면 시험 이름이 그대로 들어갑니다."
+                : "불러오기 기간도 지금 보는 쪽만 부릅니다."}
+            </span>
+          </div>
           <div className="cm-ab-wrap" data-no-swipe>
             <table className="cm-ab-table cm-sched">
               <thead>
@@ -3613,6 +3637,7 @@ function SchoolTermBoard({ onBack }) {
                   <th className="cm-ab-name" style={{width: 110}}>학교</th>
                   <th style={{width: 56}}>학년</th>
                   <th style={{width: 50}}>학생</th>
+                  <th style={{width: 116}}>시험</th>
                   <th style={{width: 126}}>내신 시작</th>
                   <th style={{width: 126}}>내신 끝</th>
                   <th style={{width: 126}}>수학시험</th>
@@ -3623,12 +3648,13 @@ function SchoolTermBoard({ onBack }) {
                 </tr>
               </thead>
               <tbody>
-                {list.length === 0 && (
-                  <tr><td colSpan={10} style={{color: "var(--muted)", padding: 14}}>
+                {shown.length === 0 && (
+                  <tr><td colSpan={11} style={{color: "var(--muted)", padding: 14}}>
+                    {level === "중" ? "중학교 줄이 없어요. " : ""}
                     학생 명단에 학교·학년을 넣으면 여기 줄이 생겨요. 아래에서 직접 더할 수도 있어요.
                   </td></tr>
                 )}
-                {list.map((r) => (
+                {shown.map((r) => (
                   <SchoolTermRow key={r.school + "|" + r.grade} term={term} row={r}
                     cur={all[schedKey(term, r.school, r.grade)] || null} onMsg={setMsg} />
                 ))}
@@ -3640,10 +3666,10 @@ function SchoolTermBoard({ onBack }) {
                   </td>
                   <td style={{padding: 3}}>
                     <select className="cm-sheet-in" value={addG} onChange={(e) => setAddG(e.target.value)}>
-                      {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+                      {levelGrades.map((g) => <option key={g} value={g}>{g}</option>)}
                     </select>
                   </td>
-                  <td colSpan={8} style={{textAlign: "left", padding: "3px 6px"}}>
+                  <td colSpan={9} style={{textAlign: "left", padding: "3px 6px"}}>
                     {addS.trim()
                       ? <button className="cm-link" onClick={addRow}>{matchSchool(addS, schoolOpts)} {addG} 줄 만들기</button>
                       : <span style={{fontSize: 12, color: "#b6ab9b"}}>학생이 아직 없는 학교도 미리 적어둘 수 있어요</span>}
@@ -3696,6 +3722,15 @@ function SchoolTermRow({ term, row, cur, onMsg }) {
       <td className="cm-ab-name" style={cell}>{row.school}</td>
       <td style={cell}>{row.grade}</td>
       <td style={{ ...cell, color: row.n ? "var(--navy)" : "#b6ab9b" }}>{row.n}명</td>
+      {/* 나이스에서 온 시험 이름. 손으로도 고친다 — "졸업고사"인지 "2학기 중간고사"인지가
+          중3에서는 회차 이름만으로 구별이 안 된다. */}
+      <td style={{ ...cell, padding: 3 }}>
+        <input className="cm-sheet-in" defaultValue={v.label || ""} disabled={busy}
+          placeholder={row.grade === "중3" ? "졸업고사?" : "중간고사"}
+          title={v.label || ""}
+          style={{fontSize: 11, color: /졸업/.test(v.label || "") ? "#a8562c" : undefined}}
+          onBlur={(e) => { if ((e.target.value || "") !== (v.label || "")) patch({ label: e.target.value.trim() }); }} />
+      </td>
       <td style={cell}>{dateIn("start")}</td>
       <td style={{ ...cell, background: bad ? "#fae3e2" : cell.background }}>{dateIn("end")}</td>
       <td style={{ ...cell, background: mathOut ? "#f6e7df" : cell.background }}>{dateIn("math")}</td>
