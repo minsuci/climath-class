@@ -342,13 +342,16 @@ async function homepageExams(hmpg, from, to, kind, budget, grades) {
   if (!exams.length) return { hasAny: true, byGrade: {} };
 
   // "중간고사(1,2)" 처럼 학년이 붙어 있으면 그 학년만. 없으면 전 학년.
+  // ⚠ 예전엔 여기서 /\(([\d,\s]+)\)/ 를 직접 썼는데 "(1,2학년)"에는 안 걸렸다.
+  //    안 걸리면 "전 학년 공통"으로 넘어가서 **1·2학년 시험이 중3 줄에 들어갔다**
+  //    (정신여중·숙명여중이 그렇게 잘못 채워졌다). 나이스 경로와 같은 nameGrades 를 쓴다.
   const byGrade = {};
   (grades || ["고1", "고2", "고3"]).forEach((g) => {
     const n = g.slice(1);          // "고1"·"중1" 둘 다 뒤 한 글자가 학년이다
-    const mine = exams.filter((r) => {
-      const t = r.nm.match(/\(([\d,\s]+)\)/);
-      return t ? t[1].split(",").map((x) => x.trim()).indexOf(n) >= 0 : true;
-    });
+    const named = exams.filter((r) => { const ng = nameGrades(r.nm); return ng && ng.indexOf(n) >= 0; });
+    // 이름에 학년이 없는 것만 전 학년 공통으로 본다. 이름이 있는데 내 학년이 아니면 남의 것이다.
+    const plain = exams.filter((r) => !nameGrades(r.nm));
+    const mine = named.length ? named : plain;
     if (!mine.length) return;
     const ds = [];
     mine.forEach((r) => { ds.push(r.s.replace(/-/g, ""), r.e.replace(/-/g, "")); });
@@ -555,8 +558,18 @@ export default async function handler(req, res) {
     const s = await resolveSchool(school, budget);
     if (!s) { res.status(200).json({ school, error: "나이스에서 학교를 못 찾았어요", hasKey: !!KEY }); return; }
 
+    // 중3이 그 학기에 몇 번 보는지 먼저 본다 — 걸러내는 규칙이 여기에 달려 있다.
+    let plan = null;
+    if (s.kind === "중학교") plan = await examPlan(s.office, s.code, from, budget).catch(() => null);
+
+    // ⚠ 중3은 학기에 **한 번만** 보는 학교가 대부분이다(강남 중학교 실측).
+    //    그런데 그 한 번의 이름이 "기말고사"다 — 고입 원서 때문에 12월이 아니라
+    //    10월 말에 보기 때문이다(대명중 10/26, 아주중·원촌중 10/28, 언북중 10/29).
+    //    시기는 고등학교 중간고사와 겹치는데 차수 이름으로 거르면 정작 지금 관리해야 할
+    //    시험이 통째로 빠진다. 학기에 한 번뿐이면 차수를 안 따지고 기간으로만 거른다.
+    const onceOnly = !!(plan && plan.blocks && plan.blocks.length === 1);
     const { rows, truncated } = await scheduleRows(s.office, s.code, from, to, budget);
-    const exams = rows.filter((r) => isExam(r.EVENT_NM, kind));
+    const exams = rows.filter((r) => isExam(r.EVENT_NM, onceOnly ? "" : kind));
     const byGrade = {};
     const myGrades = gradesOf(s.kind);
     const want = usedGrades(s.kind);
@@ -601,10 +614,6 @@ export default async function handler(req, res) {
         hasAny = true;
       }
     }
-    // 중3은 회차마다 있는 게 아니라서, 그 학기 전체를 한 번 훑어 몇 번 보는지 알려준다.
-    let plan = null;
-    if (s.kind === "중학교") plan = await examPlan(s.office, s.code, from, budget).catch(() => null);
-
     res.status(200).json({ school, official: s.official, officeName: s.officeName, plan,
                            // 이름이 같은 학교가 또 있으면 알려준다 — 잘못 고르면 남의 학교
                            // 시험 날짜가 통째로 들어오는데, 날짜만 봐서는 알 길이 없다
