@@ -25,7 +25,12 @@ const PAGE = KEY ? 1000 : 5;
 // 창을 쪼개 받다 보면 요청이 꽤 든다. 일정이 촘촘한 학교(단대부고는 두 달에 99건)는
 // 예산이 모자라 잘리고, 잘린 조각에 시험이 안 들어 있으면 "시험 없음"으로 잘못 보였다.
 // 학교 찾기가 두 종류 × (서울, 전국) 로 최대 4번까지 쓴다. 키가 있으면 요청이 싸므로 넉넉히.
-const BUDGET = KEY ? 12 : 90;     // 한 번 부를 때 쓸 수 있는 나이스 요청 수
+const BUDGET = KEY ? 12 : 90;     // 한 번 부를 때 쓸 수 있는 **나이스** 요청 수
+// ⚠ 학교 홈페이지와 문서뷰어(Synap)는 나이스가 아니다. 예산을 같이 쓰면
+//    키를 넣어 나이스 예산이 90 → 12 로 줄어드는 순간 첨부문서를 못 읽게 된다
+//    (메뉴 찾기 + 달 수 + 게시판 목록·상세 + Synap 변환·쪽수만큼 든다).
+//    키와 무관한 몫으로 따로 둔다.
+const WEB_BUDGET = 40;
 
 // 짧은 이름 → 정식 이름으로 규칙만으로는 못 펴는 것들
 const ALIAS = {
@@ -544,7 +549,8 @@ export default async function handler(req, res) {
       res.status(400).json({ error: "기간을 올바르게 넘겨주세요" }); return;
     }
     const kind = body.kind || "";
-    const budget = { n: BUDGET };
+    const budget = { n: BUDGET };        // 나이스
+    const web = { n: WEB_BUDGET };       // 학교 홈페이지 · 문서뷰어
 
     const s = await resolveSchool(school, budget);
     if (!s) { res.status(200).json({ school, error: "나이스에서 학교를 못 찾았어요", hasKey: !!KEY }); return; }
@@ -578,17 +584,19 @@ export default async function handler(req, res) {
     if (Object.keys(byGrade).length) via = "neis";
     if (!via) {
       lastMenus = [];
-      const hp = await homepageExams(s.hmpg, from, to, kind, budget, myGrades);
+      // 홈페이지·문서 경로는 학교 종류를 안 가린다. 중학교도 그대로 돈다.
+      // 학년은 앱이 쓰는 것만 넘긴다(중학교면 중3).
+      const hp = await homepageExams(s.hmpg, from, to, kind, web, want);
       if (hp && Object.keys(hp.byGrade || {}).length) {
         Object.assign(byGrade, hp.byGrade); via = "homepage"; hasAny = true;
       } else if (hp) hasAny = true;
     }
     let docTitle = "";
-    if (!via && lastMenus.length && budget.n > 0) {
+    if (!via && lastMenus.length && web.n > 0) {
       for (const url of lastMenus) {
-        const doc = await boardDocText(url, budget).catch(() => null);
+        const doc = await boardDocText(url, web).catch(() => null);
         if (!doc) continue;
-        const g = await examFromDoc(doc.text, s.official, from, to, kind, myGrades).catch(() => null);
+        const g = await examFromDoc(doc.text, s.official, from, to, kind, want).catch(() => null);
         if (g) { Object.assign(byGrade, g); via = "doc"; hasAny = true; docTitle = doc.title; break; }
         hasAny = true;
       }
