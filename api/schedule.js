@@ -215,7 +215,49 @@ function isExam(nm, kind) {
 //    중3 시험이 고3 칸으로 들어간다.
 const YN_FIELDS = ["ONE_GRADE_EVENT_YN", "TW_GRADE_EVENT_YN", "THREE_GRADE_EVENT_YN"];
 const gradesOf = (sk) => (sk === "중학교" ? ["중1", "중2", "중3"] : ["고1", "고2", "고3"]);
+// 학년 칸을 맞추려면 위 세 학년이 다 필요하지만, **돌려주는 건 앱이 쓰는 학년만**이다.
+// 중학교는 중3만 받는다 (중1·중2 학생을 안 받는다).
+const usedGrades = (sk) => (sk === "중학교" ? ["중3"] : ["고1", "고2", "고3"]);
 const fieldOf = (sk, g) => { const i = gradesOf(sk).indexOf(g); return i < 0 ? null : YN_FIELDS[i]; };
+
+// ---- 중3이 그 학기에 시험을 몇 번 보나 ----
+//
+// 중3은 학교마다 다르다. 중간·기말을 다 보는 학교가 있고(중대부중), 졸업고사 한 번으로
+// 끝내는 학교가 있다(언주중) — 고입 원서 때문에 일찍 끝내기 때문이다.
+// 회차마다 "왜 이 학교는 안 채워지지" 하지 않으려면, 그 학기에 몇 번 보는지를
+// 회차와 상관없이 한 번 알아둬야 한다. 키가 있으면 학기 전체가 요청 하나로 온다.
+function semesterRange(from) {
+  const y = Number(from.slice(0, 4)), m = Number(from.slice(4, 6));
+  if (m >= 8) return [y + "0801", (y + 1) + "0228"];        // 2학기
+  if (m <= 2) return [(y - 1) + "0801", y + "0228"];        // 2학기 (해가 넘어간 뒤)
+  return [y + "0301", y + "0731"];                          // 1학기
+}
+async function examPlan(office, code, from, budget) {
+  if (budget.n <= 0) return null;
+  const [a, b] = semesterRange(from);
+  budget.n--;
+  const { rows } = await callNeis("SchoolSchedule",
+    { ATPT_OFCDC_SC_CODE: office, SD_SCHUL_CODE: code, AA_FROM_YMD: a, AA_TO_YMD: b });
+  // 차수는 안 본다 — 중간·기말·졸업고사를 전부 모아 몇 덩어리인지 세는 게 목적이다.
+  const mine = rows.filter((r) => {
+    if (!isExam(r.EVENT_NM, "")) return false;
+    const ng = nameGrades(r.EVENT_NM);
+    if (ng) return ng.indexOf("3") >= 0;
+    return r.THREE_GRADE_EVENT_YN === "Y" || !r.THREE_GRADE_EVENT_YN;
+  });
+  if (!mine.length) return { blocks: [] };
+  const byDay = {};
+  mine.forEach((r) => { if (!byDay[r.AA_YMD]) byDay[r.AA_YMD] = r.EVENT_NM; });
+  const days = Object.keys(byDay).sort();
+  // 시험은 며칠에 걸친다. 주말·공휴일로 하루 끊기는 것까지 한 덩어리로 본다.
+  const blocks = [];
+  days.forEach((d) => {
+    const last = blocks[blocks.length - 1];
+    if (last && (toDate(d) - toDate(last.e)) / 86400000 <= 4) { last.e = d; return; }
+    blocks.push({ s: d, e: d, nm: byDay[d] });
+  });
+  return { blocks: blocks.map((x) => ({ start: dash(x.s), end: dash(x.e), name: x.nm })) };
+}
 
 // ---- 학교 홈페이지에서 긁기 (나이스에 시험이 안 올라온 학교) ----
 //
@@ -511,7 +553,9 @@ export default async function handler(req, res) {
     const exams = rows.filter((r) => isExam(r.EVENT_NM, kind));
     const byGrade = {};
     const myGrades = gradesOf(s.kind);
+    const want = usedGrades(s.kind);
     myGrades.forEach((g, gi) => {
+      if (want.indexOf(g) < 0) return;               // 중학교는 중3만
       const f = fieldOf(s.kind, g);
       const n = String(gi + 1);                       // 나이스 학년 번호 (중3·고3 모두 3)
       // (1) 이름에 학년이 적힌 것은 이름대로.
@@ -549,7 +593,11 @@ export default async function handler(req, res) {
         hasAny = true;
       }
     }
-    res.status(200).json({ school, official: s.official, officeName: s.officeName,
+    // 중3은 회차마다 있는 게 아니라서, 그 학기 전체를 한 번 훑어 몇 번 보는지 알려준다.
+    let plan = null;
+    if (s.kind === "중학교") plan = await examPlan(s.office, s.code, from, budget).catch(() => null);
+
+    res.status(200).json({ school, official: s.official, officeName: s.officeName, plan,
                            // 이름이 같은 학교가 또 있으면 알려준다 — 잘못 고르면 남의 학교
                            // 시험 날짜가 통째로 들어오는데, 날짜만 봐서는 알 길이 없다
                            dupes: s.dupes || [],

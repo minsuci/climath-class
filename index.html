@@ -750,7 +750,9 @@ async function saveSchoolTerm(term, school, grade, v) {
   const one = { term: term, school: school, grade: grade, updated: Date.now() };
   // label = 그 회차에 이 학교·학년이 실제로 보는 시험 이름("2학기 중간고사", "졸업고사").
   // 중3은 중간 없이 졸업고사만 보는 학교가 많아서, 회차 이름만으로는 뭘 보는지 알 수 없다.
-  ["start", "end", "math", "back", "label"].forEach((k) => {
+  // plan = 그 학기에 이 학교 중3이 시험을 몇 번 보는지("졸업고사 1회" / "2회").
+  // 회차가 바뀔 때 이 학교를 또 기다려야 하는지 알려면 있어야 한다.
+  ["start", "end", "math", "back", "label", "plan"].forEach((k) => {
     if (v && v[k] !== undefined) one[k] = v[k];
   });
   await schoolTermsDoc().set({ [schedKey(term, school, grade)]: one }, { merge: true });
@@ -799,6 +801,14 @@ async function neisTakeDiff(term, d) {
 }
 
 // targets: [{school, grade, cur:{start,end}}] — 부를 학교는 호출부가 이미 골라 넘긴다
+// plan.blocks → "졸업고사 1회" 처럼 한 줄로. 회차가 아니라 학기 전체 이야기다.
+function planNote(plan) {
+  const bs = (plan && plan.blocks) || [];
+  if (!bs.length) return "";
+  const names = Array.from(new Set(bs.map((b) => String(b.name || "").replace(/\(.*\)/, "").trim()).filter(Boolean)));
+  return bs.length + "회 · " + (names.join("+") || "시험") +
+    " (" + bs.map((b) => b.start.slice(5).replace("-", "/")).join(", ") + ")";
+}
 async function runNeisPull(term, targets, from, to, kind) {
   if (NEIS_JOB.running) return;
   const names = Array.from(new Set(targets.map((t) => t.school)));
@@ -822,8 +832,12 @@ async function runNeisPull(term, targets, from, to, kind) {
         // 문서(PDF·한글파일)에서 읽은 것은 사람이 한 번 봐야 한다
         if (r.via === "doc") fromDoc.push(school + (r.docTitle ? " (" + r.docTitle + ")" : ""));
         else if (r.docReason) noExam.push(school + " — " + r.docReason);
+        const note = planNote(r.plan);
         for (const t of targets.filter((x) => x.school === school)) {
           const g = r.byGrade && r.byGrade[t.grade];
+          // ⚠ 시험을 못 찾았어도 **학기 계획은 적어둔다**. 그래야 "이 학교는 이번 회차에
+          //    시험이 없다(졸업고사를 지난 회차에 이미 봤다)"와 "못 찾았다"가 구별된다.
+          if (note) { try { await saveSchoolTerm(term, t.school, t.grade, { plan: note }); } catch (e) {} }
           if (!g) { noExam.push(t.school + " " + t.grade); continue; }
           if (t.cur.start === g.start && t.cur.end === g.end) { same++; continue; }
           // 이미 적어둔 것이 다르면 덮지 않는다. 학교가 바꿨을 수도, 선생님이 맞게 고쳤을 수도 있다.
@@ -832,7 +846,7 @@ async function runNeisPull(term, targets, from, to, kind) {
                                   neis: { start: g.start, end: g.end }, name: g.name });
             continue;
           }
-          try { await saveSchoolTerm(term, t.school, t.grade, { start: g.start, end: g.end, label: g.name || "" }); filled++; }
+          try { await saveSchoolTerm(term, t.school, t.grade, { start: g.start, end: g.end, label: g.name || "", plan: planNote(r.plan) }); filled++; }
           catch (e) { notFound.push(t.school + "(저장 실패)"); }
         }
       }
@@ -3733,6 +3747,14 @@ function SchoolTermRow({ term, row, cur, onMsg }) {
           title={v.label || ""}
           style={{fontSize: 11, color: /졸업/.test(v.label || "") ? "#a8562c" : undefined}}
           onBlur={(e) => { if ((e.target.value || "") !== (v.label || "")) patch({ label: e.target.value.trim() }); }} />
+        {/* 그 학기에 몇 번 보는지. 중3은 졸업고사 한 번으로 끝내는 학교가 있어서,
+            이게 없으면 다음 회차에 이 학교를 계속 기다리게 된다. */}
+        {v.plan && (
+          <div style={{fontSize: 10, color: /^1회/.test(v.plan) ? "#a8562c" : "#8a7f72",
+               lineHeight: 1.35, marginTop: 2}} title={"이 학기 전체: " + v.plan}>
+            학기 {v.plan}
+          </div>
+        )}
       </td>
       <td style={cell}>{dateIn("start")}</td>
       <td style={{ ...cell, background: bad ? "#fae3e2" : cell.background }}>{dateIn("end")}</td>
