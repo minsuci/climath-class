@@ -806,7 +806,7 @@ async function runNeisPull(term, targets, from, to, kind) {
                             msg: "", diffs: [], stop: false });
   neisEmit();
   let filled = 0, same = 0;
-  const notFound = [], noExam = [], noData = [], fromDoc = [];
+  const notFound = [], noExam = [], noData = [], fromDoc = [], dupe = [];
   try {
     for (const school of names) {
       if (NEIS_JOB.stop) break;
@@ -817,6 +817,8 @@ async function runNeisPull(term, targets, from, to, kind) {
       if (r.error) notFound.push(school);
       else if (!r.hasAny) noData.push(school);
       else {
+        // 이름이 같은 학교가 또 있으면 알린다. 서울 것으로 골랐지만 확인은 사람이 해야 한다.
+        if (r.dupes && r.dupes.length) dupe.push(school + "→" + (r.officeName || "").replace("교육청", "") + " (" + r.dupes.join("·") + "에도 있음)");
         // 문서(PDF·한글파일)에서 읽은 것은 사람이 한 번 봐야 한다
         if (r.via === "doc") fromDoc.push(school + (r.docTitle ? " (" + r.docTitle + ")" : ""));
         else if (r.docReason) noExam.push(school + " — " + r.docReason);
@@ -842,6 +844,7 @@ async function runNeisPull(term, targets, from, to, kind) {
     if (same) bits.push("이미 같은 것 " + same + "칸");
     if (NEIS_JOB.diffs.length) bits.push("다른 것 " + NEIS_JOB.diffs.length + "칸 (아래 확인)");
     if (noExam.length) bits.push("이 기간에 시험이 안 올라온 곳: " + noExam.join(", "));
+    if (dupe.length) bits.push("이름이 같은 학교가 있어 서울 것으로 골랐어요 — 맞는지 봐주세요: " + dupe.join(", "));
     if (fromDoc.length) bits.push("첨부문서에서 읽었어요 — 한 번 확인해주세요: " + fromDoc.join(", "));
     if (noData.length) bits.push("어디에도 안 올리는 학교: " + noData.join(", "));
     if (notFound.length) bits.push("나이스에서 못 찾은 학교: " + notFound.join(", "));

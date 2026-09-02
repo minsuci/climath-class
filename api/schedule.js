@@ -56,6 +56,18 @@ function searchStem(n) {
 // (중대부고처럼 가운데에 "중"이 든 고등학교가 있어서 끝 글자만 본다).
 const guessKind = (n) => (/중$/.test(String(n || "")) ? "중학교" : "고등학교");
 
+// 이름이 같은 학교가 전국에 여럿 있다 — 대청중 4곳(서울·부산·인천·경남),
+// 세화고·영동고 3곳, 대성고·경신고·동성고·대원고 2곳.
+// 나이스가 주는 순서는 보장되지 않는다. 지금은 서울이 먼저 오지만 그건 우연이고,
+// 서울에 없는 학교로 넘어가면 순서가 곧 결과가 된다. **서울 → 경기 → 나머지**로 못 박는다.
+const OFFICE_RANK = { B10: 0, J10: 1 };          // B10 서울, J10 경기
+const officeRank = (r) => {
+  const v = OFFICE_RANK[r.ATPT_OFCDC_SC_CODE];
+  return v === undefined ? 9 : v;
+};
+// 학교를 고르는 규칙이 바뀌면 올린다. 옛 캐시는 한 번 다시 찾게 된다.
+const RESOLVE_V = 2;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function callNeis(path, params) {
@@ -80,15 +92,22 @@ async function loadCodes() {
 }
 async function resolveSchool(short, budget) {
   const codes = await loadCodes();
-  if (codes[short] && codes[short].code) {
-    const c = codes[short];
-    // 이 기능이 생기기 전에 캐시된 것에는 kind 가 없다. 정식 이름으로 되짚는다.
-    if (!c.kind) c.kind = /중학교$/.test(c.official || "") ? "중학교" : "고등학교";
-    return c;
-  }
+  const cached = codes[short];
+  // v 가 낮으면 옛 규칙으로 잡힌 것이다 — 이름이 같은 학교를 잘못 골랐을 수 있으므로
+  // 한 번 다시 찾는다. 찾고 나면 새 v 로 다시 캐시되니 다음부터는 그냥 쓴다.
+  if (cached && cached.code && cached.v >= RESOLVE_V) return cached;
 
   const want = officialName(short);
-  const pick = (rows) => rows.find((r) => r.SCHUL_NM === want) || (rows.length === 1 ? rows[0] : null);
+  let dupes = [];                      // 이름이 같은데 안 고른 학교의 지역
+  const pick = (rows) => {
+    const exact = rows.filter((r) => r.SCHUL_NM === want);
+    // 정식 이름이 정확히 맞는 것들. 그게 없으면 후보가 딱 하나일 때만 받는다.
+    const cand = exact.length ? exact : (rows.length === 1 ? rows : []);
+    if (!cand.length) return null;
+    const sorted = cand.slice().sort((a, b) => officeRank(a) - officeRank(b));
+    dupes = sorted.slice(1).map((r) => String(r.ATPT_OFCDC_SC_NM || "").replace("교육청", ""));
+    return sorted[0];
+  };
 
   // 짐작한 종류를 먼저, 그래도 없으면 반대 종류를 본다.
   const kinds = guessKind(short) === "중학교" ? ["중학교", "고등학교"] : ["고등학교", "중학교"];
@@ -111,6 +130,7 @@ async function resolveSchool(short, budget) {
   const found = { code: hit.SD_SCHUL_CODE, office: hit.ATPT_OFCDC_SC_CODE,
                   official: hit.SCHUL_NM, officeName: hit.ATPT_OFCDC_SC_NM,
                   kind: hit.SCHUL_KND_SC_NM || guessKind(short),
+                  dupes: dupes, v: RESOLVE_V,
                   hmpg: hit.HMPG_ADRES || "" };
   memo = { ...(memo || {}), [short]: found };
   await patchDoc("appConfig/neisCodes", { map: memo }).catch(() => {});
@@ -530,6 +550,9 @@ export default async function handler(req, res) {
       }
     }
     res.status(200).json({ school, official: s.official, officeName: s.officeName,
+                           // 이름이 같은 학교가 또 있으면 알려준다 — 잘못 고르면 남의 학교
+                           // 시험 날짜가 통째로 들어오는데, 날짜만 봐서는 알 길이 없다
+                           dupes: s.dupes || [],
                            byGrade, found: exams.length,
                            // 나이스에 일정이 아예 없는 학교와, 일정은 있는데 시험만 안 올린 학교는 다르다
                            hasAny, via, docTitle, docReason: via === "doc" ? "" : lastDocReason,
