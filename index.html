@@ -659,6 +659,91 @@ function listenFlyerPub(cid, cb) {
   return flyerPubDoc(cid).onSnapshot((d) => cb(d.exists ? d.data() : null));
 }
 
+// ----- 안 이어진 반 명단 줄을 "누구인가요?" 로 고른다 -----
+//
+// 이름만으로는 못 고른다. 학교·학년·담임·지금 속한 반을 같이 보여준다.
+// ⚠ **이미 그 반에 이어져 있는 사람은 후보가 아니다.** 한 반에 같은 사람이 두 줄일 수 없다.
+//    이 잠금이 없으면 동명이인 둘 중 아무나 골라 남의 학교·학년·내신 일정을 가져오게 된다.
+// ⚠ "새로 만들기"는 맨 아래에 두고 확인을 받는다. 예전에는 미연결 항목을 누르면
+//    묻지도 않고 새 사람을 만들어서, 동명이인이 있어도 셋째를 찍어냈다.
+function LinkPicker({ row, people, teachers, onDone, onCancel }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const tName = (tid) => { const t = (teachers || []).find((x) => x.tid === tid); return t ? t.name : ""; };
+  const cands = (people || []).filter((p) => normName(p.name) === normName(row.st.name));
+  const taken = {};
+  (row.cls.roster || []).forEach((r) => { if (r.pid && r.id !== row.st.id) taken[r.pid] = 1; });
+
+  async function pick(p) {
+    if (busy) return;
+    setBusy(true); setMsg("");
+    try { await linkRosterToStudent(row.cls.id, row.st.id, p); onDone(row.st.name + " 이었어요 ✓"); }
+    catch (e) { setMsg("잇지 못했어요: " + friendlyErr(e)); setBusy(false); }
+  }
+  async function create() {
+    if (busy) return;
+    if (!confirm(row.st.name + " 을(를) 학생 명단에 **새로** 만듭니다." + "\n\n" +
+      (cands.length ? "이름이 같은 사람이 이미 " + cands.length + "명 있어요. 그 중 아무도 아닌 게 확실한가요?\n" : "") +
+      "학교·학년·담임은 나중에 학생 명단에서 넣으면 됩니다.")) return;
+    setBusy(true); setMsg("");
+    try {
+      const pid = await saveStudent(null, { name: row.st.name, school: row.st.school || "",
+                                            grade: row.st.grade || "", homeroom: "" });
+      await linkRosterToStudent(row.cls.id, row.st.id, { pid: pid, school: row.st.school || "", grade: row.st.grade || "" });
+      onDone(row.st.name + " — 학생 명단에 새로 만들고 이었어요 ✓");
+    } catch (e) { setMsg("만들지 못했어요: " + friendlyErr(e)); setBusy(false); }
+  }
+
+  return (
+    <div style={{background: "#fff", border: "2px solid var(--navy)", borderRadius: 12,
+         padding: "12px 14px", marginBottom: 12}}>
+      <div style={{fontSize: 14, fontWeight: 700, color: "var(--navy)", marginBottom: 2}}>
+        {row.st.name} <span style={{fontWeight: 400, color: "var(--muted)"}}>· {row.cls.name}</span>
+      </div>
+      <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 10}}>
+        학생 명단에서 <b>누구인지</b> 골라주세요. 고르면 학교·학년·담임이 따라옵니다.
+      </div>
+      {cands.length === 0 && (
+        <div className="cm-empty" style={{padding: "8px 0"}}>학생 명단에 같은 이름이 없어요.</div>
+      )}
+      {cands.map((p) => {
+        const mineCls = classesOfPerson(p.pid).map((x) => x.cls.name);
+        const dup = !!taken[p.pid];
+        return (
+          <div key={p.pid} style={{display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+               borderTop: "1px solid var(--line)", padding: "8px 0", opacity: dup ? .5 : 1}}>
+            <div style={{flex: 1, minWidth: 180}}>
+              <div style={{fontSize: 13}}>
+                <b>{p.name}</b>
+                <span style={{color: "var(--muted)"}}>
+                  {" · "}{p.school || "학교 없음"} {p.grade || ""}
+                  {p.homeroom ? " · 담임 " + tName(p.homeroom) : ""}
+                </span>
+              </div>
+              <div style={{fontSize: 11, color: "#8a7f72", marginTop: 2}}>
+                {mineCls.length ? mineCls.join(" · ") : "배정된 반 없음"}
+              </div>
+            </div>
+            {dup
+              ? <span className="cm-chip" style={{background: "#f0ece5", color: "#8a7f72"}}>이미 이 반에 있어요</span>
+              : <button className="cm-btn cm-btn-primary" disabled={busy}
+                  style={{margin: 0, width: "auto", padding: "7px 13px", fontSize: 13}}
+                  onClick={() => pick(p)}>이 사람</button>}
+          </div>
+        );
+      })}
+      {msg && <div className="cm-err" style={{marginTop: 8}}>{msg}</div>}
+      <div style={{display: "flex", gap: 12, alignItems: "center", marginTop: 10,
+           borderTop: "1px solid var(--line)", paddingTop: 10, flexWrap: "wrap"}}>
+        <button className="cm-link" style={{padding: 0, fontSize: 13}} disabled={busy}
+          onClick={create}>＋ 둘 다 아니에요 — 새로 만들기</button>
+        <button className="cm-link" style={{padding: 0, fontSize: 13, marginLeft: "auto"}}
+          disabled={busy} onClick={onCancel}>취소</button>
+      </div>
+    </div>
+  );
+}
+
 // ----- 내신 참여표 -----
 // 내신기간에는 학생마다 안 오는 날이 다르다. 그걸 학생이 직접 내고 선생님이 한눈에 본다.
 // 회차(2026 2학기 중간)를 키에 넣어 기말·다음 학기가 덮어쓰지 않게 한다.
@@ -2646,6 +2731,7 @@ function StudentDirectory({ me, onBack, initialCls }) {
   const [msg, setMsg] = useState("");
   const [ver, bumpVer] = useState(0);   // 반 배정이 바뀌면 CLASSES를 다시 읽어 그린다
   // 표 안 학년 묶음의 접힘. 여기도 남긴다 — 43명이 한 덩어리로 쏟아지는 게 제일 지저분하다.
+  const [pick, setPick] = useState(null);   // 안 이어진 줄을 고르는 중
   const [grpFold, setGrpFold] = useState(() => {
     try { return JSON.parse(localStorage.getItem("cm.fold.grades") || "{}") || {}; } catch (e) { return {}; }
   });
@@ -2698,17 +2784,6 @@ function StudentDirectory({ me, onBack, initialCls }) {
     setBusy(false);
   }
 
-  // 명단에만 있는 학생을 사람 문서로 한번에 만들기
-  async function createFromRoster(u) {
-    setBusy(true);
-    try {
-      const pid = await saveStudent(null, { name: u.r.name, school: u.r.school || "", grade: u.r.grade || "", homeroom: "" });
-      await linkRosterToStudent(u.cls.id, u.r.id, { pid: pid, school: u.r.school || "", grade: u.r.grade || "" });
-      setMsg(u.r.name + " 추가했어요 ✓");
-    } catch (e) { setMsg("실패: " + friendlyErr(e)); }
-    setBusy(false);
-  }
-
   if (people === null) return <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>;
   const tName = (tid) => { const t = teachers.find((x) => x.tid === tid); return t ? t.name : ""; };
   // curated = 우리가 아는 학교(기본 목록 + 선생님이 올린 것). "목록에 없어요" 판정은 이것만 본다.
@@ -2732,6 +2807,9 @@ function StudentDirectory({ me, onBack, initialCls }) {
     .some((r) => r.pid === p.pid);
   const countIn = (cid) => people.filter((p) => inCls(p, cid)).length;
   const noneCount = people.filter((p) => classesOfPerson(p.pid).length === 0).length;
+  // 이름이 겹치는 사람 수 (동명이인 표시용)
+  const dupCount = {};
+  people.forEach((p) => { const k = normName(p.name); dupCount[k] = (dupCount[k] || 0) + 1; });
 
   let shown = people;
   if (clsFilter === "none") shown = people.filter((p) => classesOfPerson(p.pid).length === 0);
@@ -2894,6 +2972,11 @@ function StudentDirectory({ me, onBack, initialCls }) {
         {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"} style={{marginBottom: 8}}>{msg}</div>}
 
         {/* 아직 안 이어진 명단 항목 */}
+        {pick && (
+          <LinkPicker key={pick.cls.id + pick.st.id} row={pick} people={people} teachers={teachers}
+            onDone={(m) => { setPick(null); setMsg(m); bumpVer((v) => v + 1); }}
+            onCancel={() => setPick(null)} />
+        )}
         {unlinked.length > 0 && (
           <Fold id="dir.unlinked" tone="warn" defaultOpen={false}
             title={"학생 정보가 없는 명단 항목 " + unlinked.length + "건"}
@@ -2903,7 +2986,7 @@ function StudentDirectory({ me, onBack, initialCls }) {
               <div style={{fontSize: 12, color: "#a8562c", lineHeight: 1.55, margin: "0 0 8px"}}>
                 반에는 있는데 아직 사람 정보가 없어요. 이어주면 학교·학년·담임을 한 번만 넣으면 됩니다.
                 <b> 이름이 겹치는 학생은 자동으로 잇지 않아요</b> — 다른 사람일 수 있으니까요.
-                아래 이름을 누르면 하나씩 만들어져요.
+                아래 이름을 누르면 <b>누구인지 고르는 창</b>이 떠요.
               </div>
               {activeClasses().map((c) => {
                 const mine = unlinked.filter((u) => u.cls.id === c.id);
@@ -2912,9 +2995,11 @@ function StudentDirectory({ me, onBack, initialCls }) {
                   <div key={c.id} style={{marginTop: 8}}>
                     <div style={{fontSize: 12, color: "#a8562c", fontWeight: 700, marginBottom: 4}}>{c.name} · {mine.length}명</div>
                     <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+                      {/* 누르면 "누구인가요?" 고르개가 뜬다. 예전엔 바로 새 사람을 만들어서
+                          동명이인이 있어도 하나를 더 찍어냈다. */}
                       {mine.map((u) => (
                         <button key={u.cls.id + u.r.id} className="cm-ab-tab" disabled={busy}
-                          onClick={() => createFromRoster(u)}>{u.r.name} +</button>
+                          onClick={() => setPick({ cls: u.cls, st: u.r })}>{u.r.name} 잇기</button>
                       ))}
                     </div>
                   </div>
@@ -2982,6 +3067,7 @@ function StudentDirectory({ me, onBack, initialCls }) {
                   )}
                   {!grpFold[g.key] && g.rows.map((p) => (
                     <StudentRow key={p.pid} person={p} teachers={teachers} schoolOpts={schoolOpts} curated={curated}
+                      dupN={dupCount[normName(p.name)] || 1}
                       expanded={open === p.pid} onToggle={() => setOpen(open === p.pid ? null : p.pid)}
                       onChanged={() => bumpVer((v) => v + 1)}
                       onMsg={setMsg} />
@@ -3011,7 +3097,7 @@ function StudentDirectory({ me, onBack, initialCls }) {
 
 // 표의 한 줄. 칸을 고치면 바로 저장한다 (엑셀처럼).
 // 고르는 칸(학교·학년·담임)은 즉시, 이름은 칸을 벗어날 때.
-function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle, onChanged, onMsg }) {
+function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle, onChanged, onMsg, dupN }) {
   const [name, setName] = useState(person.name || "");
   const [school, setSchool] = useState(person.school || "");
   const [busy, setBusy] = useState(false);
@@ -3057,6 +3143,14 @@ function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle,
           onChange={(e) => setName(e.target.value)}
           onBlur={() => { const v = name.trim(); if (v && v !== person.name) patch({ name: v }); else setName(person.name || ""); }}
           onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
+        {/* 이름이 같은 사람이 또 있으면 알려준다. 잘못 만들어진 중복을 여기서 발견한다 —
+            학교·학년이 비어 있는 쪽이 대개 실수로 생긴 것이다. */}
+        {dupN > 1 && (
+          <div style={{fontSize: 10, color: "#a8562c", marginTop: 1}}
+            title="이름이 같은 사람이 학생 명단에 여럿 있어요. 학교·학년으로 구별하세요.">
+            동명 {dupN}명
+          </div>
+        )}
       </td>
       <td style={cellStyle}>
         <input className={"cm-sheet-in" + (odd ? " odd" : "")} list="cm-school-list" value={school} disabled={busy}
@@ -3787,6 +3881,7 @@ function ExamBoard({ onBack }) {
   const [sel, setSel] = useState({});            // 복귀일 일괄 지정 { "반id|학생id": true }
   const [backDraft, setBackDraft] = useState("");
   const [linkMsg, setLinkMsg] = useState("");
+  const [pick, setPick] = useState(null);   // 동명이인 고르는 중인 줄
   const [rev, setRev] = useState(0);   // 반 명단을 고친 뒤 다시 그리게 하는 counter
   const [filling, setFilling] = useState(false);
   const [fillMsg, setFillMsg] = useState("");
@@ -4031,11 +4126,9 @@ function ExamBoard({ onBack }) {
   async function linkOne(x) {
     if (filling) return;
     const cand = candOf(x);
-    if (cand.length > 1) {
-      alert(x.st.name + " 은(는) 학생 명단에 " + cand.length + "명 있어요.\n\n" +
-        "동명이인은 여기서 못 고릅니다. 학생 명단에서 직접 이어주세요.");
-      return;
-    }
+    // 동명이인이면 고르개를 띄운다. 이름만 보고 자동으로 이으면 남의 학교·학년·
+    // 내신 일정이 통째로 딸려 온다 — 되돌리기도 어렵다.
+    if (cand.length > 1) { setPick(x); return; }
     setFilling(true); setLinkMsg("");
     try {
       if (!cand.length) {
@@ -4233,6 +4326,11 @@ function ExamBoard({ onBack }) {
             <div style={{fontSize: 13, color: "#a8562c", fontWeight: 700, marginBottom: 6}}>
               학생 명단에 없는 사람 {unlinked.length}명
             </div>
+            {pick && (
+              <LinkPicker key={pick.cls.id + pick.st.id} row={pick} people={people} teachers={teachers}
+                onDone={(m) => { setPick(null); setLinkMsg(m); setRev((v) => v + 1); }}
+                onCancel={() => setPick(null)} />
+            )}
             <div style={{fontSize: 12, color: "#a8562c", opacity: .85, lineHeight: 1.6, marginBottom: 8}}>
               반 명단에만 있고 <b>학생 명단과 안 이어진</b> 줄이에요. 학교·학년·담임이 안 따라오고,
               <b> 학년 탭 어디에도 안 잡혀서 집계에서 빠집니다.</b>
