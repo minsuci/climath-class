@@ -196,6 +196,23 @@ const EXAM_WORD = /(중간|기말|지필|고사|정기\s*시험|정기\s*평가)
 const NOT_EXAM = /(모의|학력평가|수능|모평|대학수학능력|학업성취도|검정|자격)/;
 // 차수(중간/기말)로 가를 수 없는 시험. 기간으로만 거른다.
 const KIND_FREE = /(졸업\s*고사|졸업\s*시험)/;
+
+// ---- 시험 이름을 셋으로 못박는다 ----
+//
+// 나이스가 주는 이름은 학교마다 제각각이다:
+//   "3학년기말고사" · "3학년 지필고사" · "졸업고사" · "2학기 기말고사(1,2학년)"
+//   "1차 지필평가"(경기) · "정기시험"(중흥고)
+// 그대로 표에 넣으면 줄마다 다르게 읽혀서 한눈에 훑을 수가 없다.
+//
+// 규칙은 **학기에 몇 번 보느냐**로 가른다. 이름이 아니라.
+//   중간과 기말을 둘 다 보는 학교  → 이번 회차대로 "중간고사" / "기말고사"
+//   한 번만 보는 학교              → "졸업고사"
+//
+// ⚠ 두 번째가 핵심이다. 강남 중3은 고입 원서 때문에 10월 말에 딱 한 번 보는데
+//    나이스에 올라온 이름은 그냥 "기말고사"다(대명중 10/26, 언북중 10/29).
+//    이름을 믿으면 12월 기말과 구별이 안 된다 — 실제로 그게 그 학교의 졸업고사다.
+const KIND_LABEL = { "중간": "중간고사", "기말": "기말고사" };
+const examLabel = (kind, twice) => (twice ? (KIND_LABEL[kind] || "시험") : "졸업고사");
 // 이름에 학년이 붙어 있으면("기말고사(1,2학년)", "졸업고사(3학년)") 그 학년 것이다.
 // ⚠ 학년칸을 대충 채워 넣은 학교가 있다 — 중대부중 2026 "2학기 기말고사(1,2학년)"은
 //    학년칸이 1·2·3 모두 Y다. 이름이 더 정확하므로 이름이 있으면 그쪽을 믿는다.
@@ -265,7 +282,19 @@ async function examPlan(office, code, from, budget) {
     if (last && (toDate(d) - toDate(last.e)) / 86400000 <= 4) { last.e = d; return; }
     blocks.push({ s: d, e: d, nm: byDay[d] });
   });
-  return { blocks: blocks.map((x) => ({ start: dash(x.s), end: dash(x.e), name: x.nm })) };
+  // 중간·기말을 **둘 다** 보는 학교인가. 덩어리 수가 아니라 이름으로 본다 —
+  // 졸업고사가 이틀에 걸쳐 두 덩어리로 잘려도 그건 여전히 한 번이다.
+  const hasMid = blocks.some((x) => KIND_RE["중간"].test(x.nm));
+  const hasFin = blocks.some((x) => KIND_RE["기말"].test(x.nm));
+  const twice = hasMid && hasFin;
+  return {
+    twice: twice,
+    blocks: blocks.map((x) => ({
+      start: dash(x.s), end: dash(x.e),
+      name: twice ? (KIND_RE["기말"].test(x.nm) ? "기말고사" : "중간고사") : "졸업고사",
+      raw: x.nm,   // 나이스가 준 원래 이름. 이상하면 여기를 본다
+    })),
+  };
 }
 
 // ---- 학교 홈페이지에서 긁기 (나이스에 시험이 안 올라온 학교) ----
@@ -571,7 +600,10 @@ export default async function handler(req, res) {
     //    10월 말에 보기 때문이다(대명중 10/26, 아주중·원촌중 10/28, 언북중 10/29).
     //    시기는 고등학교 중간고사와 겹치는데 차수 이름으로 거르면 정작 지금 관리해야 할
     //    시험이 통째로 빠진다. 학기에 한 번뿐이면 차수를 안 따지고 기간으로만 거른다.
-    const onceOnly = !!(plan && plan.blocks && plan.blocks.length === 1);
+    // 고등학교는 늘 두 번 본다. 중학교만 학기 계획을 보고 가른다.
+    // 덩어리 수를 세는 대신 이름으로 보니, 졸업고사가 두 덩어리로 잘린 학교도 제대로 잡힌다.
+    const twice = s.kind !== "중학교" || !!(plan && plan.twice);
+    const onceOnly = !twice;
     const { rows, truncated } = await scheduleRows(s.office, s.code, from, to, budget);
     const exams = rows.filter((r) => isExam(r.EVENT_NM, onceOnly ? "" : kind));
     const byGrade = {};
@@ -594,7 +626,9 @@ export default async function handler(req, res) {
       const use = exact.length ? exact : cand;
       const ds = Array.from(new Set(use.map((r) => r.AA_YMD))).sort();
       byGrade[g] = { start: dash(ds[0]), end: dash(ds[ds.length - 1]),
-                     days: ds.length, name: use[0].EVENT_NM };
+                     days: ds.length,
+                     // 나이스 이름을 그대로 쓰지 않는다 — 셋 중 하나로 못박는다
+                     name: examLabel(kind, twice), raw: use[0].EVENT_NM };
     });
     // 나이스에 시험이 없으면 학교 홈페이지를 본다 (달력 → 게시판 문서 순)
     let via = "", hasAny = rows.length > 0;
@@ -605,7 +639,12 @@ export default async function handler(req, res) {
       // 학년은 앱이 쓰는 것만 넘긴다(중학교면 중3).
       const hp = await homepageExams(s.hmpg, from, to, kind, web, want);
       if (hp && Object.keys(hp.byGrade || {}).length) {
-        Object.assign(byGrade, hp.byGrade); via = "homepage"; hasAny = true;
+        // 홈페이지·문서에서 읽어온 것도 이름은 똑같이 못박는다.
+        // 안 그러면 나이스로 채운 줄과 문서로 채운 줄의 양식이 갈린다.
+        Object.keys(hp.byGrade).forEach((g) => {
+          byGrade[g] = { ...hp.byGrade[g], raw: hp.byGrade[g].name || "", name: examLabel(kind, twice) };
+        });
+        via = "homepage"; hasAny = true;
       } else if (hp) hasAny = true;
     }
     let docTitle = "";
@@ -614,7 +653,12 @@ export default async function handler(req, res) {
         const doc = await boardDocText(url, web).catch(() => null);
         if (!doc) continue;
         const g = await examFromDoc(doc.text, s.official, from, to, kind, want).catch(() => null);
-        if (g) { Object.assign(byGrade, g); via = "doc"; hasAny = true; docTitle = doc.title; break; }
+        if (g) {
+          Object.keys(g).forEach((k) => {
+            byGrade[k] = { ...g[k], raw: g[k].name || "", name: examLabel(kind, twice) };
+          });
+          via = "doc"; hasAny = true; docTitle = doc.title; break;
+        }
         hasAny = true;
       }
     }
