@@ -1357,6 +1357,43 @@ async function addNoteUnit(cid, title) { await noteUnitsCol(cid).add({ title, ti
 async function renameNoteUnit(cid, uid, title) { await noteUnitsCol(cid).doc(uid).update({ title }); }
 async function addNoteFile(cid, uid, file) { await saveFileToDoc(noteFilesCol(cid, uid).doc(), file); }
 async function deleteNoteFile(cid, uid, fid) { await deleteFileDoc(noteFilesCol(cid, uid).doc(fid)); }
+// 그 파일이 몇 번 문제 풀이인가. 한 장에 여러 문제가 들어가는 판서도 있으므로 배열이다.
+// ⚠ saveFileToDoc 은 메타를 통째로 set 한다(merge 아님). 같은 문서에 파일을 다시 올리면
+//    번호가 날아가므로, 번호는 **업로드가 끝난 뒤** 따로 붙인다.
+async function setNoteFileProbs(cid, uid, fid, probs) {
+  await noteFilesCol(cid, uid).doc(fid).set({ probs: probs }, { merge: true });
+}
+// "12, 15-18, 20" → [12,15,16,17,18,20]. 학생이 어떻게 치든 같은 뜻이 되게 넓게 받는다.
+function parseProbs(text) {
+  const out = [];
+  String(text || "").split(/[,\s]+/).forEach((tok) => {
+    if (!tok) return;
+    const m = tok.match(/^(\d{1,3})\s*[-~]\s*(\d{1,3})$/);
+    if (m) {
+      let a = Number(m[1]), b = Number(m[2]);
+      if (a > b) { const t = a; a = b; b = t; }
+      if (b - a > 60) b = a + 60;          // 오타로 1-999 를 치면 목록이 터진다
+      for (let i = a; i <= b; i++) out.push(i);
+      return;
+    }
+    const n = Number(tok.replace(/[^\d]/g, ""));
+    if (n >= 1 && n <= 999) out.push(n);
+  });
+  return Array.from(new Set(out)).sort((a, b) => a - b);
+}
+// [12,13,14,20] → "12-14, 20" (짧게 보여주기)
+function probsText(arr) {
+  const a = (arr || []).slice().sort((x, y) => x - y);
+  const out = [];
+  let i = 0;
+  while (i < a.length) {
+    let j = i;
+    while (j + 1 < a.length && a[j + 1] === a[j] + 1) j++;
+    out.push(j > i + 1 ? a[i] + "-" + a[j] : a.slice(i, j + 1).join(", "));
+    i = j + 1;
+  }
+  return out.join(", ");
+}
 async function deleteNoteUnit(cid, uid) {
   const fs = await noteFilesCol(cid, uid).get();
   for (const d of fs.docs) await deleteFileDoc(d.ref);
@@ -6058,14 +6095,32 @@ function ProgressEditor({ cid, pkey, canEdit, title }) {
   );
 }
 
-function NoteFileRow({ cls, unit, file, canEdit }) {
+function NoteFileRow({ cls, unit, file, canEdit, hi }) {
   const [open, setOpen] = useState(false);
+  const [edit, setEdit] = useState(false);
+  const [draft, setDraft] = useState(probsText(file.probs));
+  const [busy, setBusy] = useState(false);
+  const probs = file.probs || [];
+  async function saveProbs() {
+    const v = parseProbs(draft);
+    setBusy(true);
+    try { await setNoteFileProbs(cls.id, unit.uid, file.fid, v); setEdit(false); setDraft(probsText(v)); }
+    catch (e) { alert("번호를 저장하지 못했어요: " + friendlyErr(e)); }
+    setBusy(false);
+  }
   return (
-    <div style={{borderTop: "1px solid var(--line)", padding: "8px 0"}}>
-      <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpen(!open)}>
+    <div style={{borderTop: "1px solid var(--line)", padding: "8px 0",
+         background: hi ? "#eef1f6" : undefined}}>
+      <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flexWrap: "wrap"}} onClick={() => setOpen(!open)}>
         <span style={{fontSize: 14}}>{file.mime && file.mime.startsWith("image/") ? "🖼" : file.mime === "application/pdf" ? "📄" : "📝"} {file.name}</span>
+        {probs.length > 0 && (
+          <span className="cm-chip" style={{background: "#e3edf5", color: "#2b5f8a"}}>{probsText(probs)}번</span>
+        )}
         <span style={{fontSize: 11, color: "var(--muted)"}}>{fmtDate(ymd(new Date(file.time)))}</span>
         <span style={{marginLeft: "auto"}}>
+          {canEdit && <button className="cm-link" onClick={(e) => { e.stopPropagation(); setEdit((v) => !v); }}>
+            {probs.length ? "번호 수정" : "번호 붙이기"}
+          </button>}
           {canEdit && <button className="cm-link" style={{color: "#d6453f"}} onClick={(e) => {
             e.stopPropagation();
             if (confirm('"' + file.name + '" 파일을 삭제할까요?')) deleteNoteFile(cls.id, unit.uid, file.fid);
@@ -6073,6 +6128,20 @@ function NoteFileRow({ cls, unit, file, canEdit }) {
           {open ? "▾" : "▸"}
         </span>
       </div>
+      {canEdit && edit && (
+        <div style={{display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", margin: "6px 0 2px"}}
+          onClick={(e) => e.stopPropagation()}>
+          <input className="cm-input" style={{margin: 0, maxWidth: 200, fontSize: 13}} autoFocus
+            placeholder="예: 12, 15-18" value={draft} disabled={busy}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") saveProbs(); }} />
+          <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "7px 12px", fontSize: 13}}
+            disabled={busy} onClick={saveProbs}>저장</button>
+          <button className="cm-link" style={{padding: 0, fontSize: 12}} disabled={busy}
+            onClick={() => { setDraft(probsText(file.probs)); setEdit(false); }}>취소</button>
+          <span style={{fontSize: 11, color: "var(--muted)"}}>쉼표로 여러 개, 붙은 번호는 15-18</span>
+        </div>
+      )}
       {open && <div style={{marginTop: 8}}>
         <FileContentViewer meta={file} loader={() => loadFileB64FromDoc(noteFilesCol(cls.id, unit.uid).doc(file.fid), file)} height={Math.round(window.innerHeight * 0.55)} />
       </div>}
@@ -6085,6 +6154,8 @@ function NoteUnit({ cls, unit, canEdit }) {
   const [files, setFiles] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [justN, setJustN] = useState(0);      // 방금 올린 장수 (번호 일괄 붙이기용)
+  const [startNo, setStartNo] = useState("");
   const fileRef = React.useRef(null);
   useEffect(() => {
     if (!open) return;
@@ -6110,11 +6181,31 @@ function NoteUnit({ cls, unit, canEdit }) {
       catch (err) { alert(f.name + ": " + err.message); }
     }
     setMsg(""); setBusy(false);
+    // 방금 올린 것들에 번호를 순서대로 붙일 수 있게 해둔다.
+    // 판서를 한 장에 한 문제로 남기면 이걸로 끝난다 — 한 장씩 번호를 치는 건 일이다.
+    if (ok.length > 1) setJustN(ok.length);
   }
   function onFile(e) {
     const list = Array.from(e.target.files || []);
     e.target.value = "";
     uploadFiles(list);
+  }
+  // 최근에 올린 N개에 시작 번호부터 순서대로
+  async function numberRecent(startText) {
+    const start = Number(String(startText).replace(/[^\d]/g, ""));
+    if (!(start >= 1)) { alert("시작 번호를 숫자로 넣어주세요"); return; }
+    const recent = (files || []).slice(-justN);
+    if (!recent.length) return;
+    if (!confirm("방금 올린 " + recent.length + "장에 " + start + "번부터 순서대로 붙입니다." + "\\n" +
+      start + " ~ " + (start + recent.length - 1) + "번\\n\\n계속할까요?")) return;
+    setBusy(true);
+    try {
+      for (let i = 0; i < recent.length; i++) {
+        await setNoteFileProbs(cls.id, unit.uid, recent[i].fid, [start + i]);
+      }
+      setJustN(0);
+    } catch (e) { alert("번호를 붙이지 못했어요: " + friendlyErr(e)); }
+    setBusy(false);
   }
   const drop = useFileDrop(uploadFiles, canEdit && open && !busy);
   return (
@@ -6143,6 +6234,20 @@ function NoteUnit({ cls, unit, canEdit }) {
           {files && files.length === 0 && !drop.over && <div className="cm-empty">아직 올라온 노트가 없어요{canEdit && canDragDrop && <><br/><span style={{fontSize: 12}}>파일을 여기로 끌어다 놓아도 돼요</span></>}</div>}
           {files && files.map((f) => <NoteFileRow key={f.fid} cls={cls} unit={unit} file={f} canEdit={canEdit} />)}
           {drop.over && <div className="cm-drop-hint">↓ 여기에 놓으면 “{unit.title}”에 올라가요</div>}
+          {canEdit && justN > 1 && (
+            <div style={{background: "#eef1f6", border: "1px solid #d8e0ea", borderRadius: 10,
+                 padding: "9px 11px", marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center"}}>
+              <span style={{fontSize: 13, color: "var(--navy)"}}>방금 <b>{justN}장</b> 올렸어요 · 번호를</span>
+              <input className="cm-input" style={{margin: 0, maxWidth: 90, fontSize: 13}} placeholder="12"
+                value={startNo} disabled={busy} onChange={(e) => setStartNo(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") numberRecent(startNo); }} />
+              <span style={{fontSize: 13, color: "var(--navy)"}}>번부터 순서대로</span>
+              <button className="cm-btn cm-btn-primary" style={{margin: 0, width: "auto", padding: "7px 12px", fontSize: 13}}
+                disabled={busy || !startNo.trim()} onClick={() => numberRecent(startNo)}>붙이기</button>
+              <button className="cm-link" style={{padding: 0, fontSize: 12}} disabled={busy}
+                onClick={() => setJustN(0)}>나중에</button>
+            </div>
+          )}
           {canEdit && <button className="cm-btn cm-btn-ghost" disabled={busy} style={{marginTop: 10}} onClick={() => fileRef.current.click()}>+ 노트 올리기 (이미지 · PDF · HTML, 여러 장 가능)</button>}
           {msg && <div className="cm-hint" style={{marginTop: 6}}>{msg}</div>}
         </div>
@@ -6291,6 +6396,80 @@ function FlyerView({ cls }) {
   );
 }
 
+// 번호로 찾기 — 학생이 "15번 어떻게 풀었더라"로 들어오는 길.
+// ⚠ 단원을 열 때만 파일을 읽는 지금 구조를 그대로 둔다. 찾을 때만 한 번 훑는다 —
+//    학생이 강의노트를 열 때마다 모든 단원의 파일 목록을 읽으면 읽기 비용이 그냥 늘어난다.
+function ProbFinder({ cls, units }) {
+  const [q, setQ] = useState("");
+  const [idx, setIdx] = useState(null);      // null = 아직 안 훑음
+  const [busy, setBusy] = useState(false);
+  const [openFid, setOpenFid] = useState("");
+
+  async function build() {
+    if (busy) return idx;
+    setBusy(true);
+    try {
+      const snaps = await Promise.all(units.map((u) => noteFilesCol(cls.id, u.uid).get().catch(() => null)));
+      const out = [];
+      snaps.forEach((sn, i) => {
+        if (!sn) return;
+        sn.forEach((d) => {
+          const v = d.data();
+          if (v && v.probs && v.probs.length) out.push({ unit: units[i], fid: d.id, ...v });
+        });
+      });
+      setIdx(out);
+      setBusy(false);
+      return out;
+    } catch (e) { setBusy(false); setIdx([]); return []; }
+  }
+  async function onChange(v) {
+    setQ(v); setOpenFid("");
+    if (v.trim() && idx === null) await build();
+  }
+  const want = parseProbs(q);
+  const hits = (idx || []).filter((f) => want.some((n) => (f.probs || []).indexOf(n) >= 0));
+
+  return (
+    <div style={{background: "#faf8f4", border: "1px solid var(--line)", borderRadius: 12,
+         padding: "10px 12px", marginBottom: 12}}>
+      <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"}}>
+        <span style={{fontSize: 13, fontWeight: 700, color: "var(--navy)"}}>번호로 찾기</span>
+        <input className="cm-input" style={{margin: 0, maxWidth: 160, fontSize: 13}}
+          placeholder="예: 15" value={q} onChange={(e) => onChange(e.target.value)} />
+        {busy && <span style={{fontSize: 12, color: "var(--muted)"}}>훑는 중…</span>}
+        {!q.trim() && <span style={{fontSize: 12, color: "var(--muted)"}}>문제 번호를 치면 그 풀이가 있는 노트를 찾아줘요</span>}
+      </div>
+      {q.trim() && !busy && idx !== null && (
+        hits.length === 0
+          ? <div style={{fontSize: 13, color: "var(--muted)", marginTop: 8}}>
+              {want.length ? want.join(", ") + "번 풀이가 아직 없어요" : "숫자를 입력해주세요"}
+            </div>
+          : <div style={{marginTop: 8}}>
+              {hits.map((f) => (
+                <div key={f.unit.uid + f.fid} style={{borderTop: "1px solid var(--line)", padding: "7px 0"}}>
+                  <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", cursor: "pointer"}}
+                    onClick={() => setOpenFid(openFid === f.fid ? "" : f.fid)}>
+                    <span style={{fontSize: 12, color: "var(--muted)"}}>{f.unit.title}</span>
+                    <span style={{fontSize: 13}}>{f.name}</span>
+                    <span className="cm-chip" style={{background: "#e3edf5", color: "#2b5f8a"}}>{probsText(f.probs)}번</span>
+                    <span style={{marginLeft: "auto"}}>{openFid === f.fid ? "▾" : "▸"}</span>
+                  </div>
+                  {openFid === f.fid && (
+                    <div style={{marginTop: 8}}>
+                      <FileContentViewer meta={f}
+                        loader={() => loadFileB64FromDoc(noteFilesCol(cls.id, f.unit.uid).doc(f.fid), f)}
+                        height={Math.round(window.innerHeight * 0.55)} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+      )}
+    </div>
+  );
+}
+
 function NotesManager({ cls, canEdit }) {
   const [units, setUnits] = useState(null);
   useEffect(() => noteUnitsCol(cls.id).orderBy("time").onSnapshot((s) => {
@@ -6300,6 +6479,7 @@ function NotesManager({ cls, canEdit }) {
   if (units === null) return <div className="cm-empty">불러오는 중…</div>;
   return (
     <div>
+      {units.length > 0 && <ProbFinder cls={cls} units={units} />}
       {units.length === 0 && <div className="cm-empty">{canEdit ? "단원을 만들어 손필기 노트를 올려보세요" : "아직 게시된 강의노트가 없어요"}</div>}
       {units.map((u) => <NoteUnit key={u.uid} cls={cls} unit={u} canEdit={canEdit} />)}
       {canEdit && <button className="cm-link" style={{marginTop: 10}} onClick={() => {
