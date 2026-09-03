@@ -282,16 +282,28 @@ async function examPlan(office, code, from, budget) {
     if (last && (toDate(d) - toDate(last.e)) / 86400000 <= 4) { last.e = d; return; }
     blocks.push({ s: d, e: d, nm: byDay[d] });
   });
-  // 중간·기말을 **둘 다** 보는 학교인가. 덩어리 수가 아니라 이름으로 본다 —
-  // 졸업고사가 이틀에 걸쳐 두 덩어리로 잘려도 그건 여전히 한 번이다.
+  // 중간·기말을 **둘 다** 보는 학교인가.
+  //
+  // ⚠ 이름만 보면 안 된다. 차수를 아예 안 밝히는 학교가 있다 —
+  //    봉은중은 두 번 다 그냥 "3학년 지필고사"다. 이름으로만 가르면
+  //    중간도 기말도 아닌 게 되어 졸업고사로 잘못 떨어진다.
+  //    그래서 **몇 덩어리인가**를 같이 본다. 덩어리는 4일 안쪽이면 하나로 묶으므로
+  //    이틀에 걸친 시험이 두 번으로 세어지지는 않는다.
+  //
+  // ⚠ 졸업고사라고 적혀 있으면 그건 덩어리가 몇이든 졸업고사 학교다.
+  const hasFree = blocks.some((x) => KIND_FREE.test(x.nm));
   const hasMid = blocks.some((x) => KIND_RE["중간"].test(x.nm));
   const hasFin = blocks.some((x) => KIND_RE["기말"].test(x.nm));
-  const twice = hasMid && hasFin;
+  const twice = !hasFree && (blocks.length >= 2 || (hasMid && hasFin));
   return {
     twice: twice,
-    blocks: blocks.map((x) => ({
+    blocks: blocks.map((x, i) => ({
       start: dash(x.s), end: dash(x.e),
-      name: twice ? (KIND_RE["기말"].test(x.nm) ? "기말고사" : "중간고사") : "졸업고사",
+      // 이름이 차수를 밝히면 그대로, 안 밝히면 **순서대로** 앞이 중간·뒤가 기말이다
+      name: !twice ? "졸업고사"
+        : KIND_RE["기말"].test(x.nm) ? "기말고사"
+        : KIND_RE["중간"].test(x.nm) ? "중간고사"
+        : (i === 0 ? "중간고사" : "기말고사"),
       raw: x.nm,   // 나이스가 준 원래 이름. 이상하면 여기를 본다
     })),
   };
@@ -605,7 +617,11 @@ export default async function handler(req, res) {
     const twice = s.kind !== "중학교" || !!(plan && plan.twice);
     const onceOnly = !twice;
     const { rows, truncated } = await scheduleRows(s.office, s.code, from, to, budget);
-    const exams = rows.filter((r) => isExam(r.EVENT_NM, onceOnly ? "" : kind));
+    let exams = rows.filter((r) => isExam(r.EVENT_NM, onceOnly ? "" : kind));
+    // ⚠ 차수를 이름에 안 밝히는 학교가 있다("3학년 지필고사" — 봉은중).
+    //    회차로 거르면 통째로 빠지는데, 선생님이 고른 기간이 이미 그 회차의 창이라
+    //    기간만으로 걸러도 엉뚱한 시험이 들어오지 않는다.
+    if (!exams.length) exams = rows.filter((r) => isExam(r.EVENT_NM, ""));
     const byGrade = {};
     const myGrades = gradesOf(s.kind);
     const want = usedGrades(s.kind);
