@@ -258,6 +258,19 @@ function semesterRange(from) {
   if (m <= 2) return [(y - 1) + "0801", y + "0228"];        // 2학기 (해가 넘어간 뒤)
   return [y + "0301", y + "0731"];                          // 1학기
 }
+// 중간고사 철이 끝나는 날. 이 뒤에 홀로 있는 시험은 졸업고사로 본다.
+//
+// ⚠ 그냥 고른 숫자가 아니다. 중3 졸업고사가 10월 말~11월 초에 몰리는 건
+//    고입 원서 마감 때문에 성적을 그때까지 내야 해서다. 실측(2026 2학기 강남):
+//      대명중 10/26 · 아주중 10/28 · 원촌중 10/28 · 언주중 10/28~29
+//      언북중 10/29 · 숙명여중 11/2 · 중대부중 11/3
+//    한편 봉은중은 10/12다 — 홀로 2주 앞이고, 이건 평범한 2학기 중간고사 자리다.
+//    그 사이(10/20)에 금을 긋는다.
+function midSeasonEnd(semFrom) {
+  const y = semFrom.slice(0, 4);
+  return semFrom.slice(4) === "0801" ? y + "1020" : y + "0520";
+}
+
 async function examPlan(office, code, from, budget) {
   if (budget.n <= 0) return null;
   const [a, b] = semesterRange(from);
@@ -294,9 +307,21 @@ async function examPlan(office, code, from, budget) {
   const hasFree = blocks.some((x) => KIND_FREE.test(x.nm));
   const hasMid = blocks.some((x) => KIND_RE["중간"].test(x.nm));
   const hasFin = blocks.some((x) => KIND_RE["기말"].test(x.nm));
-  const twice = !hasFree && (blocks.length >= 2 || (hasMid && hasFin));
+
+  // ⚠ "한 덩어리뿐"을 곧바로 졸업고사로 읽으면 안 된다.
+  //    졸업고사는 **기말을 대신하는** 시험이라 늘 학기 뒤쪽에 있다.
+  //    앞쪽에 홀로 있는 것은 졸업고사가 아니라 **기말이 아직 안 올라온 중간고사**다.
+  //    (봉은중 10/12 — 이걸 졸업고사로 읽으면 11·12월이 통째로 비어버린다)
+  //    그리고 졸업고사는 **2학기 이야기다** — 고입 원서 때문에 있는 것이니까.
+  //    1학기에 하나뿐이면 날짜와 상관없이 아직 안 올라온 것이다.
+  const fall = a.slice(4) === "0801";
+  const lone = blocks.length === 1 && !hasFree;
+  const pending = lone && (!fall || blocks[0].s < midSeasonEnd(a));
+  const twice = !hasFree && (blocks.length >= 2 || (hasMid && hasFin) || pending);
   return {
     twice: twice,
+    // 두 번 보는 학교로 봤지만 아직 하나밖에 안 올라왔다. 기말 때 다시 불러야 한다.
+    pending: pending,
     blocks: blocks.map((x, i) => ({
       start: dash(x.s), end: dash(x.e),
       // 이름이 차수를 밝히면 그대로, 안 밝히면 **순서대로** 앞이 중간·뒤가 기말이다

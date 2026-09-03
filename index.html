@@ -892,11 +892,13 @@ async function neisTakeDiff(term, d) {
 function planNote(plan) {
   const bs = (plan && plan.blocks) || [];
   if (!bs.length) return "";
-  return bs.map((b) => {
+  const line = bs.map((b) => {
     const d = b.start.slice(5).replace("-", "/");
     const e = b.end && b.end !== b.start ? "~" + b.end.slice(8) : "";
     return b.name + " " + d + e;
   }).join(" · ");
+  // 중간 철에 하나만 올라온 학교. 졸업고사가 아니라 기말이 아직 안 나온 것이다.
+  return line + (plan.pending ? " · 기말 아직" : "");
 }
 // 나란히 몇 곳까지 부를지. 벌 함수가 그만큼 같이 뜨는데, 하나하나는 대부분
 // 남의 서버를 기다리는 시간이라 늘려도 우리 쪽이 힘들지 않다.
