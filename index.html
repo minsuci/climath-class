@@ -5239,6 +5239,7 @@ function MakeupCenter({ onBack }) {
   const [pickedDate, setPickedDate] = useState(null);
   const [mkByClass, setMkByClass] = useState({});
   const [q, setQ] = useState("");
+  const [clsF, setClsF] = useState("all");   // "all" | 반id
   const [weeks, setWeeks] = useState(8);
 
   useEffect(() => {
@@ -5255,7 +5256,26 @@ function MakeupCenter({ onBack }) {
     peopleMap[key].entries.push({ cls: c, st });
   }));
   const people = Object.values(peopleMap).sort((a, b) => a.name.localeCompare(b.name, "ko"));
-  const filtered = q ? people.filter((p) => norm(p.name).includes(norm(q))) : people;
+
+  // 반으로 거른다. 반을 고르면 **그 반 명단 순서**를 지킨다 —
+  // 출석부·명단에서 보던 순서와 달라지면 같은 반을 훑을 때 눈이 계속 헤맨다.
+  const inCls = (p) => clsF === "all" || p.entries.some((e) => e.cls.id === clsF);
+  const clsCount = (cid) => people.filter((p) => p.entries.some((e) => e.cls.id === cid)).length;
+  let filtered = people.filter(inCls);
+  if (q) filtered = filtered.filter((p) => norm(p.name).includes(norm(q)));
+  if (clsF !== "all") {
+    const c = findClass(clsF);
+    const order = {};
+    ((c && c.roster) || []).filter((r) => !r.teacher && !isEnded(r))
+      .forEach((r, i) => { order[norm(r.name)] = i; });
+    filtered = filtered.slice().sort((a, b) => {
+      const x = order[norm(a.name)], y = order[norm(b.name)];
+      if (x == null && y == null) return a.name.localeCompare(b.name, "ko");
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return x - y;
+    });
+  }
 
   const mkOf = (cid, sid, date) => (mkByClass[cid] || {})[sid + "_" + date];
 
@@ -5444,6 +5464,15 @@ function MakeupCenter({ onBack }) {
           <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
         </div>
         <input className="cm-input" style={{margin: 0}} placeholder="학생 이름 검색" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 10}}>
+          <span style={{fontSize: 11, color: "var(--muted)", marginRight: 2}}>반</span>
+          <button className={"cm-ab-tab" + (clsF === "all" ? " on" : "")}
+            onClick={() => setClsF("all")}>전체 {people.length}</button>
+          {activeClasses().map((c) => (
+            <button key={c.id} className={"cm-ab-tab" + (clsF === c.id ? " on" : "")}
+              onClick={() => setClsF(c.id)}>{c.name} {clsCount(c.id)}</button>
+          ))}
+        </div>
         <div className="cm-hint" style={{marginTop: 8}}>학생 → 날짜 → 수업 순서로 골라 결석을 표시해요.</div>
       </div>
 
@@ -5462,7 +5491,10 @@ function MakeupCenter({ onBack }) {
       )}
 
       <div className="cm-card">
-        <h3 className="cm-h3">학생 {filtered.length}명</h3>
+        <h3 className="cm-h3">
+          {clsF === "all" ? "학생" : (findClass(clsF) || {}).name} {filtered.length}명
+          {clsF !== "all" && <span className="cm-h-hint">(명단 순서)</span>}
+        </h3>
         {filtered.length === 0 && <div className="cm-empty">검색 결과가 없어요</div>}
         {filtered.map((p) => {
           let pend = 0;
