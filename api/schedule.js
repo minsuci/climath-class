@@ -146,6 +146,26 @@ async function resolveSchool(short, budget) {
   return found;
 }
 
+// 나이스로 채운 줄에도 **사람이 눈으로 볼 자리**를 준다.
+// 나이스 API 주소를 주면 JSON이 열릴 뿐이라 확인이 안 된다. 학교 홈페이지의
+// 학사일정 메뉴를 한 번 찾아 학교 코드 옆에 적어둔다 — 학교마다 딱 한 번만 든다.
+// ("" 도 답이다. 찾아봤는데 없더라는 뜻이니 다음부터 또 찾지 않는다)
+async function calendarUrl(short, s, web) {
+  if (s.calUrl !== undefined) return s.calUrl;
+  if (!s.hmpg || web.n <= 0) return "";
+  web.n--;
+  let url = "";
+  try {
+    const base = s.hmpg.replace(/^http:/, "https:").replace(/\/+$/, "") + "/";
+    url = (await findScheduleMenus(base))[0] || "";
+  } catch (e) { url = ""; }
+  const next = { ...s, calUrl: url };
+  memo = { ...(memo || {}), [short]: next };
+  const fp = "map.`" + short.replace(/[\\`]/g, "\\$&") + "`";
+  await patchDoc("appConfig/neisCodes", { map: { [short]: next } }, [fp]).catch(() => {});
+  return url;
+}
+
 // ---- 날짜 ----
 const ymd = (s) => String(s || "").replace(/-/g, "");
 const dash = (s) => String(s).slice(0, 4) + "-" + String(s).slice(4, 6) + "-" + String(s).slice(6, 8);
@@ -388,6 +408,7 @@ async function homepageExams(hmpg, from, to, kind, budget, grades) {
 
   lastMenus = menus;
   const rows = [];
+  let usedUrl = "";          // 실제로 자료가 나온 메뉴. 선생님이 눈으로 볼 자리다
   for (const url of menus) {
     for (const [y, mm] of monthsBetween(from, to)) {
       if (budget.n <= 0) break;
@@ -405,11 +426,11 @@ async function homepageExams(hmpg, from, to, kind, budget, grades) {
       while ((m = re.exec(t))) rows.push({ s: m[1], e: m[2], nm: m[3].trim() });
       await sleep(40);
     }
-    if (rows.length) break;      // 쓸 만한 메뉴를 찾았으면 더 안 본다
+    if (rows.length) { usedUrl = url; break; }   // 쓸 만한 메뉴를 찾았으면 더 안 본다
   }
   if (!rows.length) return null;
   const exams = rows.filter((r) => isExam(r.nm, kind));
-  if (!exams.length) return { hasAny: true, byGrade: {} };
+  if (!exams.length) return { hasAny: true, byGrade: {}, url: usedUrl };
 
   // "중간고사(1,2)" 처럼 학년이 붙어 있으면 그 학년만. 없으면 전 학년.
   // ⚠ 예전엔 여기서 /\(([\d,\s]+)\)/ 를 직접 썼는데 "(1,2학년)"에는 안 걸렸다.
@@ -428,7 +449,7 @@ async function homepageExams(hmpg, from, to, kind, budget, grades) {
     ds.sort();
     byGrade[g] = { start: dash(ds[0]), end: dash(ds[ds.length - 1]), days: mine.length, name: mine[0].nm };
   });
-  return { hasAny: true, byGrade, viaHomepage: true };
+  return { hasAny: true, byGrade, viaHomepage: true, url: usedUrl };
 }
 
 // ---- 3단계: 게시판에 붙은 문서에서 읽기 ----
@@ -672,13 +693,14 @@ export default async function handler(req, res) {
                      name: examLabel(kind, twice), raw: use[0].EVENT_NM };
     });
     // 나이스에 시험이 없으면 학교 홈페이지를 본다 (달력 → 게시판 문서 순)
-    let via = "", hasAny = rows.length > 0;
+    let via = "", hasAny = rows.length > 0, hpUrl = "";
     if (Object.keys(byGrade).length) via = "neis";
     if (!via) {
       lastMenus = [];
       // 홈페이지·문서 경로는 학교 종류를 안 가린다. 중학교도 그대로 돈다.
       // 학년은 앱이 쓰는 것만 넘긴다(중학교면 중3).
       const hp = await homepageExams(s.hmpg, from, to, kind, web, want);
+      if (hp && hp.url) hpUrl = hp.url;
       if (hp && Object.keys(hp.byGrade || {}).length) {
         // 홈페이지·문서에서 읽어온 것도 이름은 똑같이 못박는다.
         // 안 그러면 나이스로 채운 줄과 문서로 채운 줄의 양식이 갈린다.
@@ -688,11 +710,12 @@ export default async function handler(req, res) {
         via = "homepage"; hasAny = true;
       } else if (hp) hasAny = true;
     }
-    let docTitle = "";
+    let docTitle = "", docUrl = "";
     if (!via && lastMenus.length && web.n > 0) {
       for (const url of lastMenus) {
         const doc = await boardDocText(url, web).catch(() => null);
         if (!doc) continue;
+        docUrl = url;
         const g = await examFromDoc(doc.text, s.official, from, to, kind, want).catch(() => null);
         if (g) {
           Object.keys(g).forEach((k) => {
@@ -703,7 +726,18 @@ export default async function handler(req, res) {
         hasAny = true;
       }
     }
-    res.status(200).json({ school, official: s.official, officeName: s.officeName, plan,
+    // ---- 근거 링크 ----
+    // 선생님이 "정말 이 날짜가 맞나" 확인하려면 **클릭 한 번**으로 원문에 닿아야 한다.
+    // 나이스 API 주소는 JSON이 열릴 뿐이라 확인이 안 된다 — 사람이 볼 수 있는 자리로 보낸다.
+    let src = { url: "", name: "" };
+    if (via === "doc") src = { url: docUrl, name: docTitle || "게시판 문서" };
+    else if (via === "homepage") src = { url: hpUrl || s.hmpg, name: "학교 학사일정" };
+    else if (via === "neis") {
+      const c = await calendarUrl(school, s, web).catch(() => "");
+      src = { url: c || s.hmpg, name: c ? "학교 학사일정" : "학교 홈페이지" };
+    }
+
+    res.status(200).json({ school, official: s.official, officeName: s.officeName, plan, src,
                            // 이름이 같은 학교가 또 있으면 알려준다 — 잘못 고르면 남의 학교
                            // 시험 날짜가 통째로 들어오는데, 날짜만 봐서는 알 길이 없다
                            dupes: s.dupes || [],
