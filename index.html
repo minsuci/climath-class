@@ -894,6 +894,9 @@ function planNote(plan) {
   return bs.length + "회 · " + (names.join("+") || "시험") +
     " (" + bs.map((b) => b.start.slice(5).replace("-", "/")).join(", ") + ")";
 }
+// 나란히 몇 곳까지 부를지. 벌 함수가 그만큼 같이 뜨는데, 하나하나는 대부분
+// 남의 서버를 기다리는 시간이라 늘려도 우리 쪽이 힘들지 않다.
+const NEIS_CONC = 4;
 async function runNeisPull(term, targets, from, to, kind) {
   if (NEIS_JOB.running) return;
   const names = Array.from(new Set(targets.map((t) => t.school)));
@@ -902,13 +905,17 @@ async function runNeisPull(term, targets, from, to, kind) {
   neisEmit();
   let filled = 0, same = 0;
   const notFound = [], noExam = [], noData = [], fromDoc = [], dupe = [];
-  try {
-    for (const school of names) {
-      if (NEIS_JOB.stop) break;
-      NEIS_JOB.now = school; neisEmit();
+  // 학교끼리는 서로 상관이 없다. 한 줄로 세우면 스무 곳이면 스무 번을 차례로 기다린다.
+  // 나이스에 없어서 홈페이지·첨부문서까지 뒤지는 학교가 한 곳에 몇십 초씩 먹는데,
+  // 그런 학교만 남은 두 번째 불러오기부터는 그게 곧 전체 시간이 된다.
+  const inflight = new Set();
+  const showNow = () => { NEIS_JOB.now = Array.from(inflight).join(", "); };
+  let next = 0;
+
+  async function pullOne(school) {
       let r;
       try { r = await fetchSchoolSchedule(school, from, to, kind); }
-      catch (e) { notFound.push(school + "(" + e.message + ")"); NEIS_JOB.done++; neisEmit(); continue; }
+      catch (e) { notFound.push(school + "(" + e.message + ")"); return; }
       if (r.error) notFound.push(school);
       else if (!r.hasAny) noData.push(school);
       else {
@@ -935,8 +942,24 @@ async function runNeisPull(term, targets, from, to, kind) {
           catch (e) { notFound.push(t.school + "(저장 실패)"); }
         }
       }
-      NEIS_JOB.done++; neisEmit();
+  }
+
+  async function worker() {
+    while (!NEIS_JOB.stop) {
+      const i = next++;
+      if (i >= names.length) return;
+      const school = names[i];
+      inflight.add(school); showNow(); neisEmit();
+      try { await pullOne(school); }
+      catch (e) { notFound.push(school + "(" + friendlyErr(e) + ")"); }
+      inflight.delete(school); NEIS_JOB.done++; showNow(); neisEmit();
     }
+  }
+
+  try {
+    await Promise.all(Array.from({ length: Math.min(NEIS_CONC, names.length) }, () => worker()));
+    // 끝난 차례가 뒤죽박죽이라 그대로 두면 부를 때마다 목록 순서가 달라진다.
+    [notFound, noExam, noData, fromDoc, dupe].forEach((a) => a.sort((x, y) => x.localeCompare(y, "ko")));
     const bits = [];
     if (NEIS_JOB.stop) bits.push("멈췄어요");
     if (filled) bits.push(filled + "칸 채웠어요 ✓");

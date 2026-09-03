@@ -238,8 +238,11 @@ export async function listDocs(path) {
 }
 
 // 문서 쓰기(부분 갱신). 넘긴 필드만 바꾼다.
-export async function patchDoc(path, data) {
-  const mask = Object.keys(data).map((k) => "updateMask.fieldPaths=" + encodeURIComponent(k)).join("&");
+// maskPaths 를 주면 그 경로만 바꾼다 — 지도(map) 안의 한 칸만 고칠 때 쓴다.
+// 통째로 덮으면 같은 시간에 도는 다른 요청이 넣은 칸이 지워진다.
+export async function patchDoc(path, data, maskPaths) {
+  const mask = (maskPaths || Object.keys(data))
+    .map((k) => "updateMask.fieldPaths=" + encodeURIComponent(k)).join("&");
   await call(docBase() + "/" + path + "?" + mask, {
     method: "PATCH",
     body: JSON.stringify({ fields: toFields(data) }),

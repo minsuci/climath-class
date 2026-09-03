@@ -129,7 +129,7 @@ async function resolveSchool(short, budget) {
       ({ rows } = await callNeis("schoolInfo", { SCHUL_KND_SC_NM: sk, SCHUL_NM: want }));
       hit = pick(rows);
     }
-    await sleep(40);
+    if (!hit) await sleep(40);
   }
   if (!hit) return null;
   const found = { code: hit.SD_SCHUL_CODE, office: hit.ATPT_OFCDC_SC_CODE,
@@ -138,7 +138,11 @@ async function resolveSchool(short, budget) {
                   dupes: dupes, v: RESOLVE_V,
                   hmpg: hit.HMPG_ADRES || "" };
   memo = { ...(memo || {}), [short]: found };
-  await patchDoc("appConfig/neisCodes", { map: memo }).catch(() => {});
+  // ⚠ 지도를 통째로 쓰면 안 된다. 여러 학교를 나란히 부르면 인스턴스마다
+  //    제 손에 든 옛 지도를 덮어써서 남이 방금 넣은 학교가 사라진다.
+  //    한글 이름은 필드 경로에서 백틱으로 감싸야 한다.
+  const fp = "map.`" + short.replace(/[\\`]/g, "\\$&") + "`";
+  await patchDoc("appConfig/neisCodes", { map: { [short]: found } }, [fp]).catch(() => {});
   return found;
 }
 
@@ -172,7 +176,7 @@ async function scheduleRows(office, code, from, to, budget) {
       const k = r.AA_YMD + "|" + r.EVENT_NM;
       if (!seen[k]) { seen[k] = 1; out.push(r); }
     });
-    await sleep(40);
+    if (stack.length) await sleep(40);   // 더 부를 게 있을 때만 쉰다
   }
   return { rows: out, truncated };
 }
