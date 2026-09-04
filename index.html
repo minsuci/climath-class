@@ -875,6 +875,71 @@ async function deleteSchoolTerm(term, school, grade) {
   await schoolTermsDoc().set({ [schedKey(term, school, grade)]: firebase.firestore.FieldValue.delete() },
     { merge: true });
 }
+// ===== 학원 운영DB(창구) =====
+//
+// 토큰은 서버(/api/opsdb)에만 있다. 여기서 창구를 직접 부르지 않는다 —
+// index.html 은 로그인 없이도 받아지므로 토큰을 넣으면 누구나 학원 기록을 연다.
+async function opsdbApi(payload) {
+  const u = firebase.auth().currentUser;
+  if (!u) throw new Error("로그인이 풀렸어요. 다시 들어와 주세요.");
+  const idToken = await u.getIdToken();
+  const r = await fetch("/api/opsdb", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken, payload }),
+  });
+  let j = null;
+  try { j = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error((j && j.error) || ("보내지 못했어요 (" + r.status + ")"));
+  return j || {};
+}
+
+// 그 반의 기간 출결을 창구가 받는 모양으로 만든다.
+//
+// ⚠ 이 앱의 출결은 «있다/없다» 뿐이다. 문서가 있으면 출석, 없으면 결석으로 본다.
+//    지각은 아예 기록하지 않으므로 보내지 않는다 (찍은 시각만 남는다).
+// ⚠ 수업이 없던 날은 애초에 날짜 문서가 없어서 목록에 안 들어온다.
+//    그래서 «수업이 있었는데 안 왔다» 만 결석이 된다.
+// ⚠ 내신 기간에 안 오는 것은 결석이 아니다. 시험으로 빠지는 구간은 통째로 뺀다.
+async function buildAttendRows(cls, from, to, people, examRows) {
+  // ⚠ 날짜 문서가 있다고 수업일인 것이 아니다. 고1S 는 월·금인데 목요일 문서가 있다
+  //    (보강·개별 등원으로 생긴다). 요일을 안 보고 보내면 그날 전원이 결석이 된다.
+  const dows = cls.classDays || [];
+  const isClassDay = (d) => !dows.length || dows.indexOf(new Date(d + "T00:00:00").getDay()) >= 0;
+  const days = (await listDays(cls.id))
+    .filter((d) => d >= from && d <= to && isClassDay(d)).sort();
+  const roster = (cls.roster || []).filter((r) => !r.teacher);
+  const pidOf = (r) => (r.pid && people.find((p) => p.pid === r.pid)) || null;
+
+  // 시험으로 빠지는 구간: 수학시험 당일 ~ 복귀 전날 (직보 다음날부터다)
+  const examGap = {};
+  (examRows || []).forEach((v) => {
+    if (!v.math) return;
+    examGap[v.sid] = { from: v.math, to: v.back ? dayBefore(v.back) : (v.end || v.math) };
+  });
+
+  const mk = {};
+  const mkSnap = await makeupCol(cls.id).get();
+  mkSnap.forEach((d) => { const v = d.data(); mk[v.sid + "_" + v.date] = v; });
+
+  const rows = [], noId = [], skipped = [];
+  for (const d of days) {
+    const att = {};
+    (await attCol(cls.id, d).get()).forEach((x) => { att[x.id] = true; });
+    for (const st of roster) {
+      if (!attendsOn(cls, st, d)) continue;              // 그날 수업 대상이 아니다
+      const g = examGap[st.id];
+      if (g && d >= g.from && d <= g.to) { skipped.push(st.name + " " + d); continue; }
+      const p = pidOf(st);
+      const sid26 = p && p.sid26;
+      if (!sid26) { if (noId.indexOf(st.name) < 0) noId.push(st.name); continue; }
+      const m = mk[st.id + "_" + d];
+      const 상태 = (m && m.videoDone) ? "보강" : (att[st.id] ? "출석" : "결석");
+      rows.push({ 이름: sid26, 일자: d, 출결: 상태, 비고: "" });
+    }
+  }
+  return { rows: rows, noId: noId, skipped: skipped, days: days };
+}
+
 // 나이스에서 학사일정을 받아온다. 서버가 대신 부른다 (브라우저에서 부르면 CORS에 막힌다).
 // **학교 하나에 한 번씩** 부른다 — 키가 없으면 날짜 창을 쪼개 여러 번 받아야 해서
 // 한 요청에 여러 학교를 묶으면 함수 실행 시간을 넘긴다.
@@ -4005,6 +4070,167 @@ function SchoolTermRow({ term, row, cur, onMsg }) {
   );
 }
 
+// 운영DB 보내기.
+//
+// 학원이 기록을 한곳에 모으기로 했다(2026-09-03 전체회의). 앱은 그대로 쓰고
+// «보내는 문»만 붙인다. 명세: 시스템\명세\명세-출결.md
+//
+// **맛보기를 먼저 보낸다.** 넣지 않고 어떻게 들어갈지만 보여 준다.
+// 한 줄이라도 틀리면 창구가 아무것도 넣지 않는다 — 반쯤 들어간 상태가 제일 나쁘다.
+function OpsSend({ onBack }) {
+  const classes = activeClasses();
+  const [cid, setCid] = useState((classes[0] && classes[0].id) || "");
+  const [from, setFrom] = useState(todayStr);
+  const [to, setTo] = useState(todayStr);
+  const [opsName, setOpsName] = useState("");     // 창구에서 쓰는 반 이름
+  const [people, setPeople] = useState([]);
+  const [built, setBuilt] = useState(null);       // buildAttendRows 결과
+  const [preview, setPreview] = useState(null);   // 맛보기 응답
+  const [sent, setSent] = useState(null);         // 진짜 보낸 응답
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const backRef = useSwipeBack(onBack);
+  const cls = classes.find((c) => c.id === cid) || null;
+
+  useEffect(() => listenStudents(setPeople, () => setPeople([])), []);
+  useEffect(() => { setBuilt(null); setPreview(null); setSent(null); setMsg("");
+                    if (cls) setOpsName(cls.name); }, [cid, from, to]);
+
+  async function build() {
+    if (!cls) return;
+    setBusy(true); setMsg(""); setPreview(null); setSent(null);
+    try {
+      const ex = [];
+      // 구독을 걸었다 푸는 것보다 한 번 읽는 게 낫다 — 콜백이 먼저 돌면 u 가 아직 없다
+      const td = await examTermDoc().get();
+      const term = td.exists ? (td.data().term || "") : "";
+      if (term) {
+        const snap = await examCol(cls.id).where("term", "==", term).get();
+        snap.forEach((d) => ex.push(d.data()));
+      }
+      const b = await buildAttendRows(cls, from, to, people, ex);
+      setBuilt(b);
+      if (!b.rows.length) setMsg("보낼 것이 없어요. 그 기간에 수업 기록이 없거나 학생ID가 아직 없어요.");
+    } catch (e) { setMsg("만들지 못했어요: " + friendlyErr(e)); }
+    setBusy(false);
+  }
+
+  function payload(dry) {
+    return {
+      action: "import_rows", "탭": "출결", "반": opsName.trim(), "기록자": "한민수",
+      "매핑": { "학생": "이름", "날짜": "일자", "상태": "출결", "메모": "비고" },
+      "행": built.rows,
+      ...(dry ? { "맛보기": true } : {}),
+    };
+  }
+
+  async function run(dry) {
+    setBusy(true); setMsg("");
+    try {
+      const r = await opsdbApi(payload(dry));
+      if (dry) { setPreview(r); setSent(null); } else { setSent(r); }
+      if (r && r.ok === false) setMsg("창구가 거절했어요 — 아래를 보고 고쳐주세요");
+    } catch (e) { setMsg(friendlyErr(e)); }
+    setBusy(false);
+  }
+
+  // 보냈다고 들어간 것이 아니다. 되읽어 건수를 본다 (명세 ④).
+  async function verify() {
+    setBusy(true); setMsg("");
+    try {
+      const r = await opsdbApi({ action: "query", "탭": "출결",
+                                 "부터": from, "까지": to, "반": opsName.trim() });
+      const n = (r && (r.건수 != null ? r.건수 : (r.행 || r.결과 || []).length));
+      setMsg("창구에 " + n + "건 있어요 (보낸 것 " + built.rows.length + "건)");
+    } catch (e) { setMsg("되읽지 못했어요: " + friendlyErr(e)); }
+    setBusy(false);
+  }
+
+  return (
+    <div ref={backRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 10}}>
+          <h2 className="cm-h2" style={{margin: 0}}>운영DB 보내기</h2>
+          <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
+        </div>
+        <div className="cm-hint" style={{marginBottom: 10}}>
+          출결을 학원 운영DB로 보냅니다. <b>맛보기를 먼저</b> 눌러 어떻게 들어갈지 보고,
+          맞으면 진짜로 보냅니다.
+          <br/><b>수업이 끝난 뒤에 보내세요</b> — 아직 안 온 학생이 결석으로 갑니다.
+        </div>
+        <label className="cm-label">반</label>
+        <select className="cm-input" value={cid} onChange={(e) => setCid(e.target.value)} disabled={busy}>
+          {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <label className="cm-label">운영DB에서 쓰는 반 이름</label>
+        <input className="cm-input" value={opsName} disabled={busy}
+          onChange={(e) => setOpsName(e.target.value)} placeholder="예: 고1S 월금" />
+        <div className="cm-hint">앱 이름과 학원 이름이 다를 수 있어요 (「고1S」 ↔ 「고1S 월금」).</div>
+        <label className="cm-label">기간</label>
+        <div style={{display: "flex", gap: 6, alignItems: "center"}}>
+          <input type="date" className="cm-sheet-in" style={{width: 150}} value={from}
+            onChange={(e) => setFrom(e.target.value)} disabled={busy} />
+          <span style={{color: "var(--muted)"}}>~</span>
+          <input type="date" className="cm-sheet-in" style={{width: 150}} value={to}
+            onChange={(e) => setTo(e.target.value)} disabled={busy} />
+        </div>
+        <button className="cm-btn cm-btn-primary" disabled={busy || !cls} onClick={build}>
+          {busy ? "…" : "만들어 보기"}
+        </button>
+      </div>
+
+      {msg && <div className="cm-hint" style={{color: "#c2703f", marginTop: 10}}>{msg}</div>}
+
+      {built && (
+        <div className="cm-card" style={{marginTop: 12}}>
+          <h3 className="cm-h3">보낼 것 {built.rows.length}줄 · 수업일 {built.days.length}일</h3>
+          {built.noId.length > 0 && (
+            <div className="cm-hint" style={{color: "#d6453f"}}>
+              학생ID가 없어 빠진 학생: <b>{built.noId.join(", ")}</b> — 학생 명단에서 이어주세요
+            </div>
+          )}
+          {built.skipped.length > 0 && (
+            <div className="cm-hint">
+              시험으로 빠지는 구간이라 안 보냄 {built.skipped.length}건 (결석이 아니에요)
+            </div>
+          )}
+            <div style={{maxHeight: 260, overflow: "auto", marginTop: 8, border: "1px solid var(--line)", borderRadius: 8}}>
+            <table className="cm-sheet"><thead><tr>
+              <th>학생ID</th><th>날짜</th><th>상태</th>
+            </tr></thead><tbody>
+              {built.rows.slice(0, 60).map((r, i) => (
+                <tr key={i}><td>{r.이름}</td><td>{r.일자}</td>
+                  <td style={{color: r.출결 === "결석" ? "#d6453f" : undefined}}>{r.출결}</td></tr>
+              ))}
+            </tbody></table>
+          </div>
+          {built.rows.length > 60 && <div className="cm-hint">…앞 60줄만 보여요</div>}
+          <div style={{display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap"}}>
+            <button className="cm-btn cm-btn-ghost" disabled={busy || !built.rows.length}
+              onClick={() => run(true)}>맛보기 (안 넣음)</button>
+            <button className="cm-btn cm-btn-primary" style={{width: "auto", margin: 0, padding: "8px 16px"}}
+              disabled={busy || !preview || preview.ok === false}
+              onClick={() => { if (confirm("진짜로 넣습니다. " + built.rows.length + "줄.\n계속할까요?")) run(false); }}>
+              진짜 보내기
+            </button>
+            {sent && <button className="cm-btn cm-btn-ghost" disabled={busy} onClick={verify}>되읽어 확인</button>}
+          </div>
+          <div className="cm-hint" style={{marginTop: 6}}>맛보기가 통과해야 «진짜 보내기»가 열려요.</div>
+        </div>
+      )}
+
+      {(preview || sent) && (
+        <div className="cm-card" style={{marginTop: 12}}>
+          <h3 className="cm-h3">{sent ? "보낸 결과" : "맛보기 결과"}</h3>
+          <pre style={{fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0}}>
+            {JSON.stringify(sent || preview, null, 1)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ExamBoard({ onBack }) {
   const [term, setTerm] = useState(null);
   const [byClass, setByClass] = useState({});   // { cid: { sid: 제출 } }
@@ -5968,6 +6194,7 @@ function AdminView() {
         { key: "schoolcal", ico: "▦", label: "학교 일정" },
         { key: "exams", ico: "▤", label: "내신 참여표" },
         { key: "roster", ico: "☰", label: "학생 명단" },
+        { key: "opsdb", ico: "↗", label: "운영DB 보내기" },
         ...(cls ? [
           { sep: true },
           { group: cls.name + (isClassEnded(cls) ? " (종강)" : "") },
@@ -6028,6 +6255,7 @@ function AdminView() {
   if (mode === "report") return <>{homeSide}<ReportCenter onBack={() => setMode("login")} /></>;
   if (mode === "schoolcal") return <>{homeSide}<SchoolTermBoard onBack={() => setMode("login")} /></>;
   if (mode === "exams") return <>{homeSide}<ExamBoard onBack={() => setMode("login")} /></>;
+  if (mode === "opsdb") return <>{homeSide}<OpsSend onBack={() => setMode("login")} /></>;
   if (mode === "roster") return <>{homeSide}<StudentDirectory key={"dir" + (rosterCid || "")} me={me}
     initialCls={rosterCid} onBack={() => { setRosterCid(""); setMode("login"); }} /></>;
 
