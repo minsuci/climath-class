@@ -1391,6 +1391,40 @@ async function syncStudentToRosters(person) {
     try { await saveClassRoster(c.id, next); c.roster = next; } catch (e) {}
   }
 }
+// ----- 반 명단 번호를 되쓴다 -----
+//
+// 출결·과제·질문번호·참여표·강의노트 조회가 **전부 반 명단의 자리 번호**로 달려 있다.
+//
+//     days/{날짜}/attendance/{번호}   ·   homework/{번호}   ·   questioned/{번호}
+//     exams/{회차_번호}                ·   noteUnits/…/views/{번호}
+//
+// 그래서 같은 사람을 뺐다 다시 넣으면서 번호를 새로 만들면 **그 사람의 지난 기록이
+// 통째로 끊긴다.** 화면에는 «명단에 없는 제출»로 뜨고, 출석 이력은 0일이 된다.
+// (2026-09-04에 진현겸 14일·진유준 8일·윤지섭 8일이 이렇게 끊겨 있었다)
+//
+// 그래서 뺄 때 번호를 pastIds 에 적어 두고, 다시 넣을 때 그것을 되쓴다.
+// 동명이인은 이름을 A·B·C 로 갈라 쓰기로 했으므로 이름으로 찾아도 섞이지 않는다.
+const rosterKey = (p) => (p && p.pid) ? "pid:" + p.pid : "name:" + ((p && p.name) || "");
+function reuseRosterId(cls, person) {
+  const past = ((cls && cls.pastIds) || {})[rosterKey(person)];
+  const taken = ((cls && cls.roster) || []).some((r) => r.id === past);
+  if (past && !taken) return past;
+  return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+}
+// 반 명단과 «되쓸 번호»를 같이 저장한다.
+// ⚠ 점 표기(update({"pastIds.pid:xxx": …}))를 쓰면 안 된다. Firestore 는 점을 필드
+//    경로로 읽는데, 우리 열쇠에는 «:»과 한글이 들어가서 백틱으로 감싸야 한다.
+//    통째로 읽어 얹는 편이 안전하다 — 어차피 지도 하나뿐이라 작다.
+async function saveClassRosterWithPast(cid, roster, pastAdd) {
+  const patch = { roster };
+  if (pastAdd && Object.keys(pastAdd).length) {
+    const cur = await classesCol().doc(cid).get();
+    patch.pastIds = { ...((cur.exists && cur.data().pastIds) || {}), ...pastAdd };
+  }
+  await classesCol().doc(cid).update(patch);
+  await loadClasses();
+}
+
 // 반에 넣기 / 빼기.
 // 명단 전체를 다시 쓰므로 **반드시 최신(cls.roster) 위에 얹는다** — 화면이 들고 있던
 // 옛 사본으로 저장하면 그 사이 바뀐 다른 학생 내용이 날아간다.
@@ -1398,7 +1432,7 @@ async function assignToClass(cid, person) {
   const cls = findClass(cid);
   if (!cls) return;
   if ((cls.roster || []).some((r) => r.pid === person.pid)) return;   // 이미 있음
-  const id = "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  const id = reuseRosterId(cls, person);   // 있던 사람이면 옛 번호를 되쓴다
   const next = (cls.roster || []).concat([{
     id: id, pid: person.pid, name: person.name,
     school: person.school || "", grade: person.grade || "",
@@ -1412,7 +1446,8 @@ async function unassignFromClass(cid, pid) {
   if (!cls) return;
   const gone = (cls.roster || []).find((r) => r.pid === pid);
   const next = (cls.roster || []).filter((r) => r.pid !== pid);
-  await saveClassRoster(cid, next);
+  // 뺀 번호를 적어 둔다. 다시 넣을 때 이걸 되써야 지난 기록이 안 끊긴다.
+  await saveClassRosterWithPast(cid, next, gone ? { [rosterKey(gone)]: gone.id } : null);
   cls.roster = next;
   logStudentChange("반에서 뺌", pid, (gone && gone.name) || "", cls.name);
 }
