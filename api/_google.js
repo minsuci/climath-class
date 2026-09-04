@@ -139,9 +139,6 @@ async function accessToken(scope) {
   return _toks[sc].value;
 }
 
-// 다른 구글 API(시트 등)를 같은 서비스 계정으로 부를 때 쓴다. scope별로 따로 캐시된다.
-export async function googleAccessToken(scope) { return accessToken(scope); }
-
 // ---- (3) 실제로 게시된 보안 규칙 읽기 ----
 // 규칙은 저장소에 커밋해도 콘솔에 붙여넣어야 적용된다. 그래서 "올렸나?"가 계속 헷갈렸다.
 // 지금 걸려 있는 것을 서버에서 직접 확인한다 (읽기 전용).
