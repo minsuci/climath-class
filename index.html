@@ -475,6 +475,8 @@ let MY_SCOPE = null;
 // 역할도 같이 들고 있는다. 담당 밖 반을 읽을 수 있는지가 여기에 달려 있고,
 // 화면 부품마다 me 를 물려주려면 손이 너무 많이 간다.
 let MY_ROLE = "";
+// 기록에 «누가» 를 적으려면 이름이 있어야 하는데 토큰 claims 에는 없다(role·tid 뿐).
+let MY_NAME = "";
 const inScope = (c) => !MY_SCOPE || MY_SCOPE.indexOf(c.id) >= 0;
 const activeClasses = () => CLASSES.filter((c) => !isClassEnded(c) && inScope(c));
 // 반 관리 전용 — 담당 범위를 무시하고 전부 본다. 다른 화면은 절대 이걸 쓰지 않는다.
@@ -1275,6 +1277,7 @@ let MUST_CHANGE_PIN = false;
 function applyScope(t) {
   MY_SCOPE = (t && t.classIds) || [];
   MY_ROLE = (t && t.role) || "";
+  MY_NAME = (t && t.name) || "";
 }
 
 async function signOutAll() {
@@ -1283,6 +1286,7 @@ async function signOutAll() {
   AUTH = null;
   MY_SCOPE = null;
   MY_ROLE = "";
+  MY_NAME = "";
   SESSION_PIN = "";
   MUST_CHANGE_PIN = false;
 }
@@ -1312,12 +1316,55 @@ function friendlyErr(e) {
   }
   return m;
 }
+// ----- 학생 명단 변경 기록 -----
+//
+// 명단은 이 앱과 대시보드 **두 곳에서** 고친다. 저장소는 하나지만(여기 students),
+// 그래서 «누가 어디서 무엇을 바꿨나» 를 아무도 모른다. 대시보드가 명단의 근거지가
+// 되려면 그 앎이 거기 모여야 한다.
+//
+// ⚠ 새 컬렉션을 만들면 보안 규칙을 콘솔에 다시 붙여넣어야 하고, 안 붙여넣으면
+//    기록이 조용히 하나도 안 쌓인다. appConfig 는 이미 선생님이 쓸 수 있어서
+//    규칙을 안 건드리고 된다.
+const studentLogDoc = () => db.collection("appConfig").doc("studentLog");
+const STUDENT_LOG_KEEP = 300;   // 이보다 오래된 것은 버린다. 한 문서에 다 담기 때문
+// ⚠ 모아서 한 번에 쓴다. saveStudent 는 **일괄 처리 루프 안에서도** 불린다
+//    (학년 한 번에 바꾸기, 참여표에서 한꺼번에 잇기). 한 명마다 읽고 쓰면
+//    50명이 200번의 요청이 되고 저장이 눈에 띄게 느려진다.
+//    기다리지도 않는다 — 기록 때문에 저장이 늦어지면 안 된다.
+let LOG_Q = [], LOG_T = null;
+function logStudentChange(act, pid, name, detail) {
+  LOG_Q.push({ t: Date.now(), act: act, pid: pid || "", name: name || "",
+               by: MY_NAME || (AUTH && AUTH.sname) || "", from: "앱", detail: detail || "" });
+  if (LOG_T) clearTimeout(LOG_T);
+  LOG_T = setTimeout(flushStudentLog, 800);
+}
+async function flushStudentLog() {
+  LOG_T = null;
+  const q = LOG_Q; LOG_Q = [];
+  if (!q.length) return;
+  try {
+    const d = await studentLogDoc().get();
+    const items = ((d.exists && d.data().items) || []).concat(q);
+    await studentLogDoc().set({ items: items.slice(-STUDENT_LOG_KEEP), updated: Date.now() },
+                              { merge: true });
+  } catch (e) {}   // 기록 때문에 저장이 실패하면 안 된다
+}
+
 async function saveStudent(pid, data) {
-  if (pid) { await studentsCol().doc(pid).set({ ...data, updated: Date.now() }, { merge: true }); return pid; }
+  if (pid) {
+    await studentsCol().doc(pid).set({ ...data, updated: Date.now() }, { merge: true });
+    logStudentChange("고침", pid, data.name || "",
+      Object.keys(data).filter((k) => k !== "name").join(" · "));
+    return pid;
+  }
   const ref = await studentsCol().add({ ...data, time: Date.now(), updated: Date.now() });
+  logStudentChange("만듦", ref.id, data.name || "", "");
   return ref.id;
 }
-async function deleteStudent(pid) { await studentsCol().doc(pid).delete(); }
+async function deleteStudent(pid, name) {
+  await studentsCol().doc(pid).delete();
+  logStudentChange("지움", pid, name || "", "");
+}
 
 // roster 항목에 pid를 달고, 학교·학년을 함께 적어둔다.
 async function linkRosterToStudent(cid, rosterId, person) {
@@ -1358,13 +1405,16 @@ async function assignToClass(cid, person) {
   }]);
   await saveClassRoster(cid, next);
   cls.roster = next;
+  logStudentChange("반에 넣음", person.pid, person.name || "", cls.name);
 }
 async function unassignFromClass(cid, pid) {
   const cls = findClass(cid);
   if (!cls) return;
+  const gone = (cls.roster || []).find((r) => r.pid === pid);
   const next = (cls.roster || []).filter((r) => r.pid !== pid);
   await saveClassRoster(cid, next);
   cls.roster = next;
+  logStudentChange("반에서 뺌", pid, (gone && gone.name) || "", cls.name);
 }
 
 // 그 사람이 어느 반에 있나
@@ -2893,6 +2943,41 @@ function Fold({ id, title, note, tone, right, defaultOpen, children }) {
 
 // 반이 아니라 "사람"을 관리하는 곳. 학교·학년·담임을 여기서 한 번만 정하면
 // 그 학생이 속한 모든 반과 내신 참여표가 같이 따라간다.
+// 명단이 어디서 바뀌었는지 보여준다. 앱과 대시보드 두 곳에서 고치므로
+// «내가 방금 고친 게 맞나» 를 여기서 바로 볼 수 있어야 한다.
+function StudentLogPanel() {
+  const [items, setItems] = useState(null);
+  useEffect(() => db.collection("appConfig").doc("studentLog").onSnapshot(
+    (d) => setItems(((d.exists && d.data().items) || []).slice().reverse()),
+    () => setItems([])), []);
+  if (!items || !items.length) return null;
+  const when = (t) => {
+    const m = Math.floor((Date.now() - t) / 60000);
+    if (m < 1) return "방금";
+    if (m < 60) return m + "분 전";
+    if (m < 60 * 24) return Math.floor(m / 60) + "시간 전";
+    return fmtDate(ymd(new Date(t)));
+  };
+  return (
+    <Fold id="stlog" title={"최근 바뀐 것 " + items.length + "건"} defaultOpen={false}>
+      <div style={{fontSize: 12}}>
+        {items.slice(0, 40).map((x, i) => (
+          <div key={i} style={{display: "flex", gap: 8, padding: "3px 0", flexWrap: "wrap",
+                               borderTop: i ? "1px solid var(--line)" : "none"}}>
+            <span style={{color: "var(--muted)", minWidth: 62}}>{when(x.t)}</span>
+            <b>{x.name || "(이름 없음)"}</b>
+            <span>{x.act}</span>
+            {x.detail && <span style={{color: "var(--muted)"}}>{x.detail}</span>}
+            <span style={{marginLeft: "auto", color: x.from === "대시보드" ? "#2b5f8a" : "#8a7f72"}}>
+              {x.by || "?"} · {x.from}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Fold>
+  );
+}
+
 function StudentDirectory({ me, onBack, initialCls }) {
   const [people, setPeople] = useState(null);
   const [teachers, setTeachers] = useState([]);
@@ -3084,8 +3169,12 @@ function StudentDirectory({ me, onBack, initialCls }) {
             반이 아니라 <b>사람</b>을 관리하는 곳이에요. 학교·학년·담임을 여기서 정하면
             그 학생이 속한 모든 반과 내신 참여표가 같이 따라가요.
             <br/>표에서 <b>칸을 바로 고치면 저장</b>되고, 맨 아랫줄에 이름을 치면 새 학생이 만들어져요.
+            <br/><b>여기서 고쳐도 되고 대시보드에서 고쳐도 됩니다</b> — 저장되는 곳은 한 군데예요.
+            바뀐 것은 아래 «최근 바뀐 것»에 누가 어디서 했는지 남습니다.
           </div>
         </Fold>
+
+        <StudentLogPanel />
 
         {/* 접었을 때도 무엇으로 걸러져 있는지 제목에 남긴다 —
             거른 채로 접어두고 "학생이 사라졌다"고 오해하는 게 제일 흔한 사고다. */}
@@ -3303,7 +3392,7 @@ function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle,
     if (!confirm(person.name + " 학생 정보를 지울까요?" + "\n" +
       "반 명단과 출결·과제 기록은 그대로 남아요. 학교·학년·담임만 사라집니다.")) return;
     setBusy(true);
-    try { await deleteStudent(person.pid); onChanged && onChanged(); }
+    try { await deleteStudent(person.pid, person.name); onChanged && onChanged(); }
     catch (e) { onMsg("삭제 실패: " + friendlyErr(e)); setBusy(false); }
   }
 
