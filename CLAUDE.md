@@ -619,3 +619,30 @@ Vercel 환경변수 **`GEMINI_API_KEY`**. 답을 주지 않고 힌트만 주도�
 - 보강 처리: 개별진도반에서 다른 요일에 온 학생 "오늘만 추가"
 - 성적 추이 그래프 / AI 질문 분석(많이 막힌 단원 집계)
 - 일반반에도 수강 기간 적용 (현재 개별진도반 UI에만 노출)
+
+---
+
+## 팀장 대시보드 (`team.html` · `api/sheets.js`) — 2026-09-04
+
+한민수 선생님(교무팀장)이 **혼자** 쓰는 화면. `https://climath-class.vercel.app/team.html`.
+앱과 같은 Firebase 프로젝트·같은 로그인(`/api/auth`)을 쓰고 **owner 토큰이 아니면 들여보내지 않는다.**
+
+- **빌드도 React도 없다.** 순수 JS로 그린다. index.html의 Babel 트릭은 JSX 때문인데 여기엔 JSX가 없다.
+  화면은 `#sec-*` 상자 일곱 개에 `render*()`가 각각 innerHTML을 다시 그린다. 상자를 통째로
+  다시 그리면 입력칸 포커스가 날아가므로(볼트 노하우 [[입력 중에 다시 그리면 한 글자만 쳐진다]])
+  시트 찾기 칸은 표만 다시 그린다(`renderSheetTable`).
+- 읽는 곳: `teachers`(owner) · `classes` · `students` · `appConfig/examTerm` · `appConfig/schoolTerms` ·
+  `classes/{cid}/exams`(회차 =) · `classes/{cid}/days/{date}/scores`(최근 30일, 반당 날짜 문서 14개까지).
+  **쓰는 곳은 `team/tasks`·`team/config` 둘뿐.** 앱 데이터는 절대 쓰지 않는다 — 고칠 건 앱 링크로 보낸다.
+- `team/{doc}` 규칙은 **owner 전용**으로 `firestore.rules`에 넣었다. 콘솔에 게시해야 산다.
+  게시 전엔 화면 위 배너가 그 블록을 보여주고, 나머지 상자는 그대로 돈다.
+- 학생 명단의 담임 칸은 `students.homeroom`(tid)이다. `teacher`가 아니다 — roster의 `teacher`는
+  "이 항목이 선생님이다"라는 불리언이라 헷갈린다.
+- **구글시트**는 `/api/sheets`가 서비스 계정(`FIREBASE_SERVICE_ACCOUNT`)으로 읽는다.
+  시트마다 그 계정 이메일(`whoami`가 알려준다)을 **뷰어로 공유**해야 한다. 브라우저 OAuth를 안 쓴 이유:
+  남이 만든 시트는 공개로 못 바꾸고, OAuth 클라이언트는 콘솔 설정이 한 겹 더 든다.
+  처음엔 구글 클라우드 콘솔에서 이 프로젝트의 **Google Sheets API를 켜야** 한다 — 안 켜져 있으면
+  `explain()`이 그 링크를 한국어로 돌려준다. 읽기 전용 scope(`spreadsheets.readonly`)만 쓴다.
+- 시트 id는 **저장소에 적지 않는다**(공개 저장소). 볼트 쪽 작업 노트에 후보 목록이 있다.
+- 팀 할 일은 볼트 `40 팀장업무/할 일 추적.md`의 표를 붙여넣어 가져온다(`importMarkdown`).
+  같은 글자의 할 일은 건너뛰고, `9/4 (목)` 같은 기한은 올해 날짜로 읽는다.

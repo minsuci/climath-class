@@ -133,6 +133,13 @@ service cloud.firestore {
       allow write: if isTeacher();
     }
 
+    // ---------- 팀장 대시보드 (team.html) ----------
+    // 팀 할 일·연동 시트 목록. 관리자 한 사람만 쓰는 화면이라 owner 외엔 아무도 못 본다.
+    // 할 일에 학생 이름이 섞이므로 선생님 전체에도 열지 않는다.
+    match /team/{doc} {
+      allow read, write: if isOwner();
+    }
+
     // ---------- 상담 · 보고서 ----------
     // 학생·학부모에 대한 민감한 기록. 학생 토큰으로는 어떤 경우에도 안 열린다.
     match /consultations/{id} {
