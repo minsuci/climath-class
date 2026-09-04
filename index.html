@@ -1497,6 +1497,36 @@ const deleteProgressFile = (cid, key) => deleteFileDoc(progressDoc(cid, key));
 // ----- 강의노트 (단원별 파일 게시) -----
 const noteUnitsCol = (cid) => classDoc(cid).collection("noteUnits");
 const noteFilesCol = (cid, uid) => noteUnitsCol(cid).doc(uid).collection("files");
+// ----- 강의노트 조회 -----
+// 누가 봤는지는 파일 아래 views 에 학생별로 한 줄씩 쌓인다.
+// 쓰기는 서버가 한다(규칙이 noteUnits 아래를 선생님만 쓰게 막아 두었다).
+const noteViewsCol = (cid, uid, fid) => noteFilesCol(cid, uid).doc(fid).collection("views");
+function listenNoteViews(cid, uid, fid, cb) {
+  return noteViewsCol(cid, uid, fid).onSnapshot((s) => {
+    const arr = [];
+    s.forEach((d) => arr.push({ sid: d.id, ...d.data() }));
+    arr.sort((a, b) => (b.last || 0) - (a.last || 0));
+    cb(arr);
+  }, () => cb([]));
+}
+// 한 번 연 것을 세는 것이지 «머문 시간» 이 아니다. 접었다 폈다 하면 여러 번 세어지므로
+// **이 화면에 있는 동안 파일 하나는 한 번만** 보낸다.
+const NOTE_VIEW_SENT = {};
+async function recordNoteView(cid, uid, fid, sid) {
+  const k = cid + "|" + uid + "|" + fid;
+  if (NOTE_VIEW_SENT[k]) return;
+  NOTE_VIEW_SENT[k] = 1;
+  try {
+    const u = firebase.auth().currentUser;
+    if (!u) return;
+    const idToken = await u.getIdToken();
+    await fetch("/api/noteview", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken, cid, uid, fid, sid }),
+    });
+  } catch (e) { delete NOTE_VIEW_SENT[k]; }   // 못 보냈으면 다음에 다시 해볼 수 있게
+}
+
 async function addNoteUnit(cid, title) { await noteUnitsCol(cid).add({ title, time: Date.now() }); }
 async function renameNoteUnit(cid, uid, title) { await noteUnitsCol(cid).doc(uid).update({ title }); }
 async function addNoteFile(cid, uid, file) { await saveFileToDoc(noteFilesCol(cid, uid).doc(), file); }
@@ -2498,7 +2528,7 @@ function StudentHome({ cls, me, onLogout }) {
       {activeTab === "notes" && (
         <div className="cm-card">
           <h3 className="cm-h3">강의노트</h3>
-          <NotesManager cls={cls} canEdit={false} />
+          <NotesManager cls={cls} canEdit={false} me={me} />
         </div>
       )}
       {activeTab === "ai" && <AIChat cls={cls} me={me} />}
@@ -6523,13 +6553,36 @@ function ProgressEditor({ cid, pkey, canEdit, title }) {
   );
 }
 
-function NoteFileRow({ cls, unit, file, canEdit }) {
+function NoteFileRow({ cls, unit, file, canEdit, me }) {
   const [open, setOpen] = useState(false);
+  const [views, setViews] = useState(null);
+  const [showWho, setShowWho] = useState(false);
+  // 선생님만 «누가 봤나» 를 구독한다. 학생 화면에서는 남의 복습 여부를 볼 일이 없다.
+  useEffect(() => {
+    if (!canEdit) return;
+    return listenNoteViews(cls.id, unit.uid, file.fid, setViews);
+  }, [canEdit, cls.id, unit.uid, file.fid]);
+  // 학생이 펼치면 한 번 남긴다. 선생님이 열어본 것은 서버가 세지 않는다.
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next && me && me.id) recordNoteView(cls.id, unit.uid, file.fid, me.id);
+  }
+  const roster = (cls.roster || []).filter((r) => !r.teacher && !isEnded(r));
+  const seen = (views || []).length;
   return (
     <div style={{borderTop: "1px solid var(--line)", padding: "8px 0"}}>
-      <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={() => setOpen(!open)}>
+      <div style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer"}} onClick={toggle}>
         <span style={{fontSize: 14}}>{file.mime && file.mime.startsWith("image/") ? "🖼" : file.mime === "application/pdf" ? "📄" : "📝"} {file.name}</span>
         <span style={{fontSize: 11, color: "var(--muted)"}}>{fmtDate(ymd(new Date(file.time)))}</span>
+        {canEdit && views !== null && (
+          <button className="cm-link" style={{padding: 0, fontSize: 11,
+                   color: seen ? "#2b5f8a" : "#b6ab9b"}}
+            title="누가 봤는지 보기"
+            onClick={(e) => { e.stopPropagation(); setShowWho((v) => !v); }}>
+            👁 {seen}{roster.length ? "/" + roster.length : ""}명
+          </button>
+        )}
         <span style={{marginLeft: "auto"}}>
           {canEdit && <button className="cm-link" style={{color: "#d6453f"}} onClick={(e) => {
             e.stopPropagation();
@@ -6538,6 +6591,32 @@ function NoteFileRow({ cls, unit, file, canEdit }) {
           {open ? "▾" : "▸"}
         </span>
       </div>
+      {canEdit && showWho && (
+        <div style={{marginTop: 6, padding: 8, background: "#faf8f4", borderRadius: 8, fontSize: 11}}>
+          {seen === 0 ? (
+            <span style={{color: "var(--muted)"}}>아직 아무도 안 봤어요</span>
+          ) : (<>
+            <div style={{marginBottom: 4, color: "var(--muted)"}}>
+              본 학생 {seen}명 · 모두 {(views || []).reduce((a, v) => a + (v.n || 0), 0)}번
+            </div>
+            <div style={{display: "flex", flexWrap: "wrap", gap: 6}}>
+              {(views || []).map((v) => (
+                <span key={v.sid} className="cm-chip" style={{background: "#e3edf5", color: "#2b5f8a"}}
+                  title={"마지막 " + fmtDate(ymd(new Date(v.last)))}>
+                  {v.name}{v.n > 1 ? " ×" + v.n : ""}
+                </span>
+              ))}
+            </div>
+          </>)}
+          {/* 안 본 학생이 이 기능의 쓸모다. 숫자보다 이름이 필요하다. */}
+          {roster.length > seen && (
+            <div style={{marginTop: 6, color: "#c2703f"}}>
+              아직 안 본 학생 — {roster.filter((r) => !(views || []).some((v) => v.sid === r.id))
+                .map((r) => r.name).join(", ")}
+            </div>
+          )}
+        </div>
+      )}
       {open && <div style={{marginTop: 8}}>
         <FileContentViewer meta={file} loader={() => loadFileB64FromDoc(noteFilesCol(cls.id, unit.uid).doc(file.fid), file)} height={Math.round(window.innerHeight * 0.55)} />
       </div>}
@@ -6545,7 +6624,7 @@ function NoteFileRow({ cls, unit, file, canEdit }) {
   );
 }
 
-function NoteUnit({ cls, unit, canEdit }) {
+function NoteUnit({ cls, unit, canEdit, me }) {
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -6606,7 +6685,7 @@ function NoteUnit({ cls, unit, canEdit }) {
         <div style={{marginTop: 6}} className={"cm-drop" + (drop.over ? " over" : "")} {...drop.handlers}>
           {files === null && <div className="cm-empty">불러오는 중…</div>}
           {files && files.length === 0 && !drop.over && <div className="cm-empty">아직 올라온 노트가 없어요{canEdit && canDragDrop && <><br/><span style={{fontSize: 12}}>파일을 여기로 끌어다 놓아도 돼요</span></>}</div>}
-          {files && files.map((f) => <NoteFileRow key={f.fid} cls={cls} unit={unit} file={f} canEdit={canEdit} />)}
+          {files && files.map((f) => <NoteFileRow key={f.fid} cls={cls} unit={unit} file={f} canEdit={canEdit} me={me} />)}
           {drop.over && <div className="cm-drop-hint">↓ 여기에 놓으면 “{unit.title}”에 올라가요</div>}
           {canEdit && <button className="cm-btn cm-btn-ghost" disabled={busy} style={{marginTop: 10}} onClick={() => fileRef.current.click()}>+ 노트 올리기 (이미지 · PDF · HTML, 여러 장 가능)</button>}
           {msg && <div className="cm-hint" style={{marginTop: 6}}>{msg}</div>}
@@ -6756,7 +6835,7 @@ function FlyerView({ cls }) {
   );
 }
 
-function NotesManager({ cls, canEdit }) {
+function NotesManager({ cls, canEdit, me }) {
   const [units, setUnits] = useState(null);
   useEffect(() => noteUnitsCol(cls.id).orderBy("time").onSnapshot((s) => {
     const arr = []; s.forEach((d) => arr.push({ uid: d.id, ...d.data() }));
@@ -6766,7 +6845,7 @@ function NotesManager({ cls, canEdit }) {
   return (
     <div>
       {units.length === 0 && <div className="cm-empty">{canEdit ? "단원을 만들어 손필기 노트를 올려보세요" : "아직 게시된 강의노트가 없어요"}</div>}
-      {units.map((u) => <NoteUnit key={u.uid} cls={cls} unit={u} canEdit={canEdit} />)}
+      {units.map((u) => <NoteUnit key={u.uid} cls={cls} unit={u} canEdit={canEdit} me={me} />)}
       {canEdit && <button className="cm-link" style={{marginTop: 10}} onClick={() => {
         const t = prompt("새 단원 이름 (예: 1. 다항식의 연산)");
         if (t && t.trim()) addNoteUnit(cls.id, t.trim());
