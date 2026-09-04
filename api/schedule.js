@@ -628,6 +628,152 @@ async function examFromDoc(text, school, from, to, kind, grades) {
   return Object.keys(byGrade).length ? byGrade : null;
 }
 
+// ---- 4단계: 메뉴 페이지에 **그림으로** 붙여둔 학사일정 ----
+//
+// 서울 웹호스팅 학교 중에는 학사일정을 게시판 글이 아니라 **메뉴 본문(subMenu.do)** 에 두고,
+// 그것도 표가 아니라 **이미지로 붙여넣은** 곳이 있다(서운중). 글자가 하나도 없으니
+// 목록형 긁기도, 게시판 문서 읽기도 통째로 헛돈다 — "아무 데도 없음"으로 보고했던 학교들이다.
+//
+// 그림은 눈으로 읽을 수밖에 없다. 그래서 AI에게 그림을 준다. 대신 **요일로 검증한다.**
+// 학사일정 표는 요일이 열이라, AI가 "21일 · 월요일 칸"이라고 읽었으면 2026-09-21 이 실제로
+// 월요일이어야 한다. 해를 잘못 잡거나 줄을 밀려 읽으면 요일이 어긋나므로 거기서 걸린다.
+// (같은 수법을 학사력 PDF에서 이미 쓰고 있다)
+
+const CONTENT_IMG = /<img[^>]+src="([^"]+)"[^>]*>/g;
+function contentImages(html, base) {
+  const out = [];
+  let m;
+  CONTENT_IMG.lastIndex = 0;
+  while ((m = CONTENT_IMG.exec(html))) {
+    const tag = m[0], src = m[1];
+    if (/로고|logo|배너|banner|icon|아이콘/i.test(tag)) continue;      // 로고·꾸밈 그림은 뺀다
+    // 편집기로 붙여넣은 본문 그림. 서울 CMS는 crosseditor 아래에 둔다.
+    const isContent = /crosseditor\/binary\/images\//.test(src)
+      || (/selectImageView\.do/.test(src) && /atchFileId=/.test(src) && !/usrimgId=/.test(src));
+    if (!isContent) continue;
+    let u;
+    try { u = src.startsWith("http") ? src : new URL(src, base).toString(); } catch (e) { continue; }
+    if (out.indexOf(u) < 0) out.push(u);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+async function menuImages(url, web) {
+  if (web.n <= 0) return [];
+  web.n--;
+  const r = await fetch(url, { headers: UA, redirect: "follow" });
+  if (!r.ok) return [];
+  const html = await r.text();
+  return contentImages(html, url);
+}
+// 그림을 받아 base64 로. 너무 큰 것은 버린다(AI 요청이 통째로 실패한다).
+const IMG_MAX = 4 * 1024 * 1024;
+async function fetchImage(url, web) {
+  if (web.n <= 0) return null;
+  web.n--;
+  const r = await fetch(url, { headers: UA, redirect: "follow" });
+  if (!r.ok) return null;
+  const ct = (r.headers.get("content-type") || "").split(";")[0].trim();
+  if (!/^image\/(png|jpeg|jpg|gif|webp)$/.test(ct)) return null;
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (!buf.length || buf.length > IMG_MAX) return null;
+  return { mime: ct === "image/jpg" ? "image/jpeg" : ct, data: buf.toString("base64") };
+}
+const WD_KO = "일월화수목금토";
+function dowOf(d) { return WD_KO[new Date(d + "T00:00:00").getDay()]; }
+// ⚠ 이 파일의 ymd()는 하이픈만 지운다. 2026-02-30 처럼 **없는 날짜**는 그대로 통과하므로
+//    실재하는 날인지는 따로 봐야 한다(Date 가 다음 달로 넘겨버린다).
+function realDate(d) {
+  const dt = new Date(d + "T00:00:00");
+  if (isNaN(dt.getTime())) return false;
+  const back = dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
+  return back === d;
+}
+
+let lastImgReason = "";
+async function examFromImage(school, imgUrls, from, to, kind, grades, web) {
+  const GS = grades && grades.length ? grades : ["고1", "고2", "고3"];
+  lastImgReason = "";
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) { lastImgReason = "AI 키 없음"; return null; }
+  const imgs = [];
+  for (const u of imgUrls) {
+    const im = await fetchImage(u, web).catch(() => null);
+    if (im) imgs.push(im);
+    if (imgs.length >= 3) break;
+  }
+  if (!imgs.length) { lastImgReason = "그림을 못 받음"; return null; }
+
+  const parts = [{ text:
+    school + " 학사일정 표 그림이다. 세로가 월/주, 가로가 요일(월·화·수·목·금)인 달력표다.\n" +
+    "여기서 " + from.slice(0, 4) + "-" + from.slice(4, 6) + "-" + from.slice(6, 8) + " 부터 " +
+    to.slice(0, 4) + "-" + to.slice(4, 6) + "-" + to.slice(6, 8) + " 사이의 " +
+    (kind || "중간") + "고사(지필평가·정기고사) 기간을 찾아라.\n" +
+    "시작일 = 첫 시험날, 종료일 = 마지막 시험날. 중간이 공휴일로 끊겨도 처음과 끝으로 잡는다.\n" +
+    "모의고사·학력평가·수능·체험학습은 시험이 아니다. 1학기 시험도 제외한다.\n" +
+    "학년이 적혀 있으면(\"3학년 기말고사\") 그 학년만, \"1,2,3학년\"이면 전부 해당한다.\n\n" +
+    "**시작일과 종료일이 그림에서 어느 요일 칸에 있었는지도 함께 답하라.** 칸을 잘못 읽었는지 검사하는 데 쓴다.\n\n" +
+    "형식: {\"start\":\"YYYY-MM-DD\",\"end\":\"YYYY-MM-DD\",\"startDow\":\"월\",\"endDow\":\"화\"," +
+    "\"evidence\":\"그 칸에 적힌 글자 그대로\",\"grades\":[" + GS.map((g) => "\"" + g + "\"").join(",") + "]}\n" +
+    "학년 구분이 없으면 grades 는 위의 학년을 모두 넣는다. 못 찾으면 {\"none\":true}" }];
+  imgs.forEach((im) => parts.push({ inline_data: { mime_type: im.mime, data: im.data } }));
+
+  const body = {
+    system_instruction: { parts: [{ text:
+      "너는 한국 중·고등학교 학사일정 표 그림에서 시험 기간만 읽어내는 도구다. " +
+      "JSON 하나만 출력한다. 설명·코드블록 금지. " +
+      "그림에 없는 날짜는 절대 만들지 마라. 확실하지 않으면 {\"none\":true} 를 내라." }] },
+    contents: [{ role: "user", parts }],
+    generationConfig: { temperature: 0, maxOutputTokens: 800, responseMimeType: "application/json",
+                        thinkingConfig: { thinkingBudget: 0 } },
+  };
+  const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=" + key,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) { lastImgReason = "AI 호출 실패 " + r.status; return null; }
+  const j = await r.json().catch(() => null);
+  const out = ((((j || {}).candidates || [])[0] || {}).content || {}).parts || [];
+  const rawTxt = out.map((x) => x.text || "").join("").trim();
+  if (!rawTxt) {
+    const fin = (((j || {}).candidates || [])[0] || {}).finishReason || "";
+    lastImgReason = "AI가 빈 답" + (fin ? " (" + fin + ")" : "");
+    return null;
+  }
+  let v = null;
+  try { v = JSON.parse(rawTxt); } catch (e) { lastImgReason = "AI 답을 못 읽음: " + rawTxt.slice(0, 60); return null; }
+  if (!v || v.none || !v.start || !v.end) { lastImgReason = "그림에서 못 찾음"; return null; }
+
+  const bad = verifyImagePick(v, from, to, kind);
+  if (bad) { lastImgReason = bad; return null; }
+
+  const got = Array.isArray(v.grades) && v.grades.length ? v.grades : GS;
+  const byGrade = {};
+  got.forEach((g) => { if (GS.indexOf(g) >= 0) byGrade[g] = { start: v.start, end: v.end, days: 0, name: (kind || "중간") + "고사" }; });
+  return Object.keys(byGrade).length ? byGrade : null;
+}
+// 그림에서 읽은 값을 믿을 수 있는지 본다. 글자를 대조할 원문이 없으므로
+// **날짜 자체가 스스로 증명하게** 한다 — 요일이 어긋나면 칸을 잘못 읽은 것이다.
+function verifyImagePick(v, from, to, kind) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v.start) || !/^\d{4}-\d{2}-\d{2}$/.test(v.end)) return "날짜 모양이 이상함";
+  if (!realDate(v.start) || !realDate(v.end)) return "없는 날짜: " + v.start + "~" + v.end;
+  const a = ymd(v.start), b = ymd(v.end);
+  if (a > b) return "시작이 끝보다 늦음: " + v.start + "~" + v.end;
+  if (a < from || b > to) return "기간 밖: " + v.start + "~" + v.end;
+  // 시험은 한 주 안에서 끝난다. 열흘을 넘으면 다른 줄까지 삼킨 것이다.
+  const span = (new Date(v.end + "T00:00:00") - new Date(v.start + "T00:00:00")) / 86400000;
+  if (span > 10) return "기간이 너무 김(" + (span + 1) + "일): " + v.start + "~" + v.end;
+  // 시험은 주말에 안 본다
+  if (/[토일]/.test(dowOf(v.start)) || /[토일]/.test(dowOf(v.end))) return "주말로 읽음: " + v.start + "~" + v.end;
+  // ⚠ 여기가 핵심이다. 표는 요일이 열이므로, AI가 읽은 칸의 요일과 그 날짜의 진짜 요일이
+  //    같아야 한다. 해를 잘못 잡거나 줄을 밀려 읽으면 여기서 어긋난다.
+  if (v.startDow && dowOf(v.start) !== String(v.startDow).replace(/요일$/, ""))
+    return "요일이 안 맞음(" + v.start + "은 " + dowOf(v.start) + "요일인데 " + v.startDow + "로 읽음)";
+  if (v.endDow && dowOf(v.end) !== String(v.endDow).replace(/요일$/, ""))
+    return "요일이 안 맞음(" + v.end + "은 " + dowOf(v.end) + "요일인데 " + v.endDow + "로 읽음)";
+  // 읽었다는 글자에 시험이라는 말이 있어야 한다
+  if (v.evidence && !/고사|지필|평가|시험/.test(String(v.evidence))) return "시험 글자가 아님: " + String(v.evidence).slice(0, 30);
+  return "";
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
   try {
@@ -726,11 +872,28 @@ export default async function handler(req, res) {
         hasAny = true;
       }
     }
+    // 글자가 아예 없는 학교 — 메뉴 본문에 **그림으로** 붙여둔 학사일정을 읽는다
+    let imgPage = "";
+    if (!via && lastMenus.length && web.n > 0) {
+      for (const url of lastMenus) {
+        const imgs = await menuImages(url, web).catch(() => []);
+        if (!imgs.length) continue;
+        const g = await examFromImage(s.official, imgs, from, to, kind, want, web).catch(() => null);
+        hasAny = true;                       // 그림이 있다는 것 자체가 "일정이 있다"는 뜻이다
+        if (g) {
+          Object.keys(g).forEach((k) => {
+            byGrade[k] = { ...g[k], raw: g[k].name || "", name: examLabel(kind, twice) };
+          });
+          via = "image"; imgPage = url; break;
+        }
+      }
+    }
     // ---- 근거 링크 ----
     // 선생님이 "정말 이 날짜가 맞나" 확인하려면 **클릭 한 번**으로 원문에 닿아야 한다.
     // 나이스 API 주소는 JSON이 열릴 뿐이라 확인이 안 된다 — 사람이 볼 수 있는 자리로 보낸다.
     let src = { url: "", name: "" };
     if (via === "doc") src = { url: docUrl, name: docTitle || "게시판 문서" };
+    else if (via === "image") src = { url: imgPage, name: "학사일정 (그림)" };
     else if (via === "homepage") src = { url: hpUrl || s.hmpg, name: "학교 학사일정" };
     else if (via === "neis") {
       const c = await calendarUrl(school, s, web).catch(() => "");
@@ -743,7 +906,8 @@ export default async function handler(req, res) {
                            dupes: s.dupes || [],
                            byGrade, found: exams.length,
                            // 나이스에 일정이 아예 없는 학교와, 일정은 있는데 시험만 안 올린 학교는 다르다
-                           hasAny, via, docTitle, docReason: via === "doc" ? "" : lastDocReason,
+                           hasAny, via, docTitle,
+                           docReason: via === "doc" || via === "image" ? "" : (lastImgReason || lastDocReason),
                            homepage: s.hmpg || "",
                            truncated, hasKey: !!KEY });
   } catch (e) {

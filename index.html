@@ -1027,6 +1027,8 @@ async function runNeisPull(term, targets, from, to, kind) {
         if (r.dupes && r.dupes.length) dupe.push(school + "→" + (r.officeName || "").replace("교육청", "") + " (" + r.dupes.join("·") + "에도 있음)");
         // 문서(PDF·한글파일)에서 읽은 것은 사람이 한 번 봐야 한다
         if (r.via === "doc") fromDoc.push(school + (r.docTitle ? " (" + r.docTitle + ")" : ""));
+        // 그림에서 읽은 것은 대조할 원문이 없다. 요일로 걸렀어도 사람이 한 번 봐야 한다.
+        else if (r.via === "image") fromDoc.push(school + " (그림)");
         else if (r.docReason) noExam.push(school + " — " + r.docReason);
         const note = planNote(r.plan);
         // 근거는 학교 단위다(학년이 달라도 같은 학사일정을 본다)
