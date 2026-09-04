@@ -641,22 +641,27 @@ async function examFromDoc(text, school, from, to, kind, grades) {
 
 const CONTENT_IMG = /<img[^>]+src="([^"]+)"[^>]*>/g;
 function contentImages(html, base) {
-  const out = [];
+  // ⚠ 머리말·옆단의 배너도 selectImageView.do 로 나온다. 문서 차례로 주우면 그것들이 먼저
+  //    잡혀서 **정작 달력 그림이 밀려난다**(서운중은 배너 셋이 앞에 있었다). 두 겹으로 막는다.
+  // (1) 본문이 시작되는 자리부터만 본다
+  const i = html.search(/id="cntTitle"|id="cntBody"|class="[^"]*cntBody/);
+  const scope = i >= 0 ? html.slice(i) : html;
+  // (2) 편집기로 붙여넣은 그림을 앞세운다 — 본문 그림은 거의 그쪽이다
+  const paste = [], other = [];
   let m;
   CONTENT_IMG.lastIndex = 0;
-  while ((m = CONTENT_IMG.exec(html))) {
+  while ((m = CONTENT_IMG.exec(scope))) {
     const tag = m[0], src = m[1];
-    if (/로고|logo|배너|banner|icon|아이콘/i.test(tag)) continue;      // 로고·꾸밈 그림은 뺀다
-    // 편집기로 붙여넣은 본문 그림. 서울 CMS는 crosseditor 아래에 둔다.
-    const isContent = /crosseditor\/binary\/images\//.test(src)
-      || (/selectImageView\.do/.test(src) && /atchFileId=/.test(src) && !/usrimgId=/.test(src));
-    if (!isContent) continue;
+    if (/로고|logo|배너|banner|icon|아이콘/i.test(tag)) continue;
+    const isPaste = /crosseditor\/binary\/images\//.test(src);
+    const isFile = /selectImageView\.do/.test(src) && /atchFileId=/.test(src) && !/usrimgId=/.test(src);
+    if (!isPaste && !isFile) continue;
     let u;
     try { u = src.startsWith("http") ? src : new URL(src, base).toString(); } catch (e) { continue; }
-    if (out.indexOf(u) < 0) out.push(u);
-    if (out.length >= 4) break;
+    const box = isPaste ? paste : other;
+    if (box.indexOf(u) < 0) box.push(u);
   }
-  return out;
+  return paste.concat(other).slice(0, 6);
 }
 async function menuImages(url, web) {
   if (web.n <= 0) return [];

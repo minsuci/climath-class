@@ -21,19 +21,26 @@ const ok = (n, c, e) => T.push((c ? "  OK  " : "FAIL  ") + n + (e ? "   " + e : 
 
 // ---- 본문 그림 골라내기 ----
 // 서운중 학사일정 페이지에서 실제로 나오는 태그들
+// ⚠ 실제 페이지 차례 그대로다 — 배너 셋이 **달력 그림보다 앞에** 있다.
+//   문서 차례로 주우면 배너만 AI에게 가고 달력은 밀려난다 (2026-09-04에 이걸로 못 찾았다).
 const HTML = `
 <img src="/dggb/module/file/selectImageView.do?atchFileId=1754161&fileSn=0" alt="서운중학교 로고" />
 <img src="/dggb/module/image/selectDesignImageView.do?sitemapId=271297&usrimgId=23740" alt=""/>
+<h2 id="cntTitle">학사일정</h2>
+<img src="/dggb/module/file/selectImageView.do;jsessionid=ABC?atchFileId=3716272&fileSn=0" />
+<img src="/dggb/module/file/selectImageView.do;jsessionid=ABC?atchFileId=197878&fileSn=0" />
+<img src="/dggb/module/file/selectImageView.do;jsessionid=ABC?atchFileId=197879&fileSn=0" />
 <img src="https://seoun.sen.ms.kr/crosseditor/binary/images/007169/20260423144336430_SE3POC5X.png" title="external_image" alt="external_image" />
 <img src="https://seoun.sen.ms.kr/crosseditor/binary/images/007169/20260423144646654_I54CGH4W.png" title="external_image" alt="external_image" />
-<img src="/dggb/module/file/selectImageView.do;jsessionid=ABC?atchFileId=3716272&fileSn=0" />
 `;
 const imgs = call("contentImages", HTML, "https://seoun.sen.ms.kr/113296/subMenu.do");
 ok("편집기로 붙여넣은 본문 그림을 잡는다",
   imgs.filter((u) => u.includes("crosseditor")).length === 2, imgs.join(" | "));
-ok("로고는 뺀다", !imgs.some((u) => u.includes("1754161")));
-ok("꾸밈 그림(usrimgId)은 뺀다", !imgs.some((u) => u.includes("usrimgId")));
-ok("첨부 이미지도 받는다", imgs.some((u) => u.includes("atchFileId=3716272")));
+ok("**달력 그림이 배너보다 앞에 온다** (AI에게 앞의 셋만 보낸다)",
+  imgs.slice(0, 2).every((u) => u.includes("crosseditor")), imgs.map((u) => u.slice(-24)).join(" | "));
+ok("본문 위(cntTitle 앞)의 로고·꾸밈은 아예 안 본다",
+  !imgs.some((u) => u.includes("1754161") || u.includes("usrimgId")));
+ok("첨부 이미지도 뒤에 남겨둔다", imgs.some((u) => u.includes("atchFileId=3716272")));
 ok("상대 주소를 절대 주소로", imgs.every((u) => u.startsWith("https://")), imgs.join(" | "));
 
 // ---- 요일 ----
