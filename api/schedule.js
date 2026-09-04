@@ -95,6 +95,11 @@ async function loadCodes() {
   memo = (d && d.map) || {};
   return memo;
 }
+// 시·도 이름을 앞에 붙여 부르는 습관("서울서운중"). 중·고등학교의 정식 이름에는 대개 그게 없어서
+// 그대로 찾으면 **아무것도 안 나온다** — `서울서운중` → 검색어 `서울서운` → 0건.
+// (초등학교는 정식 이름에 들어 있으므로 붙은 채로 먼저 찾고, 안 되면 떼고 다시 찾는다)
+const REGION_PREFIX = /^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?=.{3,})/;
+
 async function resolveSchool(short, budget) {
   const codes = await loadCodes();
   const cached = codes[short];
@@ -130,6 +135,19 @@ async function resolveSchool(short, budget) {
       hit = pick(rows);
     }
     if (!hit) await sleep(40);
+  }
+  // 못 찾았으면 시·도 이름을 떼고 한 번 더. "서울서운중" → "서운중"
+  // 찾은 결과는 **부른 이름 그대로**(short) 캐시된다 — 다음부터 이 왕복이 없다.
+  if (!hit && REGION_PREFIX.test(short) && budget.n > 0) {
+    const bare = short.replace(REGION_PREFIX, "");
+    const r = await resolveSchool(bare, budget);
+    if (r) {
+      const alias = { ...r, dupes: r.dupes || [] };
+      memo = { ...(memo || {}), [short]: alias };
+      const fp0 = "map.`" + short.replace(/[\`]/g, "\$&") + "`";
+      await patchDoc("appConfig/neisCodes", { map: { [short]: alias } }, [fp0]).catch(() => {});
+      return alias;
+    }
   }
   if (!hit) return null;
   const found = { code: hit.SD_SCHUL_CODE, office: hit.ATPT_OFCDC_SC_CODE,
