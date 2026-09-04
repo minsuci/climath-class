@@ -472,10 +472,37 @@ const isClassEnded = (cls) => !!(cls && cls.endDate && todayStr > cls.endDate);
 // 일반 선생님은 담당 반 id 배열. 보안 규칙이 담당 반 밖을 막으므로 화면도 같이 맞춘다 —
 // 안 맞추면 목록에는 보이는데 들어가면 아무것도 안 뜨는 상태가 된다.
 let MY_SCOPE = null;
+// 역할도 같이 들고 있는다. 담당 밖 반을 읽을 수 있는지가 여기에 달려 있고,
+// 화면 부품마다 me 를 물려주려면 손이 너무 많이 간다.
+let MY_ROLE = "";
 const inScope = (c) => !MY_SCOPE || MY_SCOPE.indexOf(c.id) >= 0;
 const activeClasses = () => CLASSES.filter((c) => !isClassEnded(c) && inScope(c));
 // 반 관리 전용 — 담당 범위를 무시하고 전부 본다. 다른 화면은 절대 이걸 쓰지 않는다.
 const allClasses = () => CLASSES.slice();
+// 담당 밖 반까지 **읽을 수 있는가**. 보안 규칙의 teaches() 와 같은 판단이다 —
+// 관리자만 남의 반 하위 자료(exams 등)를 읽는다. 일반 선생님에게 남의 반을 보여주면
+// 접수가 하나도 없는 것처럼 보인다: 못 읽는 것과 안 낸 것이 구별되지 않는다.
+const canSeeOtherClasses = () => MY_ROLE === "owner";
+// 참여표에서 고른 반. null = "담당 반 그대로"(고른 적 없음)이고, 배열이면 직접 고른 것이다.
+// 빈 배열도 뜻이 있다 — 모두 껐다는 것이라 null 로 되돌리면 안 된다.
+const EXAM_PICK_KEY = "cm.examPick";
+function loadExamPick() {
+  try {
+    const raw = localStorage.getItem(EXAM_PICK_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v : null;
+  } catch (e) { return null; }
+}
+function saveExamPick(v) {
+  try {
+    if (v === null) localStorage.removeItem(EXAM_PICK_KEY);
+    else localStorage.setItem(EXAM_PICK_KEY, JSON.stringify(v));
+  } catch (e) {}
+}
+// 고를 수 있는 반. 관리자는 안 끝난 반 전부, 선생님은 담당한 것만.
+const pickableClasses = () =>
+  (canSeeOtherClasses() ? CLASSES.filter((c) => !isClassEnded(c)) : activeClasses());
 const endedClasses = () => CLASSES.filter((c) => isClassEnded(c) && inScope(c));
 // 기간 연장: 기준일(없거나 이미 지났으면 오늘)에서 n개월 뒤
 function addMonths(baseStr, n) {
@@ -1182,6 +1209,7 @@ let MUST_CHANGE_PIN = false;
 //    반 관리에서 아무 반이나 열면 편집까지 된다.
 function applyScope(t) {
   MY_SCOPE = (t && t.classIds) || [];
+  MY_ROLE = (t && t.role) || "";
 }
 
 async function signOutAll() {
@@ -1189,6 +1217,7 @@ async function signOutAll() {
   CLASSES = [];
   AUTH = null;
   MY_SCOPE = null;
+  MY_ROLE = "";
   SESSION_PIN = "";
   MUST_CHANGE_PIN = false;
 }
@@ -3996,6 +4025,11 @@ function ExamBoard({ onBack }) {
   const [rev, setRev] = useState(0);   // 반 명단을 고친 뒤 다시 그리게 하는 counter
   const [filling, setFilling] = useState(false);
   const [fillMsg, setFillMsg] = useState("");
+  // 볼 반. 기본은 담당 반이고, 관리자는 여기서 남의 반을 더 넣거나 전체로 볼 수 있다.
+  // localStorage 에 남긴다 — 참여표는 시험 기간 내내 여러 번 드나드는 화면이라
+  // 들어올 때마다 다시 고르게 하면 그게 곧 일이 된다.
+  const [picked, setPicked] = useState(loadExamPick);
+  const [openPick, setOpenPick] = useState(false);
   const backRef = useSwipeBack(onBack);
   // 참여표는 PC로 본다. 560px 컬럼에 가두면 달력이 못 들어간다 (안내문과 같은 처리)
   useEffect(() => {
@@ -4004,7 +4038,14 @@ function ExamBoard({ onBack }) {
     el.classList.add("cm-shell-wide");
     return () => el.classList.remove("cm-shell-wide");
   }, []);
-  const classes = activeClasses();
+  // ⚠ 여기가 표 전체의 뿌리다. 아래 listenExams 도 이 목록을 따라간다.
+  const pool = pickableClasses();
+  const classes = picked ? pool.filter((c) => picked.indexOf(c.id) >= 0) : activeClasses();
+  // 고른 것이 담당 반과 똑같으면 "담당 반"이라고 말한다 — 전체를 눌렀다가
+  // 도로 담당만 눌렀을 때 "직접 고름"으로 남아 있으면 지금 뭘 보는지 헷갈린다.
+  const mineOnly = !picked ||
+    (classes.length === activeClasses().length && classes.every((c) => inScope(c)));
+  useEffect(() => { saveExamPick(picked); }, [picked && picked.join(",")]);
   useEffect(() => listenSchools(setShared), []);
   useEffect(() => listenSchoolTerms(setSched), []);
   useEffect(() => listenStudents(setPeople, () => setPeople([])), []);
@@ -4015,7 +4056,7 @@ function ExamBoard({ onBack }) {
   }, []);
   // 학년 탭이나 회차가 바뀌면 보이는 줄이 통째로 달라진다. 고른 것을 들고 있으면
   // 지금 화면에 없는 사람에게 복귀일이 들어간다.
-  useEffect(() => { setSel({}); }, [grade, term]);
+  useEffect(() => { setSel({}); }, [grade, term, classes.map((c) => c.id).join(",")]);
 
   useEffect(() => listenExamTerm((t) => { setTerm(t); setDraft(t); }), []);
   useEffect(() => {
@@ -4575,6 +4616,59 @@ function ExamBoard({ onBack }) {
             <ExamEntry key={entry.cls.id + entry.st.id} cls={entry.cls} term={term} st={entry.st}
               cur={entry.cur} schoolOpts={schoolOpts} onDone={() => setEntry(null)} />
           )}
+
+          {/* 볼 반 고르기. 기본은 담당 반 — 팀장 일로 남의 반까지 봐야 할 때 켠다. */}
+          <div style={{marginTop: 10, marginBottom: 8}}>
+            <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"}}>
+              <button className="cm-link" style={{padding: 0, fontSize: 13}}
+                onClick={() => setOpenPick((v) => !v)}>
+                {openPick ? "▾" : "▸"} 보는 반 <b>{classes.length}개</b>
+                {picked && pool.length > classes.length ? " / " + pool.length + "개 중" : ""}
+              </button>
+              {mineOnly
+                ? <span className="cm-chip" style={{background: "#f0ece5", color: "#7c6f5f"}}>담당 반</span>
+                : <span className="cm-chip" style={{background: "#e3edf5", color: "#2b5f8a"}}>직접 고름</span>}
+              {classes.length === 0 && (
+                <span style={{fontSize: 12, color: "#d6453f"}}>반을 하나도 안 골랐어요</span>
+              )}
+            </div>
+            {openPick && (
+              <div style={{marginTop: 8, padding: 10, background: "#fff", border: "1px solid var(--line)",
+                           borderRadius: 8}}>
+                <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8}}>
+                  <button className="cm-btn cm-btn-ghost" style={{padding: "5px 12px", fontSize: 12}}
+                    onClick={() => setPicked(pool.map((c) => c.id))}>전체 {pool.length}개</button>
+                  <button className="cm-btn cm-btn-ghost" style={{padding: "5px 12px", fontSize: 12}}
+                    onClick={() => setPicked(null)}>담당 반만</button>
+                  <button className="cm-btn cm-btn-ghost" style={{padding: "5px 12px", fontSize: 12}}
+                    onClick={() => setPicked([])}>모두 끄기</button>
+                </div>
+                <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+                  {pool.map((c) => {
+                    const on = classes.some((x) => x.id === c.id);
+                    const mine = MY_SCOPE && MY_SCOPE.indexOf(c.id) >= 0;
+                    return (
+                      <button key={c.id} className={"cm-ab-tab" + (on ? " on" : "")}
+                        title={mine ? "담당 반" : "담당이 아닌 반"}
+                        onClick={() => {
+                          const cur = picked || pool.filter((x) => inScope(x)).map((x) => x.id);
+                          setPicked(on ? cur.filter((id) => id !== c.id) : cur.concat([c.id]));
+                        }}>
+                        {on ? "☑" : "☐"} {c.name}
+                        {!mine && <span style={{color: "#c2703f", fontSize: 10}}> ·타</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                {!canSeeOtherClasses() && (
+                  <div className="cm-hint" style={{marginTop: 8}}>
+                    담당하지 않은 반은 규칙상 접수 내용을 읽을 수 없어서 여기 안 나와요.
+                    필요하면 <b>반 관리</b>에서 담당으로 넣어달라고 하세요.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, marginTop: 10}}>
             {GRADES.map((g) => {
