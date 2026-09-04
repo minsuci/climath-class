@@ -10,10 +10,24 @@
 // 필요한 환경변수 (Vercel):
 //   OPSDB_URL    창구 주소 (…/exec)
 //   OPSDB_TOKEN  창구 토큰
-import { verifyIdToken, getDoc } from "./_google.js";
+import { verifyIdToken, getDoc, patchDoc } from "./_google.js";
 
-const URL_ = process.env.OPSDB_URL || "";
-const TOKEN = process.env.OPSDB_TOKEN || "";
+// 주소·토큰은 환경변수가 먼저다. 없으면 team/opsdb 에서 읽는다.
+//
+// team/ 은 보안 규칙에서 아무 데도 안 걸려 **어떤 클라이언트도 못 읽는다**
+// (맨 끝 catch-all 이 전부 막는다). 서비스 계정만 통과하므로 서버 전용 서랍이다.
+// 환경변수를 손댈 수 없을 때 여기에 넣으면 배포 없이 바로 돈다.
+const CFG_PATH = "team/opsdb";
+let _cfg = null;
+async function config() {
+  if (process.env.OPSDB_URL && process.env.OPSDB_TOKEN) {
+    return { url: process.env.OPSDB_URL, token: process.env.OPSDB_TOKEN, where: "환경변수" };
+  }
+  if (_cfg) return _cfg;
+  const d = await getDoc(CFG_PATH).catch(() => null);
+  if (d && d.url && d.token) { _cfg = { url: d.url, token: d.token, where: "team/opsdb" }; return _cfg; }
+  return null;
+}
 
 // 창구가 받는 것 중 **이 앱이 쓰는 것만** 연다.
 // 통째로 열면 이 문이 곧 창구의 복사본이 된다 — 앱이 안 쓰는 기능까지
@@ -24,11 +38,11 @@ const OK_ACTIONS = READ.concat(WRITE);
 
 // 창구는 302 로 googleusercontent 에 답을 놔둔다. fetch 는 그 리다이렉트를
 // GET 으로 따라가는데, POST 본문은 이미 전달된 뒤라 답을 받는 데는 문제가 없다.
-async function call(payload) {
-  const r = await fetch(URL_, {
+async function call(cfg, payload) {
+  const r = await fetch(cfg.url, {
     method: "POST",
     headers: { "Content-Type": "application/json; charset=utf-8" },
-    body: JSON.stringify({ ...payload, token: TOKEN }),
+    body: JSON.stringify({ ...payload, token: cfg.token }),
     redirect: "follow",
   });
   const text = await r.text();
@@ -39,14 +53,28 @@ async function call(payload) {
 export default async function handler(req, res) {
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
   try {
-    if (!URL_ || !TOKEN) {
-      res.status(503).json({ error: "운영DB 주소·토큰이 아직 설정되지 않았어요 (OPSDB_URL · OPSDB_TOKEN)" });
-      return;
-    }
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const claims = await verifyIdToken(body.idToken);
     if (!claims || (claims.role !== "teacher" && claims.role !== "owner")) {
       res.status(403).json({ error: "권한이 없습니다" }); return;
+    }
+
+    // 주소·토큰 넣기 — 관리자만. 넣은 값은 다시 못 읽는다(꼬리 몇 자만 알려준다).
+    if (body.setup) {
+      if (claims.role !== "owner") { res.status(403).json({ error: "관리자만 넣을 수 있습니다" }); return; }
+      const u = String(body.setup.url || ""), t = String(body.setup.token || "");
+      if (!/^https:\/\/script\.google\.com\//.test(u) || !t) {
+        res.status(400).json({ error: "주소는 script.google.com 이어야 하고 토큰이 있어야 합니다" }); return;
+      }
+      await patchDoc(CFG_PATH, { url: u, token: t, updated: Date.now() });
+      _cfg = null;
+      res.status(200).json({ ok: true, saved: true, tokenTail: "…" + t.slice(-4) }); return;
+    }
+
+    const cfg = await config();
+    if (!cfg) {
+      res.status(503).json({ error: "운영DB 주소·토큰이 아직 없어요 (OPSDB_URL·OPSDB_TOKEN 또는 team/opsdb)" });
+      return;
     }
 
     const payload = body.payload || {};
@@ -74,7 +102,7 @@ export default async function handler(req, res) {
       }
     }
 
-    const r = await call(payload);
+    const r = await call(cfg, payload);
     res.status(r.ok ? 200 : 502).json(r.body);
   } catch (e) {
     console.error("[opsdb]", e);
