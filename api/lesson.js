@@ -10,7 +10,7 @@
 //   ③ 자막은 숫자를 조용히 바꾼다 — 「y²곱」 「12미만」 처럼.
 //      개념은 읽히지만 값·문항번호는 못 믿는다
 //   개념까지 넣고 싶으면 PC 에서 뽑아 올리는 편이 낫다.
-import { verifyIdToken, getDoc, patchDoc, listDocs } from "./_google.js";
+import { verifyIdToken, getDoc, patchDoc, listDocs, deleteDoc } from "./_google.js";
 
 const UA = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
@@ -183,6 +183,69 @@ async function capPut(res, { cid, date, text, keepTitle }) {
   res.status(200).json({ ok: true, line: full });
 }
 
+// ───────── 판서 PDF 를 강의노트에 올린다 (PC 도구 전용) ─────────
+//
+// 왜 서버인가 — noteUnits 는 보안 규칙이 **선생님만 쓰게** 막아 두었고,
+// PC 에는 파이어베이스 열쇠를 두지 않는다 (noteview.js 와 같은 이유).
+// 여기서 서비스 계정으로 쓰면 배포만으로 돈다.
+//
+// 왜 나눠 받나 — 버셀은 요청 본문이 4.5MB 를 넘으면 거절한다.
+// 파일 하나를 통째로 보내면 그 벽에 걸리므로 **조각마다 한 번씩** 부른다.
+// 앱이 브라우저에서 쓰는 것과 같은 모양(parts/{n}.data)이라 화면은 그대로 읽는다.
+const NOTE_CHUNK = 700000;
+
+function unitId(title) {
+  // 제목이 같으면 언제나 같은 자리 — 매일 돌아도 단원이 늘어나지 않는다.
+  let h = 5381;
+  for (const ch of String(title)) h = ((h * 33) ^ ch.codePointAt(0)) >>> 0;
+  return "auto_" + h.toString(36);
+}
+
+// 반 목록 — PC 도구가 «어느 반에 올릴지» 를 고를 수 있게. 읽기만 한다.
+async function noteClasses(res) {
+  const cs = await listDocs("classes");
+  res.status(200).json({
+    ok: true,
+    classes: cs.map((c) => ({ id: c.id, name: c.name || "", playlist: c.playlist || "",
+                              endDate: c.endDate || "" })),
+  });
+}
+
+async function noteBegin(res, { cid, unit }) {
+  const c = await getDoc("classes/" + cid).catch(() => null);
+  if (!c) { res.status(404).json({ error: "그런 반이 없어요" }); return; }
+  const title = String(unit || "").trim() || "강의노트";
+  // 선생님이 손으로 만든 같은 이름 단원이 있으면 그 자리에 넣는다.
+  const units = await listDocs("classes/" + cid + "/noteUnits").catch(() => []);
+  const hit = units.find((u) => (u.title || "") === title);
+  const uid = hit ? hit.id : unitId(title);
+  if (!hit) await patchDoc("classes/" + cid + "/noteUnits/" + uid, { title, time: Date.now() });
+  res.status(200).json({ ok: true, uid, chunk: NOTE_CHUNK });
+}
+
+async function notePart(res, { cid, uid, fid, i, data }) {
+  if (!cid || !uid || !fid || data == null) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  await patchDoc("classes/" + cid + "/noteUnits/" + uid + "/files/" + fid + "/parts/" + String(i),
+                 { data: String(data) });
+  res.status(200).json({ ok: true, i });
+}
+
+async function noteDone(res, { cid, uid, fid, name, mime, size, chunks }) {
+  const base = "classes/" + cid + "/noteUnits/" + uid + "/files/" + fid;
+  // 지난번이 더 길었으면 남은 조각을 지운다 — 안 지우면 옛 꼬리가 붙어 파일이 깨진다.
+  const olds = await listDocs(base + "/parts").catch(() => []);
+  for (const d of olds) if (Number(d.id) >= Number(chunks)) await deleteDoc(base + "/parts/" + d.id);
+  await patchDoc(base, {
+    name: String(name || "판서.pdf"),
+    mime: String(mime || "application/pdf"),
+    size: Number(size) || 0,
+    chunks: Number(chunks) || 0,
+    time: Date.now(),
+    source: "prep",              // 사람이 올린 것과 구별한다
+  });
+  res.status(200).json({ ok: true });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
   try {
@@ -193,6 +256,10 @@ export default async function handler(req, res) {
       if (!(await toolOk(body.toolKey))) { res.status(403).json({ error: "도구 열쇠가 맞지 않아요" }); return; }
       if (body.action === "todo") return await capTodo(res, body.days);
       if (body.action === "put") return await capPut(res, body);
+      if (body.action === "noteClasses") return await noteClasses(res);
+      if (body.action === "noteBegin") return await noteBegin(res, body);
+      if (body.action === "notePart") return await notePart(res, body);
+      if (body.action === "noteDone") return await noteDone(res, body);
       res.status(400).json({ error: "그런 동작이 없어요" }); return;
     }
 
