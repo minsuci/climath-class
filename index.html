@@ -1877,7 +1877,14 @@ function StudentGate({ onClsChange }) {
         .map((c) => ({ cls: c, member: (c.roster || []).find((x) => norm(x.name) === nm) }))
         .filter((x) => x.member && !isClassEnded(x.cls));
       setBusy(false);
-      if (mine.length === 0) { setErr("반 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요."); return; }
+      // 반이 아직 없는 학생. PIN 은 맞았으므로 «이름이 틀렸다» 가 아니라
+      // 무엇이 빠졌는지를 말해준다 — 선생님도 이 말을 듣고 반에 넣어주면 된다.
+      if (mine.length === 0) {
+        setErr(r.noClass
+          ? "아직 반이 정해지지 않았어요. 선생님께 «반에 넣어달라»고 말씀해 주세요."
+          : "반 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
+        return;
+      }
       setMatches(mine);
       if (mine.length === 1) setCls(mine[0].cls);
     } catch (e) {

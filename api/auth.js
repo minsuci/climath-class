@@ -131,13 +131,23 @@ async function loginStudent(res, { name, pin }) {
     const m = (c.roster || []).find((r) => norm(r.name) === nm);
     if (m) found.push({ cls: c, member: m });
   }
-  if (!found.length) {
+  const live = found.filter((x) => !classEnded(x.cls));
+
+  // ⚠ 로그인은 오래 **반 명단만** 봤다. 그래서 학생 명단에 만들어 놓고 반에 안 넣으면
+  //    «명단에 없는 이름이에요» 가 떴다 — 이름을 잘못 친 줄 알게 되는 문구라
+  //    진짜 원인(반 배정 안 함)을 찾기가 어렵다.
+  //    학생 명단(students)에 있으면 들여보내고, 반이 없다는 것을 화면이 말하게 한다.
+  let person = null;
+  if (!live.length) {
+    const people = await listDocs("students");
+    person = people.find((p) => norm(p.name) === nm) || null;
+  }
+  if (!found.length && !person) {
     await noteFail(key, rate);
     res.status(404).json({ error: "명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해주세요." });
     return;
   }
-  const live = found.filter((x) => !classEnded(x.cls));
-  if (!live.length) {
+  if (!live.length && !person) {
     res.status(403).json({ error: "수강이 종료된 반이에요. 기록은 보관되어 있으니 선생님께 문의해주세요." });
     return;
   }
@@ -155,7 +165,10 @@ async function loginStudent(res, { name, pin }) {
   const token = createCustomToken("s_" + nm, { role: "student", sname: nm, cids });
   // 초기 비번으로 들어왔으면 앱이 비밀번호 변경을 먼저 시킨다.
   // 이름만 알면 1234로 들어가지는 계정이 남아 있는 게 지금 가장 큰 구멍이다.
-  res.status(200).json({ token, name: nm, cids, mustChangePin: how === "default" });
+  res.status(200).json({ token, name: nm, cids, mustChangePin: how === "default",
+                         // 반이 아직 없다. 앱이 «이름이 틀렸다» 가 아니라
+                         // «아직 반이 없다» 고 말하게 하려고 알려준다.
+                         noClass: !live.length });
 }
 
 // 앱의 verifyPersonPin과 같은 순서: 통합 PIN → 반별 구 PIN(성공 시 이전) → 기본값
@@ -172,9 +185,11 @@ async function verifyStudentPin(nm, pin, live) {
       return "legacy";
     }
   }
-  for (const x of live) {
-    if (pin === String(x.member.defaultPin || DEFAULT_PIN)) return "default";
-  }
+  // 반이 없는 학생(아직 배정 전)은 기댈 defaultPin 이 없다. 기본값으로 본다 —
+  // 안 그러면 명단에 있는데 PIN 이 틀렸다고 나온다.
+  const defs = live.length ? live.map((x) => String(x.member.defaultPin || DEFAULT_PIN))
+                           : [DEFAULT_PIN];
+  if (defs.indexOf(pin) >= 0) return "default";
   return "";
 }
 
