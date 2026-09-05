@@ -87,6 +87,18 @@ html,body{margin:0; padding:0;}
 .rp-table th{background:#f7f4ee; padding:7px 9px; text-align:left; font-weight:600; color:#4b5563; border-bottom:1px solid #e5ded2;}
 .rp-table td{padding:7px 9px; border-bottom:1px solid #f0ece5;}
 .rp-note{background:#f7f4ee; border-radius:10px; padding:12px 14px; white-space:pre-wrap; min-height:56px;}
+/* 교재 완성도 막대.
+   ⚠ 인쇄할 때 브라우저가 배경색을 지운다. print-color-adjust:exact 로 살린다 —
+      안 하면 막대가 통째로 흰색이 되어 «한눈에» 가 사라진다. */
+.rp-books{display:flex; flex-direction:column; gap:9px;}
+.rp-book{display:grid; grid-template-columns:1fr auto; gap:2px 10px; align-items:baseline;}
+.rp-book-n{font-size:12.5px; font-weight:600;}
+.rp-book-v{font-size:12px; color:#4b5563; white-space:nowrap;}
+.rp-bar{grid-column:1 / -1; height:9px; border-radius:5px; background:#ece7de; overflow:hidden;
+        -webkit-print-color-adjust:exact; print-color-adjust:exact;}
+.rp-bar > i{display:block; height:100%; background:#2b5f8a; border-radius:5px;
+        -webkit-print-color-adjust:exact; print-color-adjust:exact;}
+.rp-gain{color:#3f7d5e; font-weight:600;}
 .rp-scores{width:100%; border-collapse:collapse; font-size:12.5px;}
 .rp-scores th{text-align:left; font-weight:600; color:#6b7280; font-size:11px; padding:4px 6px; border-bottom:1px solid #e5ded2;}
 .rp-scores td{padding:6px; border-bottom:1px solid #f0ece5;}
@@ -5161,6 +5173,31 @@ function ReportSheet({ cls, st, ym, data, comment, editable, onNoteChange }) {
           </div>
         );
       })()}
+
+      {(data.books || []).length > 0 && (
+        <div className="rp-sec">
+          <div className="rp-sec-h">교재 완성도</div>
+          <div className="rp-books">
+            {data.books.map((b, i) => (
+              <div key={i} className="rp-book">
+                <div className="rp-book-n">{b.name}</div>
+                <div className="rp-book-v">
+                  {b.done}{b.total ? " / " + b.total : ""}
+                  {b.total ? <b style={{marginLeft: 6}}>{b.pct}%</b> : null}
+                  {/* 지난달 스냅샷이 있어야 이번 달 분량을 안다. 첫 달에는 안 나온다. */}
+                  {b.gained != null && b.gained > 0 && <span className="rp-gain"> · 이번 달 +{b.gained}</span>}
+                </div>
+                <div className="rp-bar"><i style={{width: Math.min(100, b.pct || 0) + "%"}} /></div>
+              </div>
+            ))}
+          </div>
+          {!data.hasPrev && (
+            <div style={{fontSize: 11, color: "#9ca3af", marginTop: 6}}>
+              이번 달 진행 분량은 다음 달 보고서부터 나와요 (이번 달 진도를 기준으로 삼아요).
+            </div>
+          )}
+        </div>
+      )}
 
       {(data.scores || []).length > 0 && (
         <div className="rp-sec">
