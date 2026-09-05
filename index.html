@@ -1750,6 +1750,103 @@ async function computeRiskData() {
   return { flagged, gaps };
 }
 
+// ----- 자동 신호: 사람이 적지 않아도 자료가 스스로 올린다 -----
+//
+// 위의 «표시된 신호» 는 선생님이 상담에 체크한 것이다. 체크하지 않으면 아무것도 안 뜬다.
+// 그런데 정작 걱정되는 학생일수록 상담 기록이 없다 — 안 오니까 이야기할 자리가 없다.
+// 그래서 출결과 점수에서 직접 뽑는다. 둘 다 **수업만 하면 저절로 쌓이는** 자료다.
+//
+// 판단하지 않고 «세어서 보여주기만» 한다. 위험 여부는 사람이 정한다.
+const AUTO_DAYS = 8;    // 최근 몇 번의 수업을 보나
+const AUTO_BACK = 70;   // 점수는 며칠치를 보나
+const AUTO_GAP = 15;    // 반 평균보다 이만큼 낮으면 «낮다»
+const AUTO_DROP = 15;   // 이만큼 떨어지면 «하락»
+
+async function computeAutoSignals() {
+  const from = ymd(new Date(Date.now() - AUTO_BACK * 86400000));
+  const out = [];
+
+  await Promise.all(activeClasses().map(async (cls) => {
+    // ① 출결. 날짜마다 «출석한 사람» 을 통째로 읽는다 (학생별로 읽으면 읽기가 곱해진다).
+    //    ⚠ days 문서는 점수·수업내용 때문에도 생긴다. 출석을 한 명도 안 찍은 날을
+    //       수업일로 세면 **그 반 전원이 결석**으로 잡힌다. 빈 날은 버린다.
+    const recent = (await listDays(cls.id)).slice(0, AUTO_DAYS * 2); // listDays 는 최신순
+    const att = {};
+    await Promise.all(recent.map(async (d) => {
+      const snap = await attCol(cls.id, d).get().catch(() => null);
+      if (!snap || snap.empty) return;
+      const set = {};
+      snap.forEach((x) => { set[x.id] = true; });
+      att[d] = set;
+    }));
+    const taught = Object.keys(att).sort().reverse().slice(0, AUTO_DAYS); // 최신순
+
+    // ② 점수. 반 전체를 한 번에 받아 날짜별 평균을 같이 낸다.
+    let byDate = {};
+    try {
+      const { rows } = await loadScoreHistory(cls.id, from);
+      rows.forEach((r) => {
+        // 같은 사람이 같은 날 여러 번 낸 것은 마지막 것만 (실측: 한 학생이 하루 다섯 번)
+        const m = (byDate[r.date] = byDate[r.date] || {});
+        if (!m[r.sid] || (r.time || 0) > (m[r.sid].time || 0)) m[r.sid] = r;
+      });
+    } catch (e) { byDate = {}; }
+    const dayAvg = {};
+    Object.keys(byDate).forEach((d) => {
+      const v = Object.values(byDate[d]).filter((x) => x.score != null);
+      // ⚠ 사람이 적으면 평균이 곧 남의 점수다. 셋 미만이면 안 낸다.
+      dayAvg[d] = v.length >= 3
+        ? Math.round(v.reduce((a, x) => a + Number(x.score || 0), 0) / v.length) : null;
+    });
+
+    (cls.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => {
+      const reasons = [];
+
+      // --- 결석 ---
+      const mine = taught.filter((d) => attendsOn(cls, st, d));
+      const absent = mine.filter((d) => !att[d][st.id]);
+      let run = 0;
+      for (const d of mine) { if (att[d][st.id]) break; run++; }
+      if (run >= 2) {
+        reasons.push({ lv: 3, key: "run", label: "연속 결석 " + run + "회",
+                       detail: absent.slice(0, run).slice().reverse().join(" · ") });
+      } else if (absent.length >= 3) {
+        reasons.push({ lv: 2, key: "many", label: "최근 " + mine.length + "회 중 " + absent.length + "회 결석",
+                       detail: absent.slice(0, 4).slice().reverse().join(" · ") });
+      }
+
+      // --- 점수 ---
+      const hist = Object.keys(byDate).sort()
+        .filter((d) => byDate[d][st.id] && byDate[d][st.id].score != null)
+        .map((d) => ({ date: d, my: Number(byDate[d][st.id].score), avg: dayAvg[d] }));
+      const last3 = hist.slice(-3);
+      const low = last3.filter((x) => x.avg != null && x.avg - x.my >= AUTO_GAP);
+      if (low.length >= 2) {
+        reasons.push({ lv: 2, key: "low", label: "반 평균보다 낮음 " + low.length + "회",
+                       detail: low.map((x) => x.date.slice(5) + " " + x.my + "점(평균 " + x.avg + ")").join(" · ") });
+      }
+      if (hist.length >= 4) {
+        const mean = (a) => a.reduce((x, y) => x + y.my, 0) / a.length;
+        const now = mean(hist.slice(-2)), before = mean(hist.slice(-4, -2));
+        if (before - now >= AUTO_DROP) {
+          reasons.push({ lv: 1, key: "drop", label: "점수 하락 " + Math.round(before - now) + "점",
+                         detail: Math.round(before) + "점 → " + Math.round(now) + "점 (2회 평균)" });
+        }
+      }
+
+      if (!reasons.length) return;
+      out.push({
+        cid: cls.id, cname: cls.name, sid: st.id, sname: st.name,
+        lv: Math.max.apply(null, reasons.map((r) => r.lv)),
+        reasons, absent: absent.length, sessions: mine.length,
+      });
+    });
+  }));
+
+  out.sort((a, b) => b.lv - a.lv || b.reasons.length - a.reasons.length || b.absent - a.absent);
+  return out;
+}
+
 // ----- 합반(질문 공유) -----
 // 합반 요일이면 질문을 "대표 반"(두 id 중 사전순 첫째) 한 곳에 모은다.
 function questionCid(cls, date) {
@@ -5702,11 +5799,14 @@ function MakeupCenter({ onBack }) {
 
 function RiskDashboard({ onBack }) {
   const [data, setData] = useState(null);
-  const [tab, setTab] = useState("flag"); // flag | gap
+  const [auto, setAuto] = useState(null);
+  // 처음 열면 «자동» 이 먼저다. 아무도 아무것도 안 적어도 차 있는 쪽이라서.
+  const [tab, setTab] = useState("auto"); // auto | flag | gap
   const [gapDays, setGapDays] = useState(60);
   function reload() {
-    setData(null);
+    setData(null); setAuto(null);
     computeRiskData().then(setData).catch((e) => { console.error(e); setData({ flagged: [], gaps: [] }); });
+    computeAutoSignals().then(setAuto).catch((e) => { console.error(e); setAuto([]); });
   }
   useEffect(() => { reload(); }, []);
 
@@ -5714,6 +5814,9 @@ function RiskDashboard({ onBack }) {
   const overdue = data ? data.gaps.filter((g) => g.gapDays === null || g.gapDays >= gapDays) : [];
   const counts = { 3: flagged.filter((x) => x.risk === 3).length, 2: flagged.filter((x) => x.risk === 2).length, 1: flagged.filter((x) => x.risk === 1).length };
   const gapText = (g) => g.gapDays === null ? "상담 기록 없음" : g.gapDays + "일째";
+  // 이미 상담에 표시해 둔 학생은 자동 신호 쪽에서도 알려준다 — 아는 얘기를 두 번 읽지 않게
+  const marked = {};
+  flagged.forEach((x) => { marked[x.cid + ":" + x.sid] = x.risk; });
   const riskBackRef = useSwipeBack(onBack);
 
   return (
@@ -5724,13 +5827,46 @@ function RiskDashboard({ onBack }) {
           <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
         </div>
         <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
+          <button className={"cm-ab-tab" + (tab === "auto" ? " on" : "")} onClick={() => setTab("auto")}>자동 신호 {auto ? auto.length : "…"}</button>
           <button className={"cm-ab-tab" + (tab === "flag" ? " on" : "")} onClick={() => setTab("flag")}>표시된 신호 {flagged.length}</button>
           <button className={"cm-ab-tab" + (tab === "gap" ? " on" : "")} onClick={() => setTab("gap")}>상담 공백 {overdue.length}</button>
           <button className="cm-link" style={{marginLeft: "auto"}} onClick={reload}>새로고침</button>
         </div>
       </div>
 
-      {data === null && <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>}
+      {data === null && tab !== "auto" && <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>}
+
+      {/* ---- 자동 신호 ---- */}
+      {tab === "auto" && (<>
+        <div className="cm-card">
+          <div className="cm-hint">출결과 테스트 점수에서 <b>저절로</b> 뽑은 목록이에요. 최근 {AUTO_DAYS}회 수업과 {AUTO_BACK}일치 점수를 봅니다.
+            <br/>위험하다고 판단한 게 아니라 <b>눈에 띄는 것을 세어둔</b> 거예요. 확인하고 상담에 남기면 «표시된 신호» 로 올라가요.</div>
+        </div>
+
+        {auto === null && <div className="cm-card"><div className="cm-empty">세는 중…</div></div>}
+        {auto !== null && auto.length === 0 && <div className="cm-card"><div className="cm-empty">눈에 띄는 게 없어요 👍</div></div>}
+
+        {(auto || []).map((x) => {
+          const ri = riskInfo(x.lv);
+          return (
+            <div key={x.cid + ":" + x.sid} className="cm-card" style={{borderLeft: "4px solid " + ri.color, padding: "13px 16px"}}>
+              <div style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap"}}>
+                <strong style={{fontSize: 15}}>{x.sname}</strong>
+                <span className="cm-day-sub">{x.cname}</span>
+                {marked[x.cid + ":" + x.sid] > 0 && (
+                  <span className="cm-chip" style={{background: riskInfo(marked[x.cid + ":" + x.sid]).bg, color: riskInfo(marked[x.cid + ":" + x.sid]).color}}>상담에 표시됨</span>
+                )}
+              </div>
+              {x.reasons.map((r, i) => (
+                <div key={i} style={{display: "flex", gap: 8, alignItems: "baseline", marginTop: 7}}>
+                  <span className="cm-chip" style={{background: riskInfo(r.lv).bg, color: riskInfo(r.lv).color, fontWeight: 700, flexShrink: 0}}>{r.label}</span>
+                  <span style={{fontSize: 12, color: "var(--muted)"}}>{r.detail}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </>)}
 
       {/* ---- 표시된 신호 ---- */}
       {data !== null && tab === "flag" && (<>
