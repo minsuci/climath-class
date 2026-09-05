@@ -1877,12 +1877,11 @@ function StudentGate({ onClsChange }) {
         .map((c) => ({ cls: c, member: (c.roster || []).find((x) => norm(x.name) === nm) }))
         .filter((x) => x.member && !isClassEnded(x.cls));
       setBusy(false);
-      // 반이 아직 없는 학생. PIN 은 맞았으므로 «이름이 틀렸다» 가 아니라
-      // 무엇이 빠졌는지를 말해준다 — 선생님도 이 말을 듣고 반에 넣어주면 된다.
-      if (mine.length === 0) {
-        setErr(r.noClass
-          ? "아직 반이 정해지지 않았어요. 선생님께 «반에 넣어달라»고 말씀해 주세요."
-          : "반 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
+      // ⚠ 반이 없다고 **로그인 자체를 막지 않는다.** PIN 은 맞았으니 들어온 것이 맞고,
+      //    «반이 아직 없다» 는 앱 안에서 말해주는 편이 낫다. 로그인 화면에서 막으면
+      //    학생은 자기 이름이나 비번이 틀렸다고 생각하고 그 자리만 계속 고쳐본다.
+      if (mine.length === 0 && !r.noClass) {
+        setErr("반 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
         return;
       }
       setMatches(mine);
@@ -1910,6 +1909,13 @@ function StudentGate({ onClsChange }) {
         <button className="cm-btn cm-btn-primary" disabled={busy} onClick={login}>{busy ? "확인 중..." : "입장"}</button>
       </div>
     );
+  }
+
+  // ---- 아직 반이 없는 학생 ----
+  // 로그인은 됐고 볼 것만 없다. 무엇이 빠졌는지와 **무슨 말을 하면 되는지**를 적어준다 —
+  // «선생님께 문의하세요» 만 있으면 학생은 무엇을 물어야 할지를 또 모른다.
+  if (matches.length === 0) {
+    return <NoClassHome name={name.trim()} onLogout={fullLogout} />;
   }
 
   // ---- 내 반 선택 (여러 반에 속한 경우만) ----
@@ -2317,6 +2323,43 @@ function AIChat({ cls, me }) {
           onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
         <button className="cm-ai-send" disabled={busy} onClick={send}>전송</button>
       </div>
+    </div>
+  );
+}
+
+// 반이 아직 없는 학생. 로그인은 됐고 볼 것만 없다.
+//
+// ⚠ 초기 PIN 바꾸기를 여기에도 둬야 한다. 그 안내는 StudentHome 에만 있는데
+//    반이 없으면 그 화면을 아예 안 거친다 — 그대로 두면 1234 를 영영 쓰게 된다.
+//    ChangePin 은 cls 를 안 쓰므로 그냥 쓸 수 있다.
+function NoClassHome({ name, onLogout }) {
+  const [mustPin, setMustPin] = useState(MUST_CHANGE_PIN);
+  const me = { name: name };
+  return (
+    <div className="cm-stack cm-slide-in">
+      <div className="cm-card">
+        <div className="cm-admin-top" style={{marginBottom: 12}}>
+          <h3 className="cm-h3" style={{margin: 0}}>{name}님</h3>
+          <button className="cm-link" onClick={onLogout}>로그아웃</button>
+        </div>
+        <div style={{lineHeight: 1.7, fontSize: 14, color: "var(--navy)"}}>
+          <div style={{fontSize: 15, fontWeight: 700, marginBottom: 8}}>아직 반이 정해지지 않았어요</div>
+          <span style={{color: "var(--muted)"}}>
+            로그인은 됐어요. 반이 정해지면 출결·과제·내신이 여기 나타나요.
+            <br/><b style={{color: "var(--navy)"}}>선생님께 «반에 넣어주세요» 라고 말씀해 주세요.</b>
+            <br/>반이 정해진 뒤에 다시 들어오면 바로 보여요.
+          </span>
+        </div>
+      </div>
+      {mustPin && (
+        <div className="cm-card" style={{background: "#f6e7df", borderColor: "#e6cbb9"}}>
+          <div style={{color: "#a8562c", fontSize: 14, lineHeight: 1.6, marginBottom: 10}}>
+            <b>초기 비밀번호를 그대로 쓰고 있어요.</b><br/>
+            이름만 알면 누구나 들어올 수 있어요. 나만 아는 번호로 바꿔주세요.
+          </div>
+          <ChangePin me={me} onDone={() => setMustPin(false)} />
+        </div>
+      )}
     </div>
   );
 }
