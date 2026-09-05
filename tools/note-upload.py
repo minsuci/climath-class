@@ -91,8 +91,12 @@ def main():
 
     name = os.path.basename(a.file)
     # 파일명에 날짜가 있으면 그것으로 자리를 정한다 — 같은 날은 언제나 같은 자리(덮어쓰기).
+    #
+    # ※ 단원 이름을 섞는다. 안 그러면 「판서」와 「풀이노트」가 **같은 날짜라는 이유로
+    #   같은 자리 이름**을 갖고, 되읽어 확인할 때 서로를 집는다(실제로 그랬다).
     m = re.search(r"(\d{4}-\d{2}-\d{2})", name)
-    fid = a.fid or ("board_" + m.group(1) if m else "board_" + re.sub(r"\W+", "_", name)[:40])
+    slug = re.sub(r"\W+", "", a.unit)[:12] or "note"
+    fid = a.fid or (slug + "_" + (m.group(1) if m else re.sub(r"\W+", "_", name)[:32]))
 
     b = call(key, {"action": "noteBegin", "cid": a.cid, "unit": a.unit})
     uid, chunk = b["uid"], int(b.get("chunk") or 700000)
@@ -108,7 +112,7 @@ def main():
                "chunks": len(parts)})
     # «보냈다» 로 끝내지 않는다. 되읽어서 조각 수가 맞는지 본다.
     got = [f for f in call(key, {"action": "noteFiles", "cid": a.cid}).get("files", [])
-           if f["fid"] == fid]
+           if f["fid"] == fid and f["uid"] == uid]
     ok = bool(got) and got[0]["partsFound"] == len(parts) and got[0]["b64len"] == len(b64)
     print("올렸습니다 — %s / 단원 %s / %s (%.1fMB, 조각 %d)"
           % (a.cid, a.unit, name, size / 1048576, len(parts)))

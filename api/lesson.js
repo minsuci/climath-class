@@ -232,6 +232,17 @@ async function noteFiles(res, { cid, uid }) {
   res.status(200).json({ ok: true, files: out });
 }
 
+// 파일 하나 지우기. 조각을 먼저 지우고 본체를 지운다 —
+// 반대로 하면 본체만 사라지고 조각이 남아 용량만 먹는 채로 아무 데도 안 보인다.
+async function noteDelete(res, { cid, uid, fid }) {
+  if (!cid || !uid || !fid) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  const base = "classes/" + cid + "/noteUnits/" + uid + "/files/" + fid;
+  const parts = await listDocs(base + "/parts").catch(() => []);
+  for (const d of parts) await deleteDoc(base + "/parts/" + d.id);
+  await deleteDoc(base);
+  res.status(200).json({ ok: true, removed: parts.length });
+}
+
 async function noteBegin(res, { cid, unit }) {
   const c = await getDoc("classes/" + cid).catch(() => null);
   if (!c) { res.status(404).json({ error: "그런 반이 없어요" }); return; }
@@ -279,6 +290,7 @@ export default async function handler(req, res) {
       if (body.action === "put") return await capPut(res, body);
       if (body.action === "noteClasses") return await noteClasses(res);
       if (body.action === "noteFiles") return await noteFiles(res, body);
+      if (body.action === "noteDelete") return await noteDelete(res, body);
       if (body.action === "noteBegin") return await noteBegin(res, body);
       if (body.action === "notePart") return await notePart(res, body);
       if (body.action === "noteDone") return await noteDone(res, body);
