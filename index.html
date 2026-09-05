@@ -1614,17 +1614,23 @@ async function buildReportData(cls, st, ym) {
     if (!snap) continue;
     const all = [];
     snap.forEach((x) => all.push(x.data()));
-    const mine = all.filter((v) => v.sid === st.id);
-    if (!mine.length) continue;
-    for (const v of mine) {
-      // 같은 시험을 본 사람들 (시험명이 같은 것끼리)
-      const peers = all.filter((x) => (x.label || "") === (v.label || "") && x.score != null);
-      const avg = peers.length >= 3
-        ? Math.round(peers.reduce((a, x) => a + Number(x.score || 0), 0) / peers.length)
-        : null;
-      scores.push({ date: d, label: v.label || "", correct: v.correct, total: v.total,
-                    score: Number(v.score || 0), avg, n: peers.length });
-    }
+    if (!all.length) continue;
+    // ⚠ 한 사람이 같은 날 여러 번 내는 일이 있다 (실측: 한 학생이 8/31 에 다섯 번).
+    //    사람마다 **마지막 것만** 본다. 안 그러면 평균이 그 사람 쪽으로 끌리고
+    //    보고서에도 같은 줄이 여러 번 찍힌다.
+    const last = {};
+    all.forEach((v) => { const k = v.sid; if (!last[k] || (v.time || 0) > (last[k].time || 0)) last[k] = v; });
+    const mine = last[st.id];
+    if (!mine) continue;
+    // ⚠ 같은 날 = 같은 시험으로 본다. **시험명으로 묶으면 안 된다** —
+    //    학생이 직접 치는 칸이라 같은 시험이 「가락고」「가락고 2025」「가락고2025」
+    //    「1회모고」「1회차 모의고사」로 갈린다 (2026-08-24 실측).
+    const peers = Object.values(last).filter((x) => x.score != null);
+    const avg = peers.length >= 3
+      ? Math.round(peers.reduce((a, x) => a + Number(x.score || 0), 0) / peers.length)
+      : null;
+    scores.push({ date: d, label: mine.label || "", correct: mine.correct, total: mine.total,
+                  score: Number(mine.score || 0), avg, n: peers.length });
   }
   scores.sort((a, b) => a.date.localeCompare(b.date));
   const scoreAvg = scores.length
