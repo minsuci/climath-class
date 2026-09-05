@@ -1512,6 +1512,30 @@ async function getMonthNotes(cid, sid, ym) {
   return arr;
 }
 
+// ----- 반 유튜브 재생목록 -----
+//
+// 걸어두면 하루 한 번(23시 무렵) 서버가 훑어서 그날 무엇을 했는지를
+// classes/{반}/days/{날짜}.lesson 에 적는다. 보고서에서 학생 코멘트가 없는 날에 쓴다.
+async function saveClassPlaylist(cid, url) {
+  await classesCol().doc(cid).update({ playlist: String(url || "").trim() });
+  await loadClasses();
+}
+// 걸기 전에 «무엇이 잡히나» 를 보여준다. 주소만 받고 저장은 사람이 누른다 —
+// 잘못 건 재생목록이 보고서에 그대로 실리면 되돌리기가 번거롭다.
+async function previewPlaylist(url, date) {
+  const u = firebase.auth().currentUser;
+  if (!u) throw new Error("로그인이 풀렸어요. 다시 들어와 주세요.");
+  const idToken = await u.getIdToken();
+  const r = await fetch("/api/lesson", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken, playlist: url, date }),
+  });
+  let j = null;
+  try { j = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error((j && j.error) || ("읽지 못했어요 (" + r.status + ")"));
+  return j || {};
+}
+
 // ----- 학습관리 보고서 (reports 컬렉션) -----
 // 문서 id = "{cid}_{sid}_{YYYY-MM}"
 const reportsCol = () => db.collection("reports");
@@ -1575,8 +1599,17 @@ async function buildReportData(cls, st, ym) {
   // 4) 수업별 코멘트
   const notes = await getMonthNotes(cls.id, st.id, ym);
 
+  // 5) 그날 수업 내용 (반 공통). 학생 코멘트가 없는 날에 대신 쓴다 —
+  //    코멘트를 매번 못 쓰니 «그날 무엇을 했는지» 라도 남기려는 것이다.
+  const lessons = {};
+  for (const d of myDays) {
+    const dd = await dayDoc(cls.id, d).get().catch(() => null);
+    const L = dd && dd.exists && dd.data().lesson;
+    if (L && L.line) lessons[d] = L;
+  }
+
   return {
-    notes, sessionDates: myDays,
+    notes, lessons, sessionDates: myDays,
     sessions: myDays.length, present, absent: myDays.length - present,
     videoDone, planned, rate: myDays.length > 0 ? Math.round(present / myDays.length * 100) : null,
     books, hwSnapshot, consults, hasPrev: !!prevSnap,
@@ -4903,7 +4936,70 @@ function upcomingSessions(cls, st, weeks) {
   return out;
 }
 
-function ReportNoteEdit({ note, cid, onChanged }) {
+// 반에 걸어두는 수업 영상 재생목록.
+//
+// 걸어두면 하루 한 번(23시 무렵) 서버가 훑어서 그날 무엇을 했는지를 적고,
+// 보고서에서 학생 코멘트가 없는 날에 그것이 실린다.
+//
+// **저장 전에 무엇이 잡히는지 먼저 보여준다.** 잘못 건 재생목록이 보고서에
+// 그대로 실리면 되돌리기가 번거롭다. 눈으로 보고 누르게 한다.
+function PlaylistSetting({ cls, canEdit }) {
+  const [url, setUrl] = useState(cls.playlist || "");
+  const [days, setDays] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { setUrl(cls.playlist || ""); setDays(null); setMsg(""); }, [cls.id, cls.playlist]);
+
+  async function peek() {
+    setBusy(true); setMsg(""); setDays(null);
+    try {
+      const r = await previewPlaylist(url.trim());
+      setDays(r.days || []);
+      if (!(r.days || []).length) setMsg("영상은 읽었는데 제목에서 날짜를 못 찾았어요. 제목이 «9/4(금) …» 형식인지 봐주세요.");
+    } catch (e) { setMsg(friendlyErr(e)); }
+    setBusy(false);
+  }
+  async function save() {
+    setBusy(true); setMsg("");
+    try { await saveClassPlaylist(cls.id, url); setMsg("걸었어요 ✓ 오늘 밤부터 자동으로 채워져요"); }
+    catch (e) { setMsg("저장하지 못했어요: " + friendlyErr(e)); }
+    setBusy(false);
+  }
+
+  return (
+    <div>
+      <div className="cm-hint" style={{marginTop: 0}}>
+        수업 영상 재생목록을 걸어두면 <b>하루 한 번</b> 그날 무엇을 했는지를 자동으로 적어요.
+        보고서에서 <b>학생 코멘트가 없는 날</b>에 그 내용이 실립니다.
+        <br/>영상 제목이 <b>「9/4(금) 수평교 풀이」</b>처럼 날짜로 시작해야 날짜를 알아봐요.
+      </div>
+      <input className="cm-input" value={url} disabled={busy || !canEdit}
+        placeholder="https://www.youtube.com/playlist?list=..."
+        onChange={(e) => { setUrl(e.target.value); setDays(null); }} />
+      <div style={{display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center"}}>
+        <button className="cm-btn cm-btn-ghost" style={{margin: 0, padding: "7px 14px", fontSize: 13}}
+          disabled={busy || !url.trim()} onClick={peek}>{busy ? "읽는 중…" : "무엇이 잡히나 보기"}</button>
+        <button className="cm-btn cm-btn-primary" style={{margin: 0, padding: "7px 14px", fontSize: 13, width: "auto"}}
+          disabled={busy || !canEdit || url.trim() === (cls.playlist || "")} onClick={save}>걸어두기</button>
+        {cls.playlist && (
+          <a className="cm-link" href={cls.playlist} target="_blank" rel="noreferrer" style={{fontSize: 12}}>재생목록 열기 ↗</a>
+        )}
+      </div>
+      {msg && <div className="cm-hint" style={{color: msg.indexOf("✓") >= 0 ? "#3f7d5e" : "#c2703f"}}>{msg}</div>}
+      {days && days.length > 0 && (
+        <div style={{marginTop: 8, maxHeight: 220, overflow: "auto", border: "1px solid var(--line)", borderRadius: 8, padding: 8}}>
+          {days.slice(0, 12).map((d) => (
+            <div key={d.date} style={{fontSize: 12, padding: "3px 0", borderTop: "1px solid var(--line)"}}>
+              <b>{d.date}</b> <span style={{color: "var(--muted)"}}>({d.n}개)</span> — {d.line}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReportNoteEdit({ note, cid, onChanged, placeholder }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(note.text);
   const [busy, setBusy] = useState(false);
@@ -4928,13 +5024,30 @@ function ReportNoteEdit({ note, cid, onChanged }) {
   }
 
   if (!editing) {
-    return note.text
-      ? <div style={{cursor: "pointer"}} onClick={() => setEditing(true)}>{note.text}</div>
-      : <div className="rp-noprint" style={{cursor: "pointer", color: "#b3a89a", fontSize: 12.5}} onClick={() => setEditing(true)}>+ 기록 추가</div>;
+    if (note.text) return <div style={{cursor: "pointer"}} onClick={() => setEditing(true)}>{note.text}</div>;
+    // 코멘트가 없어도 그날 수업 내용이 있으면 그것을 보여준다. 눌러서 덧쓸 수 있다 —
+    // 빈칸을 마주하는 것보다 «이날 이걸 했다» 를 보고 한 줄 얹는 편이 손이 덜 간다.
+    if (placeholder) {
+      return (
+        <div style={{cursor: "pointer", color: "#4b5563"}} onClick={() => setEditing(true)}>
+          {placeholder}
+          <span className="rp-noprint" style={{marginLeft: 6, color: "#b3a89a", fontSize: 12}}>· 눌러서 이 학생 이야기 덧쓰기</span>
+        </div>
+      );
+    }
+    return <div className="rp-noprint" style={{cursor: "pointer", color: "#b3a89a", fontSize: 12.5}} onClick={() => setEditing(true)}>+ 기록 추가</div>;
   }
   return (
     <div className="rp-noprint">
+      {placeholder && !text && (
+        <div style={{fontSize: 12, color: "#8a7f72", marginBottom: 4}}>
+          이날 수업: {placeholder}
+          <button className="cm-link" style={{padding: 0, marginLeft: 6, fontSize: 12}}
+            onClick={() => setText(placeholder)}>그대로 쓰기</button>
+        </div>
+      )}
       <textarea className="cm-input" style={{margin: "2px 0 6px", fontSize: 13, minHeight: 62, resize: "vertical"}}
+        placeholder={placeholder ? "이 학생 이야기를 적으면 위 수업 내용 대신 실려요" : ""}
         value={text} onChange={(e) => setText(e.target.value)} autoFocus />
       <div style={{display: "flex", gap: 8, alignItems: "center"}}>
         <button className="cm-btn cm-btn-primary" style={{margin: 0, padding: "6px 14px", fontSize: 13}} disabled={busy} onClick={save}>저장</button>
@@ -4989,15 +5102,22 @@ function ReportSheet({ cls, st, ym, data, comment, editable, onNoteChange }) {
             <div className="rp-sec-h">수업 기록</div>
             {dates.map((d) => {
               const n = noteBy[d] || { sid: st.id, sname: st.name, date: d, text: "", teacher: "" };
+              // 학생 코멘트가 없으면 그날 수업 내용을 대신 싣는다.
+              // ⚠ 반 공통이라 그 학생 이야기가 아니다. «무엇을 했는지» 로만 읽히게
+              //    표시를 붙인다 — 안 붙이면 선생님이 써준 평으로 오해한다.
+              const L = (data.lessons || {})[d];
+              const show = n.text || (L && L.line);
               return (
-                <div key={d} className={"rp-consult" + (n.text ? "" : " rp-noprint")}>
+                <div key={d} className={"rp-consult" + (show ? "" : " rp-noprint")}>
                   <div style={{fontSize: 11, color: "#6b7280", marginBottom: 3}}>
                     {d}
+                    {!n.text && L && <span style={{marginLeft: 6, color: "#8a7f72"}}>· 수업 내용</span>}
                     {editable && n.text && <span className="rp-noprint" style={{marginLeft: 6, color: "#b3a89a"}}>· 눌러서 수정</span>}
                   </div>
                   {editable
-                    ? <ReportNoteEdit note={n} cid={cls.id} onChanged={onNoteChange} />
-                    : <div>{n.text}</div>}
+                    ? <ReportNoteEdit note={n} cid={cls.id} onChanged={onNoteChange}
+                        placeholder={L && L.line ? L.line : ""} />
+                    : <div>{n.text || (L && L.line) || ""}</div>}
                 </div>
               );
             })}
@@ -7409,6 +7529,10 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
             <MergeManager cls={cls} onSaved={() => bumpVer((v) => v + 1)} />
           </div>
         )}
+        <div className="cm-card">
+          <h3 className="cm-h3">수업 영상 재생목록 <span className="cm-h-hint">(보고서 자동 채우기)</span></h3>
+          <PlaylistSetting cls={cls} canEdit={canEdit} />
+        </div>
         <div className="cm-card">
           <h3 className="cm-h3">학생 명단</h3>
           <RosterManager key={"rm" + cfgVer} cls={cls} canEdit={canEdit}
