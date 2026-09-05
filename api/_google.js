@@ -237,6 +237,12 @@ export async function listDocs(path) {
   return out;
 }
 
+// 문서 하나 지우기. 없어도 성공으로 친다 — 지우는 일은 «없는 상태로 만들기»가 목적이라
+// 이미 없으면 이미 목적이 이뤄진 것이다.
+export async function deleteDoc(path) {
+  await call(docBase() + "/" + path, { method: "DELETE" }).catch(() => null);
+}
+
 // 문서 쓰기(부분 갱신). 넘긴 필드만 바꾼다.
 // maskPaths 를 주면 그 경로만 바꾼다 — 지도(map) 안의 한 칸만 고칠 때 쓴다.
 // 통째로 덮으면 같은 시간에 도는 다른 요청이 넣은 칸이 지워진다.

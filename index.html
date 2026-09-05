@@ -1178,6 +1178,15 @@ async function flushStudentLog() {
   } catch (e) {}   // 기록 때문에 저장이 실패하면 안 된다
 }
 
+// 학생 PIN 초기화. 서버가 개인 PIN과 옛 반별 PIN을 지우면 초기 PIN 으로 돌아가고,
+// 그 학생은 다음 로그인에서 새 PIN 을 먼저 정하게 된다.
+async function resetStudentPin(name) {
+  const u = firebase.auth().currentUser;
+  if (!u) throw new Error("로그인이 풀렸어요. 다시 들어와 주세요.");
+  const idToken = await u.getIdToken();
+  return await authApi({ action: "resetStudentPin", idToken, name });
+}
+
 async function saveStudent(pid, data) {
   if (pid) {
     await studentsCol().doc(pid).set({ ...data, updated: Date.now() }, { merge: true });
@@ -3241,6 +3250,20 @@ function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle,
     setSchool(v);
     if (v !== (person.school || "")) patch({ school: v });
   }
+  // «비번 까먹었어요» 를 받아주는 자리. 새 값을 정해주는 게 아니라 **초기 PIN 으로 되돌린다** —
+  // 선생님이 새 비번을 정해 알려주면 그게 또 남의 손을 거친 비번이 된다.
+  async function resetPin() {
+    if (!confirm(person.name + " 학생의 PIN을 초기화할까요?" + "\n" +
+      "지금 쓰던 비번이 사라지고 초기 PIN으로 돌아가요.\n" +
+      "그 학생은 다음에 들어올 때 새 PIN을 정하게 됩니다.")) return;
+    setBusy(true);
+    try {
+      const r = await resetStudentPin(person.name);
+      onMsg(person.name + " PIN을 초기화했어요 — 초기 PIN은 " + r.pin + " 이에요. 학생에게 알려주세요 ✓");
+      onChanged && onChanged();
+    } catch (e) { onMsg("초기화하지 못했어요: " + friendlyErr(e)); }
+    setBusy(false);
+  }
   async function remove() {
     if (!confirm(person.name + " 학생 정보를 지울까요?" + "\n" +
       "반 명단과 출결·과제 기록은 그대로 남아요. 학교·학년·담임만 사라집니다.")) return;
@@ -3295,6 +3318,8 @@ function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle,
         </button>
       </td>
       <td style={cellStyle}>
+        <button className="cm-link" style={{padding: 0, marginRight: 8}} disabled={busy}
+          title="PIN을 초기 값으로 되돌려요" onClick={resetPin}>PIN</button>
         <button className="cm-link" style={{color: "#d6453f", padding: 0}} disabled={busy} onClick={remove}>삭제</button>
       </td>
       <td style={cellStyle}></td>

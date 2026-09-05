@@ -15,7 +15,7 @@
 // _google.js 는 반드시 .js 여야 한다. Vercel이 이 파일들을 CJS로 로드하면서
 // 진입 파일의 ESM 문법만 변환해 주기 때문에, 지역 파일을 .mjs로 두면
 // require()가 ESM을 못 읽어 함수 전체가 죽는다(ERR_REQUIRE_ESM → 로그인 불가).
-import { createCustomToken, verifyIdToken, getDoc, listDocs, patchDoc, getPublishedRules } from "./_google.js";
+import { createCustomToken, verifyIdToken, getDoc, listDocs, patchDoc, deleteDoc, getPublishedRules } from "./_google.js";
 
 const norm = (s) => String(s || "").replace(/\s+/g, "");
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -65,6 +65,7 @@ export default async function handler(req, res) {
     if (body.action === "teachers") return await listTeacherNames(res);
     if (body.action === "register") return await register(res, body);
     if (body.action === "changePin") return await changePin(res, body);
+    if (body.action === "resetStudentPin") return await resetStudentPin(res, body);
     if (body.action === "changeTeacherPin") return await changeTeacherPin(res, body);
     if (body.action === "defaultPinReport") return await defaultPinReport(res, body);
     if (body.action === "rulesCheck") return await rulesCheck(res);
@@ -213,6 +214,59 @@ async function defaultPinReport(res, { idToken }) {
 
 // 학생 비밀번호 변경. userPins는 클라이언트가 못 쓰므로 여기를 거친다.
 // 지금 PIN을 함께 받는다 — 로그인된 브라우저를 잠깐 빌린 사람이 비번을 바꿔버리는 걸 막는다.
+// 학생 PIN 초기화 — 선생님이 «비번 까먹었어요» 를 받아줄 자리.
+//
+// 지우는 것으로 초기화한다. 새 값을 넣지 않는다 —
+//   userPins/{이름}                     개인 PIN. 이걸 지우면
+//   classes/{반}/students/{자리}.pin    옛 반별 PIN. 이것도 지워야 한다
+//   → 남는 것은 반 명단의 defaultPin(없으면 1234)뿐이고,
+//     그걸로 들어오면 앱이 mustChangePin 으로 새 PIN 을 먼저 받는다.
+//
+// 옛 반별 PIN 을 안 지우면 «초기화했는데 옛 비번으로 계속 들어가진다» 가 된다.
+// verifyStudentPin 이 개인 → 반별 → 기본 순으로 보기 때문이다.
+//
+// 담임은 **자기 반 학생만** 초기화한다 (개인정보보호법 · 취합표준 6항).
+async function resetStudentPin(res, { idToken, name }) {
+  const claims = await verifyIdToken(idToken);
+  if (!claims || (claims.role !== "teacher" && claims.role !== "owner")) {
+    res.status(403).json({ error: "권한이 없습니다" }); return;
+  }
+  const nm = norm(name);
+  if (!nm) { res.status(400).json({ error: "이름을 넘겨주세요" }); return; }
+
+  let allowed = null;                       // null = 전체(관리자)
+  if (claims.role !== "owner") {
+    const t = await getDoc("teachers/" + claims.tid);
+    allowed = (t && t.classIds) || [];
+  }
+
+  const classes = await listDocs("classes");
+  const mine = [];                          // 이 이름이 든, 내가 볼 수 있는 반
+  for (const c of classes) {
+    if (allowed && allowed.indexOf(c.id) < 0) continue;
+    const m = (c.roster || []).find((r) => norm(r.name) === nm && !r.teacher);
+    if (m) mine.push({ cls: c, member: m });
+  }
+  if (!mine.length) {
+    res.status(404).json({ error: "담당하는 반에 그 이름이 없어요" }); return;
+  }
+  // ⚠ 이름이 겹치면 누구 것을 지우는지 알 수 없다. PIN 은 이름 하나에 하나뿐이라
+  //    한 사람만 초기화할 방법이 없다 — 동명이인은 이름을 A·B·C 로 갈라야 한다.
+  const dup = mine.filter((x) => x.member.pid).map((x) => x.member.pid);
+  if (new Set(dup).size > 1) {
+    res.status(409).json({ error: "같은 이름이 둘 이상이에요. 이름을 A·B·C 로 나눈 뒤 다시 해주세요" });
+    return;
+  }
+
+  await deleteDoc("userPins/" + encodeURIComponent(nm));
+  for (const x of mine) {
+    await deleteDoc("classes/" + x.cls.id + "/students/" + x.member.id);
+  }
+  const def = String((mine[0].member.defaultPin) || DEFAULT_PIN);
+  res.status(200).json({ ok: true, name: nm, pin: def,
+                         classes: mine.map((x) => x.cls.name) });
+}
+
 async function changePin(res, { name, oldPin, newPin }) {
   const nm = norm(name);
   if (!nm || !/^\d{4}$/.test(String(newPin || ""))) {
