@@ -313,7 +313,15 @@ async function changePin(res, { name, oldPin, newPin }) {
     const m = (c.roster || []).find((r) => norm(r.name) === nm);
     if (m) live.push({ cls: c, member: m });
   }
-  if (!live.length) { res.status(404).json({ error: "명단에 없는 이름이에요" }); return; }
+  // ⚠ 반 명단만 보면 안 된다. 반이 아직 없는 학생도 초기 PIN 을 바꿔야 한다 —
+  //    로그인·PIN 초기화도 같은 이유로 고쳤다. 여기가 그 네 번째 자리였다.
+  //    (반 없는 학생은 verifyStudentPin 이 기본값 1234 로 봐준다)
+  if (!live.length) {
+    const people = await listDocs("students");
+    if (!people.some((p) => norm(p.name) === nm)) {
+      res.status(404).json({ error: "명단에 없는 이름이에요" }); return;
+    }
+  }
 
   if (!(await verifyStudentPin(nm, String(oldPin || ""), live))) {
     await noteFail(key, rate);
