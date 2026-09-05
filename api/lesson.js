@@ -211,6 +211,27 @@ async function noteClasses(res) {
   });
 }
 
+// 올린 것을 되읽는다. 도구가 «보냈다» 로 끝내지 않고 «들어갔다» 까지 확인하게.
+// 조각을 한 번에 다 실으면 응답이 커지므로 **개수와 길이만** 센다.
+async function noteFiles(res, { cid, uid }) {
+  const units = uid ? [{ id: uid }] : await listDocs("classes/" + cid + "/noteUnits").catch(() => []);
+  const out = [];
+  for (const u of units) {
+    const fs = await listDocs("classes/" + cid + "/noteUnits/" + u.id + "/files").catch(() => []);
+    for (const f of fs) {
+      const parts = await listDocs("classes/" + cid + "/noteUnits/" + u.id + "/files/" + f.id + "/parts")
+        .catch(() => []);
+      out.push({
+        uid: u.id, fid: f.id, name: f.name || "", chunks: f.chunks || 0,
+        size: f.size || 0, source: f.source || "",
+        partsFound: parts.length,
+        b64len: parts.reduce((n, d) => n + String(d.data || "").length, 0),
+      });
+    }
+  }
+  res.status(200).json({ ok: true, files: out });
+}
+
 async function noteBegin(res, { cid, unit }) {
   const c = await getDoc("classes/" + cid).catch(() => null);
   if (!c) { res.status(404).json({ error: "그런 반이 없어요" }); return; }
@@ -257,6 +278,7 @@ export default async function handler(req, res) {
       if (body.action === "todo") return await capTodo(res, body.days);
       if (body.action === "put") return await capPut(res, body);
       if (body.action === "noteClasses") return await noteClasses(res);
+      if (body.action === "noteFiles") return await noteFiles(res, body);
       if (body.action === "noteBegin") return await noteBegin(res, body);
       if (body.action === "notePart") return await notePart(res, body);
       if (body.action === "noteDone") return await noteDone(res, body);

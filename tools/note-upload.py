@@ -60,6 +60,7 @@ def main():
     ap.add_argument("--unit", default="판서")
     ap.add_argument("--fid")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--verify", action="store_true", help="올린 것만 되읽어 확인")
     a = ap.parse_args()
     key = load_key()
 
@@ -68,6 +69,16 @@ def main():
         for c in r.get("classes", []):
             print("%-24s %-16s %s%s" % (c["id"], c["name"], c.get("playlist", ""),
                                         "  (종강)" if c.get("endDate") else ""))
+        return
+
+    if a.verify:
+        if not a.cid:
+            sys.exit("--cid 가 필요합니다")
+        for f in call(key, {"action": "noteFiles", "cid": a.cid}).get("files", []):
+            ok = f["partsFound"] == f["chunks"] and f["b64len"] > 0
+            print("%s  %-28s 조각 %d/%d  base64 %d자  %s"
+                  % ("OK " if ok else "!! ", f["name"], f["partsFound"], f["chunks"],
+                     f["b64len"], f.get("source", "")))
         return
 
     if not a.cid or not a.file:
@@ -95,8 +106,17 @@ def main():
     call(key, {"action": "noteDone", "cid": a.cid, "uid": uid, "fid": fid,
                "name": name, "mime": "application/pdf", "size": size,
                "chunks": len(parts)})
-    print("올렸습니다 — %s / 단원 «%s» / %s (%.1fMB, 조각 %d)"
+    # «보냈다» 로 끝내지 않는다. 되읽어서 조각 수가 맞는지 본다.
+    got = [f for f in call(key, {"action": "noteFiles", "cid": a.cid}).get("files", [])
+           if f["fid"] == fid]
+    ok = bool(got) and got[0]["partsFound"] == len(parts) and got[0]["b64len"] == len(b64)
+    print("올렸습니다 — %s / 단원 %s / %s (%.1fMB, 조각 %d)"
           % (a.cid, a.unit, name, size / 1048576, len(parts)))
+    if ok:
+        print("  되읽어 확인 — 조각 %d개, base64 %d자 그대로" % (len(parts), len(b64)))
+    else:
+        print("  !! 되읽으니 다릅니다:", got or "그 자리에 아무것도 없음")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
