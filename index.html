@@ -3309,7 +3309,8 @@ function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle,
     setBusy(true);
     try {
       const r = await resetStudentPin(person.name);
-      onMsg(person.name + " PIN을 초기화했어요 — 초기 PIN은 " + r.pin + " 이에요. 학생에게 알려주세요 ✓");
+      onMsg(person.name + " PIN을 초기화했어요 — 초기 PIN은 " + r.pin + " 이에요. 학생에게 알려주세요 ✓" +
+        (r.noClass ? " (아직 반이 없는 학생이에요)" : ""));
       onChanged && onChanged();
     } catch (e) { onMsg("초기화하지 못했어요: " + friendlyErr(e)); }
     setBusy(false);

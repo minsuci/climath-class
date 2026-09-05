@@ -262,12 +262,25 @@ async function resetStudentPin(res, { idToken, name }) {
     const m = (c.roster || []).find((r) => norm(r.name) === nm && !r.teacher);
     if (m) mine.push({ cls: c, member: m });
   }
+  // ⚠ 반 명단에만 있는 게 아니다. 학생 명단에 만들어 놓고 아직 반에 안 넣은 학생도
+  //    비번을 까먹는다 — 로그인도 그래서 고쳤다. 여기서도 students 를 같이 본다.
+  let people = [];
   if (!mine.length) {
-    res.status(404).json({ error: "담당하는 반에 그 이름이 없어요" }); return;
+    people = (await listDocs("students")).filter((p) => norm(p.name) === nm);
+    if (!people.length) {
+      res.status(404).json({ error: "그 이름을 찾을 수 없어요" }); return;
+    }
+    // 반이 없는 학생은 «담당 반» 으로 가릴 수가 없다. 관리자이거나,
+    // 학생 명단에 내가 담임으로 적힌 경우만 연다.
+    if (claims.role !== "owner" && !people.some((p) => p.homeroom === claims.tid)) {
+      res.status(403).json({ error: "아직 반이 없는 학생이에요. 관리자나 담임 선생님이 해주셔야 해요" });
+      return;
+    }
   }
   // ⚠ 이름이 겹치면 누구 것을 지우는지 알 수 없다. PIN 은 이름 하나에 하나뿐이라
   //    한 사람만 초기화할 방법이 없다 — 동명이인은 이름을 A·B·C 로 갈라야 한다.
-  const dup = mine.filter((x) => x.member.pid).map((x) => x.member.pid);
+  const dup = mine.length ? mine.filter((x) => x.member.pid).map((x) => x.member.pid)
+                          : people.map((p) => p.id);
   if (new Set(dup).size > 1) {
     res.status(409).json({ error: "같은 이름이 둘 이상이에요. 이름을 A·B·C 로 나눈 뒤 다시 해주세요" });
     return;
@@ -277,9 +290,11 @@ async function resetStudentPin(res, { idToken, name }) {
   for (const x of mine) {
     await deleteDoc("classes/" + x.cls.id + "/students/" + x.member.id);
   }
-  const def = String((mine[0].member.defaultPin) || DEFAULT_PIN);
+  // 반이 없으면 기댈 defaultPin 도 없다. 로그인도 이때는 기본값으로 본다.
+  const def = String((mine.length && mine[0].member.defaultPin) || DEFAULT_PIN);
   res.status(200).json({ ok: true, name: nm, pin: def,
-                         classes: mine.map((x) => x.cls.name) });
+                         classes: mine.map((x) => x.cls.name),
+                         noClass: !mine.length });
 }
 
 async function changePin(res, { name, oldPin, newPin }) {
