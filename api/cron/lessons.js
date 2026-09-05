@@ -15,6 +15,7 @@ import { listDocs, getDoc, patchDoc } from "../_google.js";
 import { readPlaylist, lineOf } from "../lesson.js";
 
 const DAYS_BACK = 7;          // 이만큼 거슬러 올라가며 빈 날을 메운다
+const DAYS_MAX = 400;         // 손으로 부를 때 최대. 처음 걸 때 지난 것까지 채우려고 둔다
 const KST = 9 * 60 * 60 * 1000;
 
 // 서버는 UTC 로 돈다. 한국 날짜로 세어야 «오늘» 이 맞는다.
@@ -36,7 +37,10 @@ export default async function handler(req, res) {
     res.status(401).json({ error: "권한이 없습니다" }); return;
   }
   try {
-    const want = backDays(DAYS_BACK);
+    // 처음 재생목록을 걸면 지난 수업도 채우고 싶다. ?days=120 처럼 넓혀 부를 수 있다.
+    // 크론은 인자를 안 주므로 늘 7일이다 — 매일 도는 일이 무거워지면 안 된다.
+    const n = Math.min(DAYS_MAX, Math.max(1, Number((req.query && req.query.days) || DAYS_BACK) || DAYS_BACK));
+    const want = backDays(n);
     const classes = await listDocs("classes");
     const todo = classes.filter((c) => c.playlist && !(c.endDate && c.endDate < kstToday()));
     const log = [];
@@ -71,6 +75,7 @@ export default async function handler(req, res) {
       log.push({ 반: c.name, 채움: wrote, 그대로: kept, 영상: pl.items.length });
     }
     res.status(200).json({ ok: true, 오늘: kstToday(), 훑은날: want.length,
+                           맨앞: want[want.length - 1],
                            재생목록있는반: todo.length, 결과: log });
   } catch (e) {
     console.error("[cron/lessons]", e);
