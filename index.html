@@ -3027,16 +3027,6 @@ function StudentDirectory({ me, onBack, initialCls }) {
           <h2 className="cm-h2" style={{margin: 0}}>학생 명단</h2>
           <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
         </div>
-        <Fold id="dir.help" title="이 화면은 뭔가요?" defaultOpen={false}>
-          <div className="cm-hint" style={{margin: 0}}>
-            반이 아니라 <b>사람</b>을 관리하는 곳이에요. 학교·학년·담임을 여기서 정하면
-            그 학생이 속한 모든 반과 내신 참여표가 같이 따라가요.
-            <br/>표에서 <b>칸을 바로 고치면 저장</b>되고, 맨 아랫줄에 이름을 치면 새 학생이 만들어져요.
-            <br/><b>여기서 고쳐도 되고 대시보드에서 고쳐도 됩니다</b> — 저장되는 곳은 한 군데예요.
-            바뀐 것은 아래 «최근 바뀐 것»에 누가 어디서 했는지 남습니다.
-          </div>
-        </Fold>
-
         <StudentLogPanel />
 
         {/* 접었을 때도 무엇으로 걸러져 있는지 제목에 남긴다 —
