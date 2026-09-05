@@ -8,3 +8,4 @@ tools/__pycache__/
 
 # 도구 열쇠 (공개 저장소라 커밋하지 않는다)
 tools/lesson-key.json
+tools/logs/
