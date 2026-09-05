@@ -87,6 +87,11 @@ html,body{margin:0; padding:0;}
 .rp-table th{background:#f7f4ee; padding:7px 9px; text-align:left; font-weight:600; color:#4b5563; border-bottom:1px solid #e5ded2;}
 .rp-table td{padding:7px 9px; border-bottom:1px solid #f0ece5;}
 .rp-note{background:#f7f4ee; border-radius:10px; padding:12px 14px; white-space:pre-wrap; min-height:56px;}
+.rp-scores{width:100%; border-collapse:collapse; font-size:12.5px;}
+.rp-scores th{text-align:left; font-weight:600; color:#6b7280; font-size:11px; padding:4px 6px; border-bottom:1px solid #e5ded2;}
+.rp-scores td{padding:6px; border-bottom:1px solid #f0ece5;}
+.rp-scores tr:last-child td{border-bottom:0;}
+.rp-dim{color:#9ca3af; font-weight:400;}
 .rp-consult{padding:9px 0; border-bottom:1px solid #f0ece5;}
 .rp-consult:last-child{border-bottom:0;}
 .rp-foot{margin-top:22px; padding-top:11px; border-top:1px solid #e5ded2; font-size:11px; color:#9ca3af; display:flex; justify-content:space-between;}
@@ -1599,7 +1604,33 @@ async function buildReportData(cls, st, ym) {
   // 4) 수업별 코멘트
   const notes = await getMonthNotes(cls.id, st.id, ym);
 
-  // 5) 그날 수업 내용 (반 공통). 학생 코멘트가 없는 날에 대신 쓴다 —
+  // 5) 테스트 점수. 그날 것을 통째로 읽는다 —
+  //    어차피 한 번 부르는 김에 **반 평균**도 같이 낸다. 내 점수만 있으면
+  //    학부모가 «잘한 건지» 를 알 수가 없다.
+  //    ⚠ 사람이 적으면 평균이 곧 남의 점수가 된다. 셋 미만이면 안 낸다.
+  const scores = [];
+  for (const d of myDays) {
+    const snap = await scoresCol(cls.id, d).get().catch(() => null);
+    if (!snap) continue;
+    const all = [];
+    snap.forEach((x) => all.push(x.data()));
+    const mine = all.filter((v) => v.sid === st.id);
+    if (!mine.length) continue;
+    for (const v of mine) {
+      // 같은 시험을 본 사람들 (시험명이 같은 것끼리)
+      const peers = all.filter((x) => (x.label || "") === (v.label || "") && x.score != null);
+      const avg = peers.length >= 3
+        ? Math.round(peers.reduce((a, x) => a + Number(x.score || 0), 0) / peers.length)
+        : null;
+      scores.push({ date: d, label: v.label || "", correct: v.correct, total: v.total,
+                    score: Number(v.score || 0), avg, n: peers.length });
+    }
+  }
+  scores.sort((a, b) => a.date.localeCompare(b.date));
+  const scoreAvg = scores.length
+    ? Math.round(scores.reduce((a, x) => a + x.score, 0) / scores.length) : null;
+
+  // 6) 그날 수업 내용 (반 공통). 학생 코멘트가 없는 날에 대신 쓴다 —
   //    코멘트를 매번 못 쓰니 «그날 무엇을 했는지» 라도 남기려는 것이다.
   const lessons = {};
   for (const d of myDays) {
@@ -1609,7 +1640,7 @@ async function buildReportData(cls, st, ym) {
   }
 
   return {
-    notes, lessons, sessionDates: myDays,
+    notes, lessons, scores, scoreAvg, sessionDates: myDays,
     sessions: myDays.length, present, absent: myDays.length - present,
     videoDone, planned, rate: myDays.length > 0 ? Math.round(present / myDays.length * 100) : null,
     books, hwSnapshot, consults, hasPrev: !!prevSnap,
@@ -5125,6 +5156,32 @@ function ReportSheet({ cls, st, ym, data, comment, editable, onNoteChange }) {
         );
       })()}
 
+      {(data.scores || []).length > 0 && (
+        <div className="rp-sec">
+          <div className="rp-sec-h">테스트 점수</div>
+          <table className="rp-scores">
+            <thead><tr><th>날짜</th><th>시험</th><th>점수</th><th>반 평균</th></tr></thead>
+            <tbody>
+              {data.scores.map((x, i) => (
+                <tr key={i}>
+                  <td>{x.date.slice(5).replace("-", "/")}</td>
+                  <td>{x.label || "테스트"}</td>
+                  <td><b>{x.score}점</b>
+                    {x.correct != null && x.total ? <span className="rp-dim"> ({x.correct}/{x.total})</span> : null}</td>
+                  {/* 사람이 적으면 평균을 안 낸다 — 그게 곧 남의 점수가 된다 */}
+                  <td className="rp-dim">{x.avg == null ? "-" : x.avg + "점"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {data.scores.length > 1 && (
+            <div style={{fontSize: 12, color: "#4b5563", marginTop: 6}}>
+              이 달 평균 <b>{data.scoreAvg}점</b> · {data.scores.length}회
+            </div>
+          )}
+        </div>
+      )}
+
       {data.consults.length > 0 && (
         <div className="rp-sec">
           <div className="rp-sec-h">상담 내용</div>
@@ -5160,6 +5217,8 @@ function ReportCenter({ onBack }) {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [q, setQ] = useState("");
+  const [clsF, setClsF] = useState("all");   // "all" | 반id
+  const [done, setDone] = useState({});      // 이번 달 코멘트를 쓴 사람 { 반|학생: true }
   const backRef = useSwipeBack(onBack);
   const backRef2 = useSwipeBack(() => setPicked(null));
 
@@ -5170,7 +5229,35 @@ function ReportCenter({ onBack }) {
   everyone.sort((a, b) =>
     (isClassEnded(a.cls) ? 1 : 0) - (isClassEnded(b.cls) ? 1 : 0)
     || a.st.name.localeCompare(b.st.name, "ko") || a.cls.name.localeCompare(b.cls.name, "ko"));
-  const filtered = q ? everyone.filter((x) => norm(x.st.name).includes(norm(q))) : everyone;
+  // 반으로 거른다. 반을 고르면 **그 반 명단 순서**를 지킨다 —
+  // 출석부에서 보던 순서와 달라지면 같은 반을 훑을 때 눈이 계속 헤맨다.
+  const inCls = (x) => clsF === "all" || x.cls.id === clsF;
+  const clsCount = (cid) => everyone.filter((x) => x.cls.id === cid).length;
+  let filtered = everyone.filter(inCls);
+  if (q) filtered = filtered.filter((x) => norm(x.st.name).includes(norm(q)));
+  if (clsF !== "all") {
+    const order = {};
+    ((findClass(clsF) || {}).roster || []).filter((r) => !r.teacher && !isEnded(r))
+      .forEach((r, i) => { order[r.id] = i; });
+    filtered = filtered.slice().sort((a, b) => {
+      const x = order[a.st.id], y = order[b.st.id];
+      if (x == null && y == null) return a.st.name.localeCompare(b.st.name, "ko");
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return x - y;
+    });
+  }
+  // 이번 달 코멘트를 이미 쓴 사람. **누가 아직 안 됐는지**가 이 화면의 쓸모다.
+  useEffect(() => {
+    let live = true;
+    reportsCol().where("ym", "==", ym).get().then((sn) => {
+      if (!live) return;
+      const m = {};
+      sn.forEach((d) => { const v = d.data(); if ((v.comment || "").trim()) m[v.cid + "|" + v.sid] = true; });
+      setDone(m);
+    }).catch(() => setDone({}));
+    return () => { live = false; };
+  }, [ym, picked]);
 
   const monthOpts = recentMonths(12);
 
@@ -5243,16 +5330,40 @@ function ReportCenter({ onBack }) {
           <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
         </div>
         <input className="cm-input" style={{margin: 0}} placeholder="학생 이름 검색" value={q} onChange={(e) => setQ(e.target.value)} />
-        <div className="cm-hint" style={{marginTop: 8}}>학생을 고르면 출결·진도·상담이 자동으로 집계돼요. 코멘트만 쓰고 인쇄하면 됩니다.</div>
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 10}}>
+          <span style={{fontSize: 11, color: "var(--muted)", marginRight: 2}}>반</span>
+          <button className={"cm-ab-tab" + (clsF === "all" ? " on" : "")}
+            onClick={() => setClsF("all")}>전체 {everyone.length}</button>
+          {activeClasses().map((c) => (
+            <button key={c.id} className={"cm-ab-tab" + (clsF === c.id ? " on" : "")}
+              onClick={() => setClsF(c.id)}>{c.name} {clsCount(c.id)}</button>
+          ))}
+        </div>
+        <label className="cm-label">기준 월</label>
+        <select className="cm-input" style={{margin: 0, maxWidth: 200}} value={ym}
+          onChange={(e) => setYm(e.target.value)}>
+          {monthOpts.map((m) => <option key={m} value={m}>{m.split("-")[0]}년 {Number(m.split("-")[1])}월</option>)}
+        </select>
+        <div className="cm-hint" style={{marginTop: 8}}>학생을 고르면 출결·점수·수업내용·상담이 자동으로 집계돼요. 코멘트만 쓰고 인쇄하면 됩니다.
+          <br/>이름 옆 <b>✓</b> 는 그 달 코멘트를 이미 쓴 학생이에요.</div>
       </div>
       <div className="cm-card">
-        <h3 className="cm-h3">학생 {filtered.length}명</h3>
+        <h3 className="cm-h3">
+          {clsF === "all" ? "학생" : (findClass(clsF) || {}).name} {filtered.length}명
+          {(() => {
+            const n = filtered.filter((x) => done[x.cls.id + "|" + x.st.id]).length;
+            return <span className="cm-h-hint">{ym.split("-")[1].replace(/^0/, "")}월 코멘트 {n}/{filtered.length}</span>;
+          })()}
+        </h3>
         {filtered.length === 0 && <div className="cm-empty">검색 결과가 없어요</div>}
         {filtered.map(({ cls, st }) => (
           <button key={cls.id + st.id} className="cm-day" style={isClassEnded(cls) ? {opacity: .62} : undefined}
             onClick={() => { setPicked({ cls, st }); load(cls, st, ym); }}>
             <div className="cm-day-left">
-              <span className="cm-day-date">{st.name}</span>
+              <span className="cm-day-date">
+                {st.name}
+                {done[cls.id + "|" + st.id] && <span style={{color: "#3f7d5e", marginLeft: 6}}>✓</span>}
+              </span>
               <span className="cm-day-sub">{cls.name}{isClassEnded(cls) ? " · " + cls.endDate + " 종강" : ""}</span>
             </div>
             <span className="cm-day-arrow">›</span>
