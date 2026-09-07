@@ -97,7 +97,10 @@ service cloud.firestore {
       // `match /config/{x}` 로 뭉뚱그리면 게시 전 안내문 초안까지 학생이 읽는다.
       // 내신 참여표. 학생은 자기 것을 내고 반 것을 읽는다(같은 반 일정은 서로 알아도 된다).
       // 회차는 선생님만 연다 — 학생이 바꾸면 접수가 엉뚱한 곳에 쌓인다.
-      match /exams/{x}        { allow read: if inClass(cid); allow write: if teaches(cid) || enrolled(cid); }
+      // 2026-09-07 — 읽기는 **선생님 전원**에게 연다. 팀체크(대시보드)가 학원 전체 참여표를
+      // 반을 가로질러 보여주는데, 담당 반만 읽히면 다른 반은 전부 «안 냈다»로 보였다.
+      // 참여표는 이름·학교·시험 날짜라 같은 학원 선생님끼리 알아도 되는 것. 쓰기는 그대로 담당 반만.
+      match /exams/{x}        { allow read: if isTeacher() || enrolled(cid); allow write: if teaches(cid) || enrolled(cid); }
 
       match /config/notice    { allow read: if inClass(cid); allow write: if teaches(cid); }
       match /config/flyerPub  { allow read: if inClass(cid); allow write: if teaches(cid); }  // 게시본
