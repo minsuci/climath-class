@@ -141,7 +141,7 @@ def main():
     slug = re.sub(r"\W+", "", a.kind)[:12] or "note"
     fid = a.fid or (slug + "_" + date)
 
-    b = call(key, {"action": "noteBegin", "cid": a.cid, "unit": title})
+    b = call(key, {"action": "noteBegin", "cid": a.cid, "unit": title, "day": date})
     uid, chunk = b["uid"], int(b.get("chunk") or 700000)
 
     b64 = base64.b64encode(io.open(a.file, "rb").read()).decode("ascii")

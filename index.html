@@ -6695,6 +6695,14 @@ function NotesManager({ cls, canEdit, me }) {
   const [units, setUnits] = useState(null);
   useEffect(() => noteUnitsCol(cls.id).orderBy("time").onSnapshot((s) => {
     const arr = []; s.forEach((d) => arr.push({ uid: d.id, ...d.data() }));
+    // 강의노트는 «수업 날짜» 가 곧 단원이다. 만든 순서로 두면 9/4 을 나중에
+    // 올렸다는 이유로 9/7 아래에 붙는다 (실제로 그랬다).
+    //
+    // ⚠ 제목(`9/4(금) 강의노트`)에는 연도가 없다. 그래서 제목을 파싱하지 않고
+    //    서버가 적어 둔 day 를 쓴다. day 가 없는 옛 단원·손으로 만든 단원은
+    //    만든 날을 대신 써서 같은 줄에 세운다 — 있던 자리에서 안 움직인다.
+    const key = (u) => u.day || ymd(new Date(u.time || 0));
+    arr.sort((a, b) => key(a).localeCompare(key(b)) || (a.time || 0) - (b.time || 0));
     setUnits(arr);
   }), [cls.id]);
   if (units === null) return <div className="cm-empty">불러오는 중…</div>;

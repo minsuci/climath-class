@@ -259,22 +259,27 @@ async function noteUnitDelete(res, { cid, uid }) {
   res.status(200).json({ ok: true, files: files.length, parts });
 }
 
-async function noteUnitRename(res, { cid, uid, title }) {
+async function noteUnitRename(res, { cid, uid, title, day }) {
   const t = String(title || "").trim();
   if (!cid || !uid || !t) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
-  await patchDoc("classes/" + cid + "/noteUnits/" + uid, { title: t });
-  res.status(200).json({ ok: true, title: t });
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(String(day || "")) ? String(day) : null;
+  await patchDoc("classes/" + cid + "/noteUnits/" + uid, { title: t, ...(d ? { day: d } : {}) });
+  res.status(200).json({ ok: true, title: t, day: d });
 }
 
-async function noteBegin(res, { cid, unit }) {
+async function noteBegin(res, { cid, unit, day }) {
   const c = await getDoc("classes/" + cid).catch(() => null);
   if (!c) { res.status(404).json({ error: "그런 반이 없어요" }); return; }
   const title = String(unit || "").trim() || "강의노트";
+  // ⚠ day(수업 날짜)를 따로 적어 둔다. 제목에는 연도가 없어서 «12/20» 과 «1/5» 의
+  //    앞뒤를 제목만으로는 가릴 수 없다. 화면은 이 값으로 줄을 세운다.
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(String(day || "")) ? String(day) : null;
   // 선생님이 손으로 만든 같은 이름 단원이 있으면 그 자리에 넣는다.
   const units = await listDocs("classes/" + cid + "/noteUnits").catch(() => []);
   const hit = units.find((u) => (u.title || "") === title);
   const uid = hit ? hit.id : unitId(title);
-  if (!hit) await patchDoc("classes/" + cid + "/noteUnits/" + uid, { title, time: Date.now() });
+  if (!hit) await patchDoc("classes/" + cid + "/noteUnits/" + uid, { title, time: Date.now(), ...(d ? { day: d } : {}) });
+  else if (d && !hit.day) await patchDoc("classes/" + cid + "/noteUnits/" + uid, { day: d });
   res.status(200).json({ ok: true, uid, chunk: NOTE_CHUNK });
 }
 

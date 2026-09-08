@@ -109,14 +109,16 @@ def main():
                 # 날짜가 하나로 모이는 단원만 바꾼다. 여러 날짜가 섞인 옛 단원은
                 # 이름만 바꿔서는 갈리지 않는다 — 손대지 않고 그대로 둔다.
                 if len(dates) == 1 and None not in dates:
-                    want = title_for(dates.pop())
-                    if want != u["title"]:
-                        if a.dry:
-                            mark = "  → 「%s」 로" % want
-                        else:
-                            call(key, {"action": "noteUnitRename", "cid": c["id"],
-                                       "uid": uid, "title": want})
-                            mark = "  → 「%s」 로 바꿈" % want
+                    day = dates.pop()
+                    want = title_for(day)
+                    # 이름이 이미 맞아도 다시 보낸다 — **날짜(day)가 비어 있을 수 있다.**
+                    # 화면은 제목이 아니라 그 값으로 줄을 세운다(제목에는 연도가 없다).
+                    if a.dry:
+                        mark = "  → 「%s」 로" % want if want != u["title"] else "  → 날짜만 (%s)" % day
+                    else:
+                        call(key, {"action": "noteUnitRename", "cid": c["id"],
+                                   "uid": uid, "title": want, "day": day})
+                        mark = "  → 「%s」 · %s" % (want, day)
                 elif len(dates) > 1:
                     mark = "  (날짜가 %d개 섞여 있어 그대로 둠)" % len(dates)
 
