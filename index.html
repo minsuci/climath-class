@@ -1204,7 +1204,28 @@ async function resetStudentPin(name) {
   return await authApi({ action: "resetStudentPin", idToken, name });
 }
 
+// ---------- 명단 고치기는 팀체크에서 (2026-09-08) ----------
+//
+// 학생 명단을 이 앱과 팀체크 **두 곳에서** 고칠 수 있었다. 화면이 두 벌이면 어느 쪽이 맞는지 아무도 모른다 —
+// 학사일정 때 내린 결론과 같다(2026-09-04에 이 앱의 학사일정 화면을 지웠다).
+//
+// ⚠ **자료는 옮기지 않았다.** students·classes 는 그대로 이 앱 DB 에 있고, 팀체크가 그것을 직접 고친다.
+//   옮기는 것은 이사가 아니라 재건축이다 — 출결·과제·점수·로그인이 전부 반 명단의 자리 번호에 달려 있다.
+//
+// 여기서 막는 것: 사람 만들기·고치기·지우기, 반에 넣고 빼기, 반 명단 줄을 사람에게 잇기.
+// 여기 남는 것: 반 안 순서, 선생님↔학생 전환, 학생별 등원요일·교재, PIN 초기화.
+//   그건 담임이 수업하며 하는 일이지 명단 관리가 아니다.
+//
+// 되돌리려면 ROSTER_RO 를 false 로 한 줄만 바꾼다.
+const ROSTER_RO = true;
+const TEAM_ROSTER_URL = "https://climath-team1.vercel.app/#students";
+const ROSTER_RO_MSG = "학생 명단은 팀체크에서 고쳐요.\n\n" +
+  "두 앱에서 같은 명단을 고치면 어느 쪽이 맞는지 알 수 없어서\n" +
+  "고치는 자리를 팀체크 한 곳으로 모았어요. (2026-09-08)\n\n" + TEAM_ROSTER_URL;
+function rosterGuard() { if (ROSTER_RO) throw new Error(ROSTER_RO_MSG); }
+
 async function saveStudent(pid, data) {
+  rosterGuard();
   if (pid) {
     await studentsCol().doc(pid).set({ ...data, updated: Date.now() }, { merge: true });
     logStudentChange("고침", pid, data.name || "",
@@ -1216,12 +1237,14 @@ async function saveStudent(pid, data) {
   return ref.id;
 }
 async function deleteStudent(pid, name) {
+  rosterGuard();
   await studentsCol().doc(pid).delete();
   logStudentChange("지움", pid, name || "", "");
 }
 
 // roster 항목에 pid를 달고, 학교·학년을 함께 적어둔다.
 async function linkRosterToStudent(cid, rosterId, person) {
+  rosterGuard();
   const cls = findClass(cid);
   if (!cls) return;
   const next = (cls.roster || []).map((r) => (r.id === rosterId
@@ -1283,6 +1306,7 @@ async function saveClassRosterWithPast(cid, roster, pastAdd) {
 // 명단 전체를 다시 쓰므로 **반드시 최신(cls.roster) 위에 얹는다** — 화면이 들고 있던
 // 옛 사본으로 저장하면 그 사이 바뀐 다른 학생 내용이 날아간다.
 async function assignToClass(cid, person) {
+  rosterGuard();
   const cls = findClass(cid);
   if (!cls) return;
   if ((cls.roster || []).some((r) => r.pid === person.pid)) return;   // 이미 있음
@@ -1296,6 +1320,7 @@ async function assignToClass(cid, person) {
   logStudentChange("반에 넣음", person.pid, person.name || "", cls.name);
 }
 async function unassignFromClass(cid, pid) {
+  rosterGuard();
   const cls = findClass(cid);
   if (!cls) return;
   const gone = (cls.roster || []).find((r) => r.pid === pid);
@@ -3317,6 +3342,17 @@ function StudentDirectory({ me, onBack, initialCls }) {
           )}
         </div>
         </Fold>
+        {ROSTER_RO && (
+          <div style={{background: "#f6e7df", border: "1px solid #e6cbb9", borderRadius: 10,
+                       padding: "9px 12px", marginBottom: 10, fontSize: 13, color: "#8a5a33"}}>
+            <b>보기 전용이에요.</b> 학생 명단을 고치는 곳은 <b>팀체크</b> 한 곳으로 모았어요.{" "}
+            <a href={TEAM_ROSTER_URL} target="_blank" rel="noreferrer"
+               style={{color: "#a8562c", fontWeight: 700}}>팀체크에서 열기 →</a>
+            <div style={{fontSize: 12, marginTop: 3, color: "#a08165"}}>
+              찾아보기·PIN 초기화는 여기서 그대로 됩니다. 이름·학교·학년·담임·반 배정은 팀체크에서 고쳐요.
+            </div>
+          </div>
+        )}
         {loadErr && (
           <div style={{background: "#fae3e2", border: "1px solid #eec9c7", borderRadius: 12,
                padding: "12px 14px", marginBottom: 12, color: "#a5322d", fontSize: 13, lineHeight: 1.6}}>
@@ -3335,7 +3371,8 @@ function StudentDirectory({ me, onBack, initialCls }) {
           <Fold id="dir.unlinked" tone="warn" defaultOpen={false}
             title={"학생 정보가 없는 명단 항목 " + unlinked.length + "건"}
             right={<button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "7px 12px", fontSize: 13}}
-                disabled={busy} onClick={autoLink}>이름이 같은 것끼리 잇기</button>}>
+                disabled={busy || ROSTER_RO} title={ROSTER_RO ? ROSTER_RO_MSG : undefined}
+                onClick={autoLink}>이름이 같은 것끼리 잇기</button>}>
             <>
               <div style={{fontSize: 12, color: "#a8562c", lineHeight: 1.55, margin: "0 0 8px"}}>
                 반에는 있는데 아직 사람 정보가 없어요. 이어주면 학교·학년·담임을 한 번만 넣으면 됩니다.
@@ -3352,7 +3389,8 @@ function StudentDirectory({ me, onBack, initialCls }) {
                       {/* 누르면 "누구인가요?" 고르개가 뜬다. 예전엔 바로 새 사람을 만들어서
                           동명이인이 있어도 하나를 더 찍어냈다. */}
                       {mine.map((u) => (
-                        <button key={u.cls.id + u.r.id} className="cm-ab-tab" disabled={busy}
+                        <button key={u.cls.id + u.r.id} className="cm-ab-tab" disabled={busy || ROSTER_RO}
+                          title={ROSTER_RO ? ROSTER_RO_MSG : undefined}
                           onClick={() => setPick({ cls: u.cls, st: u.r })}>{u.r.name} 잇기</button>
                       ))}
                     </div>
@@ -3367,11 +3405,16 @@ function StudentDirectory({ me, onBack, initialCls }) {
           <div style={{background: "#f6e7df", border: "1px solid #e6cbb9", borderRadius: 10,
                padding: "9px 11px", marginBottom: 10, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
             <span style={{fontSize: 12, color: "#a8562c"}}>
-              지금 보이는 <b>{shown.length}명</b>을 한 학년으로 넣기 →
+              {ROSTER_RO
+                ? <>학년 없는 <b>{shown.length}명</b>이에요. 학년은 <b>팀체크</b>에서 넣어요 →</>
+                : <>지금 보이는 <b>{shown.length}명</b>을 한 학년으로 넣기 →</>}
             </span>
-            {GRADES.map((g) => (
-              <button key={g} className="cm-ab-tab" disabled={busy} onClick={() => bulkGrade(g)}>{g}</button>
-            ))}
+            {ROSTER_RO
+              ? <a href={TEAM_ROSTER_URL} target="_blank" rel="noreferrer"
+                   style={{fontSize: 12, color: "#a8562c", fontWeight: 700}}>팀체크에서 열기 →</a>
+              : GRADES.map((g) => (
+                  <button key={g} className="cm-ab-tab" disabled={busy} onClick={() => bulkGrade(g)}>{g}</button>
+                ))}
           </div>
         )}
 
@@ -3428,7 +3471,8 @@ function StudentDirectory({ me, onBack, initialCls }) {
                   ))}
                 </React.Fragment>
               ))}
-              {/* 새 줄 — 이름만 치면 만들어진다 */}
+              {/* 새 줄 — 이름만 치면 만들어진다. 명단 고치기를 팀체크로 모으며 닫았다(2026-09-08) */}
+              {!ROSTER_RO && (
               <tr>
                 <td className="cm-ab-name" style={{padding: 3}}>
                   <input className="cm-sheet-in" placeholder="+ 새 학생" value={newName}
@@ -3441,6 +3485,7 @@ function StudentDirectory({ me, onBack, initialCls }) {
                     : <span style={{fontSize: 12, color: "#b6ab9b"}}>이름을 치면 새 학생이 만들어져요</span>}
                 </td>
               </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -3508,7 +3553,7 @@ function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle,
   return (<>
     <tr>
       <td className="cm-ab-name" style={cellStyle}>
-        <input className="cm-sheet-in" value={name} disabled={busy}
+        <input className="cm-sheet-in" value={name} disabled={busy || ROSTER_RO}
           onChange={(e) => setName(e.target.value)}
           onBlur={() => { const v = name.trim(); if (v && v !== person.name) patch({ name: v }); else setName(person.name || ""); }}
           onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
@@ -3522,19 +3567,19 @@ function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle,
         )}
       </td>
       <td style={cellStyle}>
-        <input className={"cm-sheet-in" + (odd ? " odd" : "")} list="cm-school-list" value={school} disabled={busy}
+        <input className={"cm-sheet-in" + (odd ? " odd" : "")} list="cm-school-list" value={school} disabled={busy || ROSTER_RO}
           title={odd ? "아는 학교 목록에 없어요. 이름이 맞는지 확인해주세요." : undefined}
           placeholder="—" onChange={(e) => setSchool(e.target.value)} onBlur={settleSchool}
           onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
       </td>
       <td style={cellStyle}>
-        <select className="cm-sheet-in" value={person.grade || ""} disabled={busy} onChange={(e) => patch({ grade: e.target.value })}>
+        <select className="cm-sheet-in" value={person.grade || ""} disabled={busy || ROSTER_RO} onChange={(e) => patch({ grade: e.target.value })}>
           <option value="">—</option>
           {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
       </td>
       <td style={cellStyle}>
-        <select className="cm-sheet-in" value={person.homeroom || ""} disabled={busy} onChange={(e) => patch({ homeroom: e.target.value })}>
+        <select className="cm-sheet-in" value={person.homeroom || ""} disabled={busy || ROSTER_RO} onChange={(e) => patch({ homeroom: e.target.value })}>
           <option value="">—</option>
           {teachers.filter((t) => (t.status || "active") !== "pending").map((t) => (
             <option key={t.tid} value={t.tid}>{t.name}</option>
@@ -3550,7 +3595,9 @@ function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle,
       <td style={cellStyle}>
         <button className="cm-link" style={{padding: 0, marginRight: 8}} disabled={busy}
           title="PIN을 초기 값으로 되돌려요" onClick={resetPin}>PIN</button>
-        <button className="cm-link" style={{color: "#d6453f", padding: 0}} disabled={busy} onClick={remove}>삭제</button>
+        {!ROSTER_RO && (
+          <button className="cm-link" style={{color: "#d6453f", padding: 0}} disabled={busy} onClick={remove}>삭제</button>
+        )}
       </td>
       <td style={cellStyle}></td>
     </tr>
@@ -3590,11 +3637,13 @@ function ClassAssign({ person, onChanged, onMsg }) {
   }
   return (
     <div>
-      <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 6}}>반 배정 — 누르면 넣고 빼요</div>
+      <div style={{fontSize: 12, color: "var(--muted)", marginBottom: 6}}>
+        {ROSTER_RO ? "반 배정 — 고치는 것은 팀체크에서" : "반 배정 — 누르면 넣고 빼요"}
+      </div>
       <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
         {activeClasses().map((c) => {
           const inIt = (c.roster || []).some((r) => r.pid === person.pid);
-          return <button key={c.id} className={"cm-ab-tab" + (inIt ? " on" : "")} disabled={busy}
+          return <button key={c.id} className={"cm-ab-tab" + (inIt ? " on" : "")} disabled={busy || ROSTER_RO}
             onClick={() => toggle(c, inIt)}>{c.name}</button>;
         })}
       </div>
@@ -4399,10 +4448,14 @@ function ExamBoard({ onBack }) {
               반 명단에만 있고 <b>학생 명단과 안 이어진</b> 줄이에요. 학교·학년·담임이 안 따라오고,
               <b> 학년 탭 어디에도 안 잡혀서 집계에서 빠집니다.</b>
               학생 명단에서 사람을 지워도 반 명단 줄은 남기 때문에 여기 계속 보여요.
+              {ROSTER_RO && (<><br/><b>잇는 것은 팀체크에서 해요</b> — 학생 명단의 «사람으로 만들어 잇기».{" "}
+                <a href={TEAM_ROSTER_URL} target="_blank" rel="noreferrer"
+                   style={{color: "#a8562c", fontWeight: 700}}>팀체크에서 열기 →</a></>)}
             </div>
             <div style={{display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8}}>
               {autoLinkable.length > 0 && (
-                <button className="cm-btn cm-btn-primary" disabled={filling}
+                <button className="cm-btn cm-btn-primary" disabled={filling || ROSTER_RO}
+                  title={ROSTER_RO ? ROSTER_RO_MSG : undefined}
                   style={{margin: 0, width: "auto", padding: "8px 13px", fontSize: 13}}
                   onClick={linkAllSameName}>
                   {filling ? "잇는 중…" : "이름이 같은 " + autoLinkable.length + "명 한 번에 잇기"}
@@ -4426,7 +4479,8 @@ function ExamBoard({ onBack }) {
                         <span style={{fontSize: 11, color: "#a8562c", opacity: .8}}>
                           {n === 0 ? "명단에 없음" : (n === 1 ? "명단에 1명" : "동명이인 " + n + "명")}
                         </span>
-                        <button className="cm-link" style={{padding: 0, fontSize: 12}} disabled={filling}
+                        <button className="cm-link" style={{padding: 0, fontSize: 12}} disabled={filling || ROSTER_RO}
+                          title={ROSTER_RO ? ROSTER_RO_MSG : undefined}
                           onClick={() => linkOne(x)}>{n === 0 ? "만들어 잇기" : "잇기"}</button>
                         <span style={{color: "#ded5c7"}}>·</span>
                         <button className="cm-link" style={{padding: 0, fontSize: 12, color: "#5a6b82"}}
@@ -6900,18 +6954,26 @@ function RosterManager({ cls, canEdit, onChanged, onOpenDirectory }) {
           {canEdit && (<span style={{marginLeft: "auto", display: "flex", gap: 2, alignItems: "center"}}>
             <button className="cm-link" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{padding: "0 4px"}}>▲</button>
             <button className="cm-link" disabled={busy || i === students.length - 1} onClick={() => move(i, 1)} style={{padding: "0 4px"}}>▼</button>
-            <button className="cm-link" disabled={busy} onClick={() => renameStudent(st)}>이름</button>
+            {/* 이름·빼기는 명단 관리다 → 팀체크로 (2026-09-08). 순서와 선생님 전환은 반 운영이라 남긴다 */}
+            {!ROSTER_RO && <button className="cm-link" disabled={busy} onClick={() => renameStudent(st)}>이름</button>}
             <button className="cm-link" disabled={busy} onClick={() => toTeacher(st)}>선생님</button>
-            <button className="cm-link" disabled={busy} style={{color: "#d6453f"}} onClick={() => removeStudent(st)}>빼기</button>
+            {!ROSTER_RO && <button className="cm-link" disabled={busy} style={{color: "#d6453f"}} onClick={() => removeStudent(st)}>빼기</button>}
           </span>)}
         </div>
         );
       })}
-      {canEdit && !picking && (
+      {canEdit && ROSTER_RO && (
+        <div style={{marginTop: 10, fontSize: 12, color: "#8a5a33", background: "#f6e7df",
+                     border: "1px solid #e6cbb9", borderRadius: 8, padding: "7px 10px"}}>
+          학생을 넣고 빼는 것은 <b>팀체크</b>에서 해요.{" "}
+          <a href={TEAM_ROSTER_URL} target="_blank" rel="noreferrer" style={{color: "#a8562c", fontWeight: 700}}>팀체크에서 열기 →</a>
+        </div>
+      )}
+      {canEdit && !ROSTER_RO && !picking && (
         <button className="cm-link" style={{marginTop: 10}} disabled={busy || people === null}
           onClick={() => setPicking(true)}>+ 학생 넣기</button>
       )}
-      {canEdit && picking && (
+      {canEdit && !ROSTER_RO && picking && (
         <div style={{marginTop: 10, background: "#f7f4f0", border: "1px solid #e8e0d4", borderRadius: 10, padding: "10px 12px"}}>
           <div style={{display: "flex", gap: 8, alignItems: "center", marginBottom: 8}}>
             <input className="cm-input" style={{margin: 0, flex: 1}} placeholder="학생 명단에서 찾기 (이름 · 학교)"

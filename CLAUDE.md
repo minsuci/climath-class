@@ -23,6 +23,25 @@ repo/
 
 ## ⚠️ 먼저 알아야 할 것 (사고 방지)
 
+### 0. 학생 명단은 여기서 못 고친다 — 팀체크에서 고친다 (2026-09-08)
+
+`ROSTER_RO = true` 한 줄이 명단 쓰기를 통째로 막는다. 문지기는 `rosterGuard()`.
+
+| 막은 것 | 남긴 것 |
+|---|---|
+| `saveStudent` · `deleteStudent` · `assignToClass` · `unassignFromClass` · `linkRosterToStudent` | `saveClassRoster`(순서·선생님 전환) · `StudentConfig`(등원요일·교재) · `resetStudentPin` |
+
+**자료는 안 옮겼다.** `students`·`classes` 는 그대로 이 앱 DB 에 있고, 팀체크가 그것을 직접 고친다.
+옮기는 것은 이사가 아니라 재건축이다 — 출결·과제·점수·학생 로그인이 전부 **반 명단의 자리 번호**(`roster[].id`)에 달려 있다.
+
+> [!warning] 화면만 감추면 반쪽이다
+> 단추만 숨기면 함수는 그대로 열려 있다. 다른 화면에서 부르거나 옛 화면이 남으면 그대로 쓰인다.
+> **쓰기 함수 자체를 막고** 화면은 그 위에 덮는다. `tools/test-roster-ro.mjs` 가 둘 다 센다(31건).
+
+- 진단은 남긴다 — «학생 정보가 없는 명단 항목» 상자는 그대로 보이고 단추만 잠긴다. 그게 보여야 팀체크에 가서 고칠 생각을 한다.
+- 되돌리려면 `ROSTER_RO` 를 `false` 로. 옛 화면이 그대로 돌아온다.
+- 왜: 화면이 두 벌이면 어느 쪽이 맞는지 아무도 모른다. 학사일정 때 내린 결론과 같다(2026-09-04에 이 앱의 학사일정 화면을 지웠다).
+
 ### 1. 앱 코드는 `<script type="text/plain" id="__appSource">` 안에 있다
 Babel 자동 변환을 쓰지 않는다. 앱 코드를 `text/plain`으로 숨겨두고, 아래 스크립트가
 `Babel.transform(src, { presets:["react"], sourceType:"script" })`로 직접 변환해 실행한다.
