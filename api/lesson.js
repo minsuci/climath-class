@@ -222,7 +222,7 @@ async function noteFiles(res, { cid, uid }) {
       const parts = await listDocs("classes/" + cid + "/noteUnits/" + u.id + "/files/" + f.id + "/parts")
         .catch(() => []);
       out.push({
-        uid: u.id, fid: f.id, name: f.name || "", chunks: f.chunks || 0,
+        uid: u.id, title: u.title || "", fid: f.id, name: f.name || "", chunks: f.chunks || 0,
         size: f.size || 0, source: f.source || "",
         partsFound: parts.length,
         b64len: parts.reduce((n, d) => n + String(d.data || "").length, 0),
