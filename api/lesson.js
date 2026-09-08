@@ -243,6 +243,29 @@ async function noteDelete(res, { cid, uid, fid }) {
   res.status(200).json({ ok: true, removed: parts.length });
 }
 
+// 단원 하나를 통째로. 파일 → 조각 순서는 noteDelete 와 같은 이유로 조각이 먼저다.
+async function noteUnitDelete(res, { cid, uid }) {
+  if (!cid || !uid) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  const base = "classes/" + cid + "/noteUnits/" + uid;
+  const files = await listDocs(base + "/files").catch(() => []);
+  let parts = 0;
+  for (const f of files) {
+    const ps = await listDocs(base + "/files/" + f.id + "/parts").catch(() => []);
+    for (const d of ps) await deleteDoc(base + "/files/" + f.id + "/parts/" + d.id);
+    await deleteDoc(base + "/files/" + f.id);
+    parts += ps.length;
+  }
+  await deleteDoc(base);
+  res.status(200).json({ ok: true, files: files.length, parts });
+}
+
+async function noteUnitRename(res, { cid, uid, title }) {
+  const t = String(title || "").trim();
+  if (!cid || !uid || !t) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  await patchDoc("classes/" + cid + "/noteUnits/" + uid, { title: t });
+  res.status(200).json({ ok: true, title: t });
+}
+
 async function noteBegin(res, { cid, unit }) {
   const c = await getDoc("classes/" + cid).catch(() => null);
   if (!c) { res.status(404).json({ error: "그런 반이 없어요" }); return; }
@@ -291,6 +314,8 @@ export default async function handler(req, res) {
       if (body.action === "noteClasses") return await noteClasses(res);
       if (body.action === "noteFiles") return await noteFiles(res, body);
       if (body.action === "noteDelete") return await noteDelete(res, body);
+      if (body.action === "noteUnitDelete") return await noteUnitDelete(res, body);
+      if (body.action === "noteUnitRename") return await noteUnitRename(res, body);
       if (body.action === "noteBegin") return await noteBegin(res, body);
       if (body.action === "notePart") return await notePart(res, body);
       if (body.action === "noteDone") return await noteDone(res, body);

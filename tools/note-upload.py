@@ -17,8 +17,11 @@
   python tools/note-upload.py --list                     반 목록만 보여준다
 
 강의노트 제목은 **수업 날짜 하나로** 정해진다 — `9/7(월) 강의노트`.
---kind 는 «판서/풀이노트» 를 가르는 데만 쓰고 제목에는 안 들어간다.
-그래서 같은 날 판서와 풀이노트를 올리면 **같은 강의노트 안에 파일 둘**로 들어간다.
+
+**한 날짜에 올라가는 것은 «정제된 풀이노트» 하나다** (2026-09-08).
+판서와 수업정리는 PC 에 재료로 남기고 앱에는 올리지 않는다 — 셋 다 올리던 때는
+한 날짜가 세 군데로 갈려 학생이 무엇을 볼지 몰랐다.
+--kind 는 혹시 둘 이상을 올릴 때 **서로 덮어쓰지 않게** 자리를 가르는 값이다.
 
 같은 --fid 로 다시 올리면 **덮어쓴다.** 매일 돌려도 파일이 늘어나지 않는다.
 """
@@ -87,7 +90,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cid")
     ap.add_argument("--file")
-    ap.add_argument("--kind", default="판서", help="판서 / 풀이노트 — 파일을 가르는 데만 쓴다")
+    ap.add_argument("--kind", default="풀이노트", help="같은 날 파일이 둘 이상일 때만 가르는 값")
     ap.add_argument("--date", help="수업 날짜 YYYY-MM-DD (없으면 파일명에서)")
     ap.add_argument("--title", help="제목을 손으로 정할 때만. 보통은 쓰지 않는다")
     ap.add_argument("--unit", help="옛 이름 — --kind 로 받는다")
