@@ -302,6 +302,7 @@ details[open] .cm-resolved-summary::before { content: "▼ "; }
 .cm-ab-table th { background: #f7f4f0; font-weight: 700; color: #5a5248; position: sticky; top: 0; }
 .cm-ab-name { position: sticky; left: 0; background: #f7f4f0; font-weight: 700; color: #2c3e5c; text-align: left !important; z-index: 2; min-width: 60px; }
 .cm-ab-table th.cm-ab-name { z-index: 3; }
+.cm-ab-off { color: #c8c2ba; background: #f4f2ef; }
 .cm-ab-att-o { color: #2ecc71; font-weight: 700; cursor: pointer; user-select: none; }
 .cm-ab-att-x { color: #e74c3c; cursor: pointer; user-select: none; }
 .cm-ab-att-o:active, .cm-ab-att-x:active { opacity: 0.5; }
@@ -583,10 +584,24 @@ function scheduledDates(cls, ym) {
 }
 
 // 그 날짜에 수업 대상인 학생인가 (요일 + 기간)
+// 정규반은 반 요일을 **호출부가** 거른다 — 여기서는 학생의 «나오는 요일»(onlyDays)만 본다.
+// onlyDays (2026-09-18): 정규반 학생이 반 요일 중 일부에만 오는 경우. 예) 고1S(월금)인데 월만 오고 목은 개진반.
+//   비어 있으면 반 요일 전부. 팀체크 학생 명단에서 정한다(명단 고치기는 팀체크 몫). 팀체크 업무보고도 같은 칸을 읽는다.
+//   ⚠ 정규반에 `days` 를 쓰지 않는 이유 — 개진반 `days` 는 «비면 안 온다» 라 뜻이 거꾸로다.
 function attendsOn(cls, st, date) {
   if (!isActiveOn(st, date)) return false;
-  if (!isIndividual(cls)) return true;
-  return (st.days || []).includes(new Date(date + "T00:00:00").getDay());
+  const dow = new Date(date + "T00:00:00").getDay();
+  if (!isIndividual(cls)) {
+    const only = (st && st.onlyDays) || [];
+    return !only.length || only.includes(dow);
+  }
+  return (st.days || []).includes(dow);
+}
+// 그 반에서 그 학생이 오는 요일 — 개진반은 학생 요일, 정규반은 반 요일(나오는 요일이 있으면 그중에서만)
+function studentDows(cls, st) {
+  if (isIndividual(cls)) return (st && st.days) || [];
+  const all = cls.classDays || [], only = (st && st.onlyDays) || [];
+  return only.length ? all.filter((d) => only.includes(d)) : all;
 }
 const getStudentBooks = (cls, st) => isIndividual(cls) ? ((st && st.books) || []) : getBooks(cls);
 function getClassAllBooks(cls) {
@@ -3671,7 +3686,7 @@ function ExamEntry({ cls, term, st, cur, schoolOpts, onDone }) {
   const [pmonth, setPmonth] = useState(((cur && cur.start) || todayStr).slice(0, 7));
   const [days, setDays] = useState(
     (cur && cur.days && cur.days.length) ? cur.days
-      : (isIndividual(cls) ? ((st.days || []).slice()) : ((cls.classDays || []).slice())));
+      : studentDows(cls, st).slice());
 
   // 칠할 달의 날짜들
   const paintDays = [];
@@ -4366,7 +4381,7 @@ function ExamBoard({ onBack }) {
     // 제출에 요일이 적혀 있으면 그걸 쓴다 — 선생님이 달력에서 고른 값이고,
     // 나중에 반 요일이 바뀌어도 그때 센 회차가 그대로 재현된다.
     const days = (v && v.days && v.days.length) ? v.days
-               : (isIndividual(cls) ? (st.days || []) : (cls.classDays || []));
+               : studentDows(cls, st);                           // 나오는 요일만 센다 (2026-09-18) — 수강료 숫자다
     return days.indexOf(dow) >= 0;
   }
   // 안 오는 구간은 내신기간(start~end)이 아니라 **직보 다음날 ~ 복귀 전날**이다.
@@ -5123,7 +5138,7 @@ function ScoreForm({ cls, me }) {
 // 학생의 다가올 수업 날짜 계산 (요일 기반, weeks주 앞까지)
 function upcomingSessions(cls, st, weeks) {
   const out = [];
-  const dows = isIndividual(cls) ? (st.days || []) : (cls.classDays || []);
+  const dows = studentDows(cls, st);
   if (dows.length === 0) return out;
   const start = new Date(todayStr + "T00:00:00");
   const end = new Date(start); end.setDate(end.getDate() + (weeks || 8) * 7);
@@ -5630,7 +5645,7 @@ function MakeupCenter({ onBack }) {
     // 본인 반 중 그날 수업 있는 것
     const sessions = picked.entries.filter(({ cls, st }) => {
       if (!isActiveOn(st, pickedDate)) return false;
-      const dows = isIndividual(cls) ? (st.days || []) : (cls.classDays || []);
+      const dows = studentDows(cls, st);
       return dows.includes(dow);
     });
     // 본인 반이 아니지만 그날 수업이 열리는 반 (보강 참석 등)
@@ -8155,16 +8170,20 @@ function AttendanceBook({ cls, canEdit }) {
               const hw = hwData[st.id] || {};
               const totalDone = getBooks(cls).reduce((s, b) => s + (hw[b.name] || 0), 0);
               const hwPct = totalHwPages > 0 ? Math.round(totalDone / totalHwPages * 100) : 0;
-              const attCount = days.filter((d) => (attData[d] && attData[d][st.id]) || (makeups[st.id + "_" + d] || {}).videoDone).length;
+              // 나오는 요일이 정해진 학생(onlyDays)은 그 요일만 센다 — 안 오는 요일은 결석이 아니다 (2026-09-18).
+              // 그 요일에 찍힌 출석이 있으면(보강 등) 그 칸은 센다.
+              const offDay = (d) => { const o = st.onlyDays || []; return o.length > 0 && !o.includes(new Date(d + "T00:00:00").getDay()); };
+              const myDays = days.filter((d) => !offDay(d) || (attData[d] && attData[d][st.id]));
+              const attCount = myDays.filter((d) => (attData[d] && attData[d][st.id]) || (makeups[st.id + "_" + d] || {}).videoDone).length;
               return (
                 <tr key={st.id}>
-                  <td className="cm-ab-name">{st.name}</td>
+                  <td className="cm-ab-name">{st.name}{(st.onlyDays || []).length ? <span style={{display: "block", fontSize: 10, color: "#8a7f72"}}>{st.onlyDays.map((d) => DAY_NAMES[d]).join("·")}만</span> : null}</td>
                   {days.map((d) => {
                     const present = attData[d] && attData[d][st.id];
                     const score = scoreData[d] && scoreData[d][st.id];
                     return (
                       <React.Fragment key={d}>
-                        {(() => { const cv = cellView(d, st); return (
+                        {(() => { const cv = (offDay(d) && !present) ? { cls: "cm-ab-off", t: "·", title: "안 오는 요일 — 나오는 요일만 센다" } : cellView(d, st); return (
                         <td className={cv.cls} title={cv.title} onClick={() => canEdit && cycleCell(d, st)} style={canEdit ? undefined : {cursor: "default"}}>{cv.t}</td>
                       ); })()}
                         <td></td>
@@ -8172,7 +8191,7 @@ function AttendanceBook({ cls, canEdit }) {
                       </React.Fragment>
                     );
                   })}
-                  <td className="cm-ab-hw">{hwPct}%<br/><span style={{fontSize:9,color:"#bbb"}}>{attCount}/{days.length}</span></td>
+                  <td className="cm-ab-hw">{hwPct}%<br/><span style={{fontSize:9,color:"#bbb"}}>{attCount}/{myDays.length}</span></td>
                 </tr>
               );
             })}
