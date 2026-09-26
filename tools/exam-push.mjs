@@ -4,12 +4,14 @@
 //   node tools/exam-push.mjs --file … --dry                            검사만
 //   node tools/exam-push.mjs --list                                     올라가 있는 것
 //   node tools/exam-push.mjs --del <id>                                 빼기
+//   node tools/exam-push.mjs --classes [이름 일부]                      반 ID 와 명단 (cids·names 적을 때)
 //
 // 파일은 바탕화면 원형과 같은 모양이다 — `window.EXAMS = [ … ]` (exams.js) 또는 JSON 배열.
 // 분기 시작에 기출백서 답지로 이 파일을 한 번에 만들고, 이 도구로 한 번에 올린다.
 //
 //   { id, title, minutes, questions: [{ n, type: "mc"|"short"|"essay", ans, pt }],
 //     cids?: [반ID…]  (없으면 모든 반)
+//     names?: [학생 이름…]  (그 학생만 본다. cids 필요. 명단 표기 그대로 — 동명이인은 A·B·C 까지)
 //     test?: true      (선생님 모드에서만 보인다 — 올려서 확인할 때)
 //     order?: 숫자     (목록 순서) }
 //
@@ -57,7 +59,8 @@ function summary(e) {
   const pt = qs.every((q) => typeof q.pt === "number") ? qs.reduce((a, q) => a + q.pt, 0) : null;
   return `${e.id}  「${e.title}」 ${e.minutes}분 · ${qs.length}문항 (객관식 ${kind("mc")} · 단답 ${kind("short")} · 서술 ${kind("essay")})`
     + (pt != null ? ` · 배점합 ${Math.round(pt * 10) / 10}` : " · 배점 없음(개수로 셈)")
-    + (e.test ? "  [시험용 — 선생님만]" : "") + ((e.cids || []).length ? `  [반 ${e.cids.length}곳만]` : "");
+    + (e.test ? "  [시험용 — 선생님만]" : "") + ((e.cids || []).length ? `  [반 ${e.cids.length}곳만]` : "")
+    + ((e.names || []).length ? `  [학생: ${e.names.join(", ")}]` : "");
 }
 
 (async () => {
@@ -76,6 +79,13 @@ function summary(e) {
     logs.forEach((l) => console.log(`${l.date}  ${l.name}  「${l.title}」 ${l.score}점 · ${l.correct}/${l.n}`
       + ` · ${Math.floor(l.endT / 60)}분${l.pending ? " · 미채점 " + l.pending : ""}${l.teacher ? "  (선생님)" : ""}`));
     console.log("\n" + logs.length + "건 → " + out);
+    return;
+  }
+  if (has("--classes")) {
+    const q = arg("--classes") && !arg("--classes").startsWith("--") ? arg("--classes") : "";
+    const { classes } = await call({ action: "classes" });
+    classes.filter((c) => !q || (c.name + c.id).includes(q))
+      .forEach((c) => console.log(`${c.id}  「${c.name}」 ${c.names.length}명: ${c.names.join(", ")}`));
     return;
   }
   if (arg("--del")) {

@@ -93,7 +93,7 @@ async function rebuildList() {
   const all = await listDocs("examKeys").catch(() => []);
   const exams = all.map((e) => ({
     id: e.id, title: e.title, minutes: e.minutes,
-    cids: e.cids || [], test: !!e.test, order: e.order || 0,
+    cids: e.cids || [], sids: e.sids || [], test: !!e.test, order: e.order || 0,
     questions: (e.questions || []).map((q) => ({ n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}) })),
   })).sort((a, b) => (a.order - b.order) || String(a.title).localeCompare(String(b.title), "ko"));
   await patchDoc(LIST_PATH, { exams, updated: Date.now() });
@@ -178,12 +178,31 @@ export default async function handler(req, res) {
       if (body.action === "examPut") {
         const e = body.exam, err = checkExam(e);
         if (err) { res.status(400).json({ error: err }); return; }
+        // names 가 있으면 그 학생들만 본다. 이름을 반 명단의 ID 로 바꿔 둔다 —
+        // 목록은 로그인한 누구나 읽으니 이름은 싣지 않고, 명단에 없는 이름은 여기서 막는다
+        let sids = [];
+        const names = Array.isArray(e.names) ? e.names.map((x) => String(x).trim()).filter(Boolean) : [];
+        if (names.length) {
+          const cids = Array.isArray(e.cids) ? e.cids.map(String) : [];
+          if (!cids.length) { res.status(400).json({ error: "names 를 쓰려면 cids(반)도 적어야 해요" }); return; }
+          const rows = [];
+          for (const c of cids) {
+            const cl = await getDoc("classes/" + c).catch(() => null);
+            if (!cl) { res.status(400).json({ error: "반이 없어요: " + c }); return; }
+            (cl.roster || []).forEach((r) => r && r.id && rows.push(r));
+          }
+          for (const nm of names) {
+            const hit = rows.filter((r) => String(r.name || "").trim() === nm);
+            if (hit.length !== 1) { res.status(400).json({ error: (hit.length ? "명단에 둘 이상: " : "명단에 없는 이름: ") + nm }); return; }
+            sids.push(hit[0].id);
+          }
+        }
         // patchDoc 은 보낸 칸만 고친다. 전에 있던 cids·test 가 남지 않게 **전부 적는다**
         await patchDoc("examKeys/" + e.id, {
           title: String(e.title).trim(), minutes: Number(e.minutes),
           questions: e.questions.map((q) => ({ n: q.n, type: q.type, ...(q.ans != null ? { ans: q.ans } : {}),
                                                ...(q.pt != null ? { pt: q.pt } : {}) })),
-          cids: Array.isArray(e.cids) ? e.cids.map(String) : [], test: !!e.test,
+          cids: Array.isArray(e.cids) ? e.cids.map(String) : [], sids, names, test: !!e.test,
           order: Number(e.order) || 0, updated: Date.now(),
         });
         const n = await rebuildList();
@@ -193,6 +212,12 @@ export default async function handler(req, res) {
         await deleteDoc("examKeys/" + String(body.id || ""));
         const n = await rebuildList();
         res.status(200).json({ ok: true, listed: n }); return;
+      }
+      // 반 ID 와 명단 이름 — 시험지에 cids·names 를 적으려고
+      if (body.action === "classes") {
+        const cs = await listDocs("classes").catch(() => []);
+        res.status(200).json({ ok: true, classes: cs.map((c) => ({ id: c.id, name: c.name || "",
+          names: (c.roster || []).filter((r) => r && r.name).map((r) => r.name) })) }); return;
       }
       if (body.action === "examKeys") {
         res.status(200).json({ ok: true, exams: await listDocs("examKeys").catch(() => []) }); return;

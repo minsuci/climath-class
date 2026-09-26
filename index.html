@@ -3067,9 +3067,11 @@ function MockExamTab({ cls, me }) {
 
   useEffect(() => examListDoc().onSnapshot((d) => {
     const all = (d.exists && d.data().exams) || [];
-    // test 는 선생님 모드에서만 — 올려서 확인할 때 쓴다. cids 가 있으면 그 반에만
-    setExams(all.filter((e) => (!e.test || me.teacher) && (!(e.cids || []).length || e.cids.includes(cls.id))));
-  }, () => setExams([])), [cls.id, me.teacher]);
+    // test 는 선생님 모드에서만 — 올려서 확인할 때 쓴다. cids 가 있으면 그 반에만,
+    // sids 가 있으면 그 학생에게만 (선생님 모드는 다 보인다 — 무엇이 걸려 있는지 확인하게)
+    setExams(all.filter((e) => (!e.test || me.teacher) && (!(e.cids || []).length || e.cids.includes(cls.id))
+      && (me.teacher || !(e.sids || []).length || e.sids.includes(me.id))));
+  }, () => setExams([])), [cls.id, me.teacher, me.id]);
   useEffect(() => {
     if (!exams || !exams.length || exams.find((e) => e.id === pick)) return;
     setPick(exams[0].id); setMins(String(exams[0].minutes));
