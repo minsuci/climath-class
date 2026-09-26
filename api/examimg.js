@@ -52,6 +52,13 @@ export default async function handler(req, res) {
         for (const d of mine) await deleteDoc("examImgs/" + d.id);
         res.status(200).json({ ok: true, deleted: mine.length }); return;
       }
+      // 학생이 막힐 때 확인용 — 서버가 그 기록을 어떻게 읽는지 그대로 보여 준다
+      if (body.action === "peek") {
+        const log = await getDoc("classes/" + String(body.cid) + "/days/" + String(body.date) + "/examLogs/" + String(body.rid)).catch((e) => ({ err: e.message }));
+        const img = await getDoc(imgPath(examId, 1, "q")).catch((e) => ({ err: e.message }));
+        res.status(200).json({ ok: true, log: log && { err: log.err, examId: log.examId, name: log.name, cid: log.cid, date: log.date },
+                               img1: !!(img && img.png) }); return;
+      }
       res.status(400).json({ error: "그런 동작이 없어요" }); return;
     }
 
