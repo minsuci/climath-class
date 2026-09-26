@@ -67,8 +67,11 @@ export default async function handler(req, res) {
       if (!(claims.cids || []).includes(cid)) { res.status(403).json({ error: "그 반 학생이 아니에요" }); return; }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^[A-Za-z0-9_-]{6,40}$/.test(rid)) { res.status(400).json({ error: "기록이 이상해요" }); return; }
       const log = await getDoc("classes/" + cid + "/days/" + date + "/examLogs/" + rid).catch(() => null);
-      if (!log || log.examId !== examId || log.name !== claims.sname) {
-        res.status(403).json({ error: "제출한 시험만 문제를 볼 수 있어요" }); return;
+      // 어느 조건에서 막혔는지 남긴다 — 화면에는 한 문장, 서버 기록에는 까닭
+      const why = !log ? "no-log" : log.examId !== examId ? "exam" : log.name !== claims.sname ? "name" : "";
+      if (why) {
+        console.log("[examimg] 403", why, cid, date, rid, examId, "| log:", log && log.examId, "| name-match:", !!log && log.name === claims.sname);
+        res.status(403).json({ error: "제출한 시험만 문제를 볼 수 있어요 (" + why + ")" }); return;
       }
     }
     const sol = body.kind === "sol";
