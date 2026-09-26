@@ -67,7 +67,12 @@ export default async function handler(req, res) {
     const n = Number(body.n);
     if (!Number.isInteger(n) || n <= 0) { res.status(400).json({ error: "번호가 이상해요" }); return; }
 
-    const teacher = claims.role === "teacher" || claims.role === "owner";
+    let teacher = claims.role === "teacher" || claims.role === "owner";
+    // 학생 화면 «선생님 모드» (명단에 teacher 표시가 붙은 학생 계정) 도 선생님으로 본다
+    if (!teacher && body.cid && (claims.cids || []).includes(String(body.cid))) {
+      const cls = await getDoc("classes/" + String(body.cid)).catch(() => null);
+      if (cls && (cls.roster || []).some((r) => r && r.teacher && r.name === claims.sname)) teacher = true;
+    }
     if (!teacher) {
       // 그 시험을 **낸** 학생만. 기록의 이름이 로그인한 이름과 같은지 본다
       const cid = String(body.cid || ""), date = String(body.date || ""), rid = String(body.rid || "");

@@ -109,7 +109,7 @@ async function submit(res, claims, b) {
   // 제출 직후 연결이 끊겨 다시 누르면 기록이 두 개가 되는 일을 막는다.
   if (!/^[A-Za-z0-9_-]{6,40}$/.test(rid)) { res.status(400).json({ error: "기록 번호가 이상해요" }); return; }
 
-  const teacher = claims.role === "teacher" || claims.role === "owner";
+  let teacher = claims.role === "teacher" || claims.role === "owner";
   const cls = await getDoc("classes/" + cid).catch(() => null);
   if (!cls) { res.status(404).json({ error: "반이 없어요" }); return; }
   let name = String(b.name || "");
@@ -120,6 +120,9 @@ async function submit(res, claims, b) {
     const row = (cls.roster || []).find((r) => r && r.id === sid);
     if (!row || row.name !== claims.sname) { res.status(403).json({ error: "명단과 이름이 맞지 않아요" }); return; }
     name = row.name;
+    // 학생 화면의 «선생님 모드» 는 명단에 teacher 표시가 붙은 학생 계정이다. 서버엔 학생으로 오지만
+    // 선생님이 확인하려고 본 것이니 점수 칸에 쓰지 않는다
+    if (row.teacher) teacher = true;
   }
 
   const key = await getDoc("examKeys/" + examId).catch(() => null);

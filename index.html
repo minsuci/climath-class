@@ -3305,10 +3305,13 @@ function MockExamLive({ cls }) {
     const a = []; qs.forEach((d) => a.push(d.data())); setRows(a);
   }, () => setRows([])), [cls.id]);
   useEffect(() => { const t = setInterval(() => setTick((k) => k + 1), 1000); return () => clearInterval(t); }, []);
-  if (!rows || !rows.length) return null;
   const now = Date.now();
+  // 지금 보고 있는 학생만 — 낸 것은 아래 «결과» 에 있다. 시간이 2분 넘게 지났는데 안 낸 것은 남겨 둔다(끊긴 것일 수 있다)
   const on = (r) => r.state !== "done" && (r.limitSec - (now - r.startedAt) / 1000) > -120;
-  const list = rows.slice().sort((a, b) => (on(b) - on(a)) || String(a.name).localeCompare(String(b.name), "ko"));
+  const stuck = (r) => r.state !== "done" && !on(r) && now - r.updated < 3 * 3600e3;
+  const list = (rows || []).filter((r) => on(r) || stuck(r))
+    .sort((a, b) => (on(b) - on(a)) || String(a.name).localeCompare(String(b.name), "ko"));
+  if (!list.length) return null;
   return (
     <div className="cm-card">
       <h3 className="cm-h3">지금 시험 중 <span className="cm-h-hint">(오늘 · 저절로 바뀝니다)</span></h3>
