@@ -214,6 +214,20 @@ html,body{margin:0; padding:0;}
 .mx-btn[disabled]{opacity:.35; pointer-events:none;}
 .mx-note{margin-top:14px; padding:10px 12px; border-radius:10px; background:#e9eef6; font-size:13.5px; color:var(--navy2); line-height:1.55;}
 .mx-side{background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:16px; align-self:start;}
+.mx-live{display:flex; flex-direction:column; gap:10px;}
+.mx-lrow{border:1.5px solid var(--line); border-radius:12px; padding:10px 12px;}
+.mx-lrow.off{opacity:.62;}
+.mx-lhead{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;}
+.mx-ltitle{color:var(--muted); font-size:13px;}
+.mx-lbadge{font-size:13px; font-weight:700; padding:2px 9px; border-radius:99px; background:#eef1f6; color:var(--navy); white-space:nowrap;}
+.mx-lbadge.low{background:#fdecec; color:#b3261e;}
+.mx-lbadge.ok{background:#e7f5ec; color:#1e7a45;}
+.mx-lnow{margin:6px 0 7px; font-size:14px;}
+.mx-lnow b{font-size:18px; color:var(--navy);}
+.mx-lchips{display:flex; flex-wrap:wrap; gap:3px;}
+.mx-lchips span{width:24px; height:21px; font-size:11.5px; border:1.5px solid var(--line); border-radius:5px; display:inline-flex; align-items:center; justify-content:center; color:var(--muted); background:#fff;}
+.mx-lchips span.done{background:#e9eef6; color:var(--navy); font-weight:700;}
+.mx-lchips span.cur{border-color:var(--navy); background:var(--navy); color:#fff;}
 .mx-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(54px,1fr)); gap:7px;}
 .mx-chip{border:2px solid var(--line); border-radius:10px; background:#fff; padding:6px 0 4px; text-align:center; line-height:1.15; cursor:pointer; font-family:inherit; color:var(--ink);}
 .mx-chip b{display:block; font-size:17px;}
@@ -2656,6 +2670,8 @@ function NoClassHome({ name, onLogout }) {
 const MX_CIRC = ["", "①", "②", "③", "④", "⑤"];
 const MX_TYPE = { mc: "객관식", short: "단답형", essay: "서술형" };
 const examLogCol = (cid, date) => dayDoc(cid, date).collection("examLogs");
+// 선생님 «지금 시험 중» — 학생 기기가 번호·푼 개수만 적는다(답은 안 적는다). 날마다 한 칸
+const examLiveCol = (cid, date) => dayDoc(cid, date).collection("examLive");
 const examListDoc = () => db.collection("appConfig").doc("examList");
 const mxKey = (cid, sid) => "climath_mock_" + cid + "_" + sid;
 function mxLoad(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } }
@@ -2748,8 +2764,28 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
   const [, setTick] = useState(0);
   const busy = useRef(false);
 
-  function put(next) { sRef.current = next; mxSave(K, next); setS(next); }
+  function put(next) { sRef.current = next; mxSave(K, next); setS(next); live(next); }
   const nowT = (x) => Math.round((Date.now() - x.startedAt) / 100) / 10;
+  // 선생님 판에 «몇 번을 푸는 중» 을 알린다. 번호나 푼 개수가 바뀔 때만 쓴다.
+  // 실패해도 시험은 그대로 간다 — 이건 보기용이다
+  const liveSig = useRef("");
+  function live(x, state, score) {
+    try {
+      if (!x) return;
+      const done = x.questions.filter((q) => mxAnswered(x, q.n)).map((q) => q.n);
+      const st = state || (x.endT != null ? "sending" : "run");
+      const sig = [x.rid, x.cur, done.join(","), st].join("|");
+      if (sig === liveSig.current) return;
+      liveSig.current = sig;
+      const lastGo = [...x.ev].reverse().find((e) => e.k === "go");
+      examLiveCol(cls.id, ymd(new Date(x.startedAt))).doc(me.id).set({
+        sid: me.id, name: me.name, rid: x.rid, examId: x.examId, title: x.title,
+        qs: x.questions.map((q) => q.n), cur: x.cur, curAt: lastGo ? lastGo.t : 0, done, state: st,
+        score: score == null ? null : score, startedAt: x.startedAt, limitSec: x.limitSec,
+        endT: x.endT == null ? null : x.endT, teacher: !!me.teacher, updated: Date.now(),
+      }).catch(() => {});
+    } catch (e) {}
+  }
 
   function go(n) {
     const x = sRef.current; if (!x || x.endT != null || n === x.cur) return;
@@ -2800,6 +2836,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
       let j = null; try { j = await r.json(); } catch (e) {}
       if (!r.ok) throw new Error((j && j.error) || "제출하지 못했어요 (" + r.status + ")");
       mxSave(K, null);
+      live(f, "done", j.log && j.log.score);
       onDone(j.log);
     } catch (e) {
       put({ ...f, sending: false });
@@ -2808,6 +2845,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
   }
 
   useEffect(() => {
+    live(sRef.current);   // 새로고침으로 돌아왔을 때도 선생님 판에 다시 뜨게
     // 이미 끝난 시험(제출 실패 뒤 새로고침)이면 바로 다시 보낸다. 서버는 같은 rid 면 덮어쓴다
     if (sRef.current && sRef.current.endT != null) submit(sRef.current.reason || "submit");
     const t = setInterval(() => {
@@ -3143,6 +3181,53 @@ function MockExamTab({ cls, me }) {
 }
 
 // 선생님 — 반 전체 결과. 눌러서 문항별로 보고 O/X 를 고친다
+function MockExamLive({ cls }) {
+  const [rows, setRows] = useState(null);
+  const [, setTick] = useState(0);
+  useEffect(() => examLiveCol(cls.id, ymd(new Date())).onSnapshot((qs) => {
+    const a = []; qs.forEach((d) => a.push(d.data())); setRows(a);
+  }, () => setRows([])), [cls.id]);
+  useEffect(() => { const t = setInterval(() => setTick((k) => k + 1), 1000); return () => clearInterval(t); }, []);
+  if (!rows || !rows.length) return null;
+  const now = Date.now();
+  const on = (r) => r.state !== "done" && (r.limitSec - (now - r.startedAt) / 1000) > -120;
+  const list = rows.slice().sort((a, b) => (on(b) - on(a)) || String(a.name).localeCompare(String(b.name), "ko"));
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">지금 시험 중 <span className="cm-h-hint">(오늘 · 저절로 바뀝니다)</span></h3>
+      <div className="mx-live">
+        {list.map((r) => {
+          const el = (now - r.startedAt) / 1000, left = r.limitSec - el, going = on(r);
+          const onQ = Math.max(0, el - (r.curAt || 0)), quiet = (now - r.updated) / 1000;
+          const done = new Set(r.done || []);
+          return (
+            <div key={r.sid} className={"mx-lrow" + (going ? "" : " off")}>
+              <div className="mx-lhead">
+                <b>{r.name}</b>{r.teacher ? <span className="cm-hint"> (선생님)</span> : null}
+                <span className="mx-ltitle">{r.title}</span>
+                <span style={{flex: 1}} />
+                {r.state === "done" ? <span className="mx-lbadge ok">제출함{r.score != null ? " · " + r.score + "점" : ""}</span>
+                  : r.state === "sending" ? <span className="mx-lbadge">제출하는 중</span>
+                  : left > 0 ? <span className={"mx-lbadge" + (left <= 300 ? " low" : "")}>남은 {mxClock(left)}</span>
+                  : <span className="mx-lbadge low">시간 끝 · 제출 안 됨</span>}
+              </div>
+              {going && r.state === "run" && (
+                <div className="mx-lnow"><b>{r.cur}번</b> 푸는 중 · {mxClock(onQ)}째 · 푼 문제 {done.size} / {(r.qs || []).length}
+                  {quiet > 600 ? <span className="cm-hint"> · 마지막 신호 {Math.floor(quiet / 60)}분 전</span> : null}</div>
+              )}
+              <div className="mx-lchips">
+                {(r.qs || []).map((n) => (
+                  <span key={n} className={(going && r.state === "run" && n === r.cur ? "cur" : "") + (done.has(n) ? " done" : "")}>{n}</span>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function MockExamBoard({ cls }) {
   const [logs, setLogs] = useState(null);
   const [view, setView] = useState(null);
@@ -3153,7 +3238,8 @@ function MockExamBoard({ cls }) {
     return () => { live = false; };
   }, [cls.id, again]);
   if (view) return <MockExamResult log={view} canMark onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
-  return (
+  return (<>
+    <MockExamLive cls={cls} />
     <div className="cm-card">
       <h3 className="cm-h3">실전 시험 결과 <span className="cm-h-hint">(최근 90일)</span></h3>
       {logs === null ? <div className="cm-empty">불러오는 중…</div>
@@ -3175,7 +3261,7 @@ function MockExamBoard({ cls }) {
         )}
       <div className="cm-hint" style={{marginTop: 8}}>점수는 «점수 추이» 와 학습관리 보고서에도 저절로 들어가요. 선생님 모드로 본 것만 빠져요.</div>
     </div>
-  );
+  </>);
 }
 
 function StudentHome({ cls, me, onLogout }) {
