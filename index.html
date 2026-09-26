@@ -248,6 +248,13 @@ html,body{margin:0; padding:0;}
 .mx-axis{position:relative; height:18px; font-size:11px; color:var(--muted);}
 .mx-axis span{position:absolute; transform:translateX(-50%);}
 .mx-tw{overflow-x:auto;}
+.mx-qno{min-width:34px; padding:3px 6px; border:1.5px solid var(--line); border-radius:8px; background:#fff; font:inherit; font-weight:800; color:var(--navy); cursor:pointer;}
+.mx-qno:hover{border-color:var(--navy);}
+.mx-modal .box.mx-qbox{max-width:620px; max-height:92vh; display:flex; flex-direction:column; padding:16px 18px;}
+.mx-qtop{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;}
+.mx-qtop h4{margin:0;}
+.mx-qimg{overflow:auto; background:#fff; border:1px solid var(--line); border-radius:10px; padding:8px; min-height:120px;}
+.mx-qimg img{display:block; width:100%; height:auto;}
 .mx-table{width:100%; border-collapse:collapse; font-size:14px;}
 .mx-table th,.mx-table td{padding:7px 5px; border-bottom:1px solid var(--line); text-align:center;}
 .mx-table th{font-size:12px; color:var(--muted); font-weight:600; white-space:nowrap;}
@@ -2987,6 +2994,27 @@ function MockExamResult({ log, canMark, onBack }) {
   const [L, setL] = useState(log);
   const [saving, setSaving] = useState(false);
   useEffect(() => { setL(log); }, [log]);
+  // 번호를 누르면 그 문항 그림 — 서버가 «제출한 사람» 에게만 준다 (api/examimg.js)
+  const [see, setSee] = useState(null);
+  const [imgs, setImgs] = useState({});
+  async function openQ(n) {
+    setSee(n);
+    if (imgs[n]) return;
+    setImgs((m) => ({ ...m, [n]: { wait: true } }));
+    try {
+      const u = firebase.auth().currentUser;
+      if (!u) throw new Error("로그인이 풀렸어요");
+      const r = await fetch("/api/examimg", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken: await u.getIdToken(), examId: L.examId, n, cid: L.cid, date: L.date, rid: L.rid }),
+      });
+      let j = null; try { j = await r.json(); } catch (e) {}
+      if (!r.ok) throw new Error((j && j.error) || "문제를 불러오지 못했어요 (" + r.status + ")");
+      setImgs((m) => ({ ...m, [n]: { src: "data:image/png;base64," + j.png } }));
+    } catch (e) {
+      setImgs((m) => ({ ...m, [n]: { err: e.message || "문제를 불러오지 못했어요" } }));
+    }
+  }
   const A = mxAnalyze(L), T = L.endT || 1, N = L.questions.length;
 
   // 단답형: 맞음 ↔ 틀림 · 서술형: 채점 전 → 맞음 → 틀림 → 맞음
@@ -3067,7 +3095,7 @@ function MockExamResult({ log, canMark, onBack }) {
               const k = kind(r), txt = r.ok === null ? "채점" : r.ok ? "O" : "X";
               return (
                 <tr key={r.q.n}>
-                  <td><b>{r.q.n}</b></td>
+                  <td><button className="mx-qno" onClick={() => openQ(r.q.n)} title="문제 보기">{r.q.n}</button></td>
                   <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{shown(r.q, r.q.answer)}</td>
                   <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{keyShown(r.q)}</td>
                   <td>{r.q.type !== "mc" && canMark
@@ -3083,12 +3111,39 @@ function MockExamResult({ log, canMark, onBack }) {
         </table>
       </div>
       <div className="cm-hint" style={{marginTop: 8}}>
-        {canMark ? "단답형·서술형의 채점 표시는 눌러서 고칠 수 있어요. " : ""}붉은 시간은 한 문제 평균({mxHm(avg)})의 두 배를 넘은 것.
+        번호를 누르면 그 문제를 볼 수 있어요. {canMark ? "단답형·서술형의 채점 표시는 눌러서 고칠 수 있어요. " : ""}붉은 시간은 한 문제 평균({mxHm(avg)})의 두 배를 넘은 것.
       </div>
       <div style={{display: "flex", justifyContent: "flex-end", marginTop: 12}}>
         <button className="cm-btn cm-btn-ghost" onClick={() => mxDownload(L.date + "_" + L.name + "_" + L.title + ".json", L)}>결과 파일로 저장</button>
       </div>
     </div>
+    {see != null && (() => {
+      const r = A.rows.find((x) => x.q.n === see), i = A.rows.indexOf(r), im = imgs[see] || {};
+      const pv = A.rows[i - 1], nx = A.rows[i + 1], k = kind(r);
+      return (
+        <div className="mx-modal" onClick={() => setSee(null)}>
+          <div className="box mx-qbox" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-qtop">
+              <h4>{see}번</h4>
+              <span className={"mx-mark " + (k === "u" ? "x" : k)}>{r.ok === null ? "채점" : r.ok ? "O" : "X"}</span>
+              <span className="cm-hint">내 답 <b>{shown(r.q, r.q.answer)}</b> · 정답 <b>{keyShown(r.q)}</b>{r.sec ? " · " + mxClock(r.sec) : ""}</span>
+              <span style={{flex: 1}} />
+              <button className="cm-link" onClick={() => setSee(null)}>닫기 ✕</button>
+            </div>
+            <div className="mx-qimg">
+              {im.src ? <img src={im.src} alt={see + "번 문제"} />
+                : im.err ? <div className="cm-empty">{im.err}</div>
+                : <div className="cm-empty">불러오는 중…</div>}
+            </div>
+            <div className="mx-foot">
+              <button className="mx-btn" disabled={!pv} onClick={() => pv && openQ(pv.q.n)}>◀ {pv ? pv.q.n + "번" : ""}</button>
+              <span style={{flex: 1}} />
+              <button className="mx-btn" disabled={!nx} onClick={() => nx && openQ(nx.q.n)}>{nx ? nx.q.n + "번" : ""} ▶</button>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
   </>);
 }
 
