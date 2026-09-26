@@ -156,8 +156,7 @@ def main():
     ap.add_argument("--del", dest="delete", action="store_true"); ap.add_argument("--out")
     a = ap.parse_args()
     if a.list:
-        r = call({"action": "imgList", "examId": a.id}); print(a.id, "→ 문제", r["ns"], "
-  해설", r.get("sols")); return
+        r = call({"action": "imgList", "examId": a.id}); print(a.id, "→ 문제", r["ns"], "/ 해설", r.get("sols")); return
     if a.delete:
         print("뺐습니다:", call({"action": "imgDel", "examId": a.id})["deleted"], "장"); return
     if not a.pdf:
