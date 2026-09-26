@@ -184,6 +184,65 @@ html,body{margin:0; padding:0;}
 .cm-rangebar{display:flex; align-items:center; gap:8px; margin-bottom:16px;}
 .cm-rangebar .cm-input{padding:9px 11px; font-size:14px;}
 .cm-rangebtn{white-space:nowrap;}
+/* ── 실전 시험 — 학생이 태블릿으로 시험을 본다 (원형: 바탕화면 시험 시간기록) ── */
+.mx-run{position:fixed; inset:0; z-index:900; background:var(--cream); overflow:auto; -webkit-user-select:none; user-select:none;}
+.mx-top{position:sticky; top:0; z-index:2; background:var(--navy); color:#fff; display:flex; align-items:center; gap:14px; padding:10px 18px;}
+.mx-who{font-weight:700;}
+.mx-ttl{font-size:12.5px; opacity:.75; max-width:40vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.mx-clock{margin-left:auto; font-size:26px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.02em;}
+.mx-clock.low{color:#ffb3a7;}
+.mx-sub{background:#fff; color:var(--navy); border:0; border-radius:10px; padding:9px 18px; font-weight:800; font-size:15px; cursor:pointer; font-family:inherit;}
+.mx-sub[disabled]{opacity:.4;}
+.mx-body{max-width:1100px; margin:0 auto; padding:16px; display:grid; gap:16px; grid-template-columns:1fr;}
+@media(min-width:900px){.mx-body{grid-template-columns:1fr 340px;}}
+.mx-q{background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:22px; min-height:420px; display:flex; flex-direction:column;}
+.mx-num{font-family:'Fraunces',serif; font-size:54px; font-weight:700; color:var(--navy); line-height:1;}
+.mx-num small{font-family:'Noto Sans KR',sans-serif; font-size:15px; font-weight:600; color:var(--muted); margin-left:10px;}
+.mx-choices{display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin:30px 0 8px;}
+.mx-choice{aspect-ratio:1; width:100%; max-width:108px; justify-self:center; border-radius:50%; border:2px solid var(--line); background:#fff; font-size:34px; font-weight:700; color:var(--ink); cursor:pointer; font-family:inherit; display:flex; align-items:center; justify-content:center;}
+.mx-choice.on{background:var(--navy); border-color:var(--navy); color:#fff;}
+.mx-disp{margin:26px 0 12px; border:2px solid var(--line); border-radius:12px; padding:12px 16px; font-size:34px; font-weight:700; min-height:68px; text-align:right; background:#fff; font-variant-numeric:tabular-nums;}
+.mx-disp.saved{border-color:var(--navy);}
+.mx-pad{display:grid; grid-template-columns:repeat(5,1fr); gap:8px;}
+.mx-pad button{padding:14px 0; font-size:23px; font-weight:700; border:1px solid var(--line); border-radius:10px; background:#fff; cursor:pointer; font-family:inherit; color:var(--ink);}
+.mx-pad .ok{grid-column:4 / span 2; background:var(--navy); border-color:var(--navy); color:#fff; font-size:19px;}
+.mx-essay{margin:30px 0 8px; text-align:center;}
+.mx-foot{margin-top:auto; padding-top:20px; display:flex; gap:8px; align-items:center;}
+.mx-btn{border:1px solid var(--line); background:#fff; border-radius:10px; padding:10px 16px; font-weight:700; font-size:14px; cursor:pointer; font-family:inherit; color:var(--ink);}
+.mx-btn.primary{background:var(--navy); border-color:var(--navy); color:#fff;}
+.mx-btn.big{padding:15px 26px; font-size:18px;}
+.mx-btn[disabled]{opacity:.35; pointer-events:none;}
+.mx-note{margin-top:14px; padding:10px 12px; border-radius:10px; background:#e9eef6; font-size:13.5px; color:var(--navy2); line-height:1.55;}
+.mx-side{background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:16px; align-self:start;}
+.mx-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(54px,1fr)); gap:7px;}
+.mx-chip{border:2px solid var(--line); border-radius:10px; background:#fff; padding:6px 0 4px; text-align:center; line-height:1.15; cursor:pointer; font-family:inherit; color:var(--ink);}
+.mx-chip b{display:block; font-size:17px;}
+.mx-chip i{display:block; font-style:normal; font-size:12.5px; color:var(--muted); min-height:15px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; padding:0 2px;}
+.mx-chip.done{background:#e9eef6;}
+.mx-chip.done i{color:var(--navy); font-weight:700;}
+.mx-chip.cur{border-color:var(--navy);}
+.mx-modal{position:fixed; inset:0; z-index:950; background:rgba(21,35,63,.45); display:flex; align-items:center; justify-content:center; padding:16px;}
+.mx-modal .box{background:var(--paper); border-radius:16px; padding:22px; max-width:420px; width:100%;}
+.mx-modal h4{margin:0 0 8px; font-size:19px; color:var(--navy);}
+.mx-score{display:flex; gap:26px; flex-wrap:wrap; align-items:baseline;}
+.mx-score .v{font-family:'Fraunces',serif; font-size:40px; font-weight:700; color:var(--navy); line-height:1.1;}
+.mx-score .v.s{font-size:28px;}
+.mx-score .l{font-size:12px; color:var(--muted);}
+.mx-tl{height:40px; display:flex; border-radius:8px; overflow:hidden; background:var(--line); margin-top:6px;}
+.mx-tl > div{height:100%; border-right:1px solid var(--paper); display:flex; align-items:center; justify-content:center; font-size:11.5px; font-weight:700; color:#fff; overflow:hidden; min-width:0;}
+.mx-tl .o{background:var(--green);} .mx-tl .x{background:#d6453f;} .mx-tl .u{background:#c9bfae; color:var(--ink);} .mx-tl .q{background:#c9962b;}
+.mx-axis{position:relative; height:18px; font-size:11px; color:var(--muted);}
+.mx-axis span{position:absolute; transform:translateX(-50%);}
+.mx-tw{overflow-x:auto;}
+.mx-table{width:100%; border-collapse:collapse; font-size:14px;}
+.mx-table th,.mx-table td{padding:7px 5px; border-bottom:1px solid var(--line); text-align:center;}
+.mx-table th{font-size:12px; color:var(--muted); font-weight:600; white-space:nowrap;}
+.mx-table tr.go{cursor:pointer;}
+.mx-table tr.go:hover td{background:#f7f3ea;}
+.mx-mark{display:inline-block; min-width:42px; padding:3px 10px; border-radius:999px; font-weight:800; font-family:inherit; font-size:13px; border:0;}
+.mx-mark.o{color:var(--green); background:#e3f0e8;} .mx-mark.x{color:#d6453f; background:#fae3e2;} .mx-mark.q{color:#9a6b12; background:#f6ecd2;}
+button.mx-mark{border:1px dashed currentColor; cursor:pointer;}
+.mx-long{color:#d6453f; font-weight:700;}
 .cm-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(34px,1fr)); gap:5px; user-select:none; -webkit-user-select:none;}
 .cm-cell{display:flex; align-items:center; justify-content:center; padding:7px 0; font-size:11px; border-radius:7px; background:#f0eadd; color:var(--muted); border:1px solid var(--line);}
 button.cm-cell{cursor:pointer; font-family:inherit;}
@@ -2583,6 +2642,540 @@ function NoClassHome({ name, onLogout }) {
   );
 }
 
+// ===================== 실전 시험 =====================
+//
+// 바탕화면 원형(`시험 시간기록\시간기록.html`)을 옮겼다. 학생이 **지금 푸는 문항**을 눌러 두고
+// 답을 고르면 다음 안 푼 문제로 넘어간다. 그 누름이 곧 문항별 시간 기록이다 —
+// 위에서 영상을 찍어 «지금 몇 번을 풀고 있나» 를 알아내는 것보다 정확하고 싸다.
+//
+// ⚠ 이 화면에는 **정답이 없다.** 채점은 서버(api/exam.js)가 하고 제출한 뒤에야 정답이 온다.
+//    원형은 정답을 exams.js 에 그대로 두었다 — 한 기기에서는 괜찮지만 반 전체가 쓰면
+//    소스를 연 한 명이 반 전체에 돌릴 수 있다.
+// ⚠ 보는 중인 시험은 기기(localStorage)에 매번 적는다. 새로고침돼도 이어진다.
+//    제출이 네트워크에서 실패해도 **답을 지우지 않고** 다시 시도 단추를 띄운다.
+const MX_CIRC = ["", "①", "②", "③", "④", "⑤"];
+const MX_TYPE = { mc: "객관식", short: "단답형", essay: "서술형" };
+const examLogCol = (cid, date) => dayDoc(cid, date).collection("examLogs");
+const examListDoc = () => db.collection("appConfig").doc("examList");
+const mxKey = (cid, sid) => "climath_mock_" + cid + "_" + sid;
+function mxLoad(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } }
+function mxSave(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+function mxClock(sec) { sec = Math.max(0, Math.round(sec)); return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0"); }
+function mxHm(sec) { sec = Math.round(sec); const m = Math.floor(sec / 60), x = sec % 60; return m ? (x ? m + "분 " + x + "초" : m + "분") : x + "초"; }
+const mxAnswered = (S, n) => S.answers[n] != null && S.answers[n] !== "";
+
+// ev: {t, k:"go", q} 문항 전환 · {t, k:"ans", q, v} 답 기록(v=null 이면 지움). t 는 시작부터 초
+function mxSegments(ev, endT) {
+  const gos = (ev || []).filter((e) => e.k === "go"), out = [];
+  gos.forEach((e, i) => {
+    const to = i + 1 < gos.length ? gos[i + 1].t : endT;
+    if (to > e.t) out.push({ q: e.q, from: e.t, to });
+  });
+  return out;
+}
+// ⚠ api/exam.js 의 tally 와 **같은 식**이다. 제출 때는 서버가, O/X 를 고칠 때는 여기서 낸다.
+//    점수는 100점 기준 — 점수 칸의 다른 줄(«17/22» → 77점)과 같은 날 평균에 섞인다.
+function mxTally(qs, override) {
+  const ok = (q) => (override && q.n in override ? override[q.n] : q.auto);
+  const hasPt = qs.every((q) => typeof q.pt === "number" && q.pt > 0);
+  const totalPt = hasPt ? qs.reduce((a, q) => a + q.pt, 0) : qs.length;
+  const got = qs.reduce((a, q) => a + (ok(q) ? (hasPt ? q.pt : 1) : 0), 0);
+  return {
+    got: Math.round(got * 10) / 10, totalPt: Math.round(totalPt * 10) / 10,
+    correct: qs.filter((q) => ok(q)).length, n: qs.length,
+    pending: qs.filter((q) => ok(q) === null).length,
+    score: totalPt > 0 ? Math.round((got / totalPt) * 100) : 0, hasPt,
+  };
+}
+function mxAnalyze(log) {
+  const segs = mxSegments(log.ev, log.endT), ov = log.override || {};
+  const rows = log.questions.map((q) => {
+    const my = segs.filter((x) => x.q === q.n);
+    return {
+      q, ok: q.n in ov ? ov[q.n] : q.auto,
+      sec: my.reduce((a, x) => a + x.to - x.from, 0), visits: my.length,
+      // 답 기록 횟수. 같은 답을 다시 누른 것은 기록 자체가 안 남으므로 «바꿈» 으로 안 센다
+      changes: (log.ev || []).filter((e) => e.k === "ans" && e.q === q.n).length,
+      firstAt: my.length ? my[0].from : null,
+    };
+  });
+  return { rows, segs, ...mxTally(log.questions, ov), blank: rows.filter((r) => r.q.answer == null || r.q.answer === "").length };
+}
+// 답을 적으면 다음 «안 푼» 문제로 — 앞에서부터 차례로 풀면 n+1 과 같다.
+// 앞 문제로 돌아가 답을 고쳤으면 그 바로 뒤가 아니라 **아직 안 푼 곳**으로 간다.
+function mxNextOpen(S, n) {
+  const ns = S.questions.map((q) => q.n), i = ns.indexOf(n);
+  for (let k = 1; k < ns.length; k++) { const m = ns[(i + k) % ns.length]; if (!mxAnswered(S, m)) return m; }
+  return null;
+}
+// 지난 기록은 날짜마다 흩어져 있다(days/{날짜}/examLogs). 최근 날짜부터 훑는다. sid 가 없으면 반 전체
+async function mxLogs(cid, sid, maxDays) {
+  const days = (await listDays(cid)).slice(0, maxDays || 60), out = [];
+  await Promise.all(days.map(async (d) => {
+    try {
+      let q = examLogCol(cid, d);
+      if (sid) q = q.where("sid", "==", sid);
+      (await q.get()).forEach((x) => out.push(x.data()));
+    } catch (e) { /* 권한 없는 날은 건너뛴다 */ }
+  }));
+  return out.sort((a, b) => (b.time || 0) - (a.time || 0));
+}
+function mxDownload(name, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 1)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name.replace(/[\\/:*?"<>|]/g, "_");
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+function MockExamRun({ cls, me, onDone, onAbandon }) {
+  const K = mxKey(cls.id, me.id);
+  const [S, setS] = useState(() => {
+    const s0 = mxLoad(K);
+    // 보내는 도중에 창이 닫혔으면 «보내는 중» 에 갇힌다. 풀어 두고 아래에서 다시 보낸다
+    if (s0 && s0.sending) { s0.sending = false; mxSave(K, s0); }
+    return s0;
+  });
+  const sRef = useRef(S);
+  const [buf, setBuf0] = useState(() => {
+    const s0 = sRef.current; if (!s0) return "";
+    const q = s0.questions.find((x) => x.n === s0.cur);
+    return q && q.type === "short" && mxAnswered(s0, s0.cur) ? String(s0.answers[s0.cur]) : "";
+  });
+  // 칸의 글자는 ref 에도 둔다 — 빠르게 누르면 «답 적기»가 다시 그려지기 전의 옛 글자를 읽는다
+  const bufRef = useRef(buf);
+  const setBuf = (f) => { const v = typeof f === "function" ? f(bufRef.current) : f; bufRef.current = v; setBuf0(v); };
+  const [ask, setAsk] = useState(false);
+  const [err, setErr] = useState("");
+  const [, setTick] = useState(0);
+  const busy = useRef(false);
+
+  function put(next) { sRef.current = next; mxSave(K, next); setS(next); }
+  const nowT = (x) => Math.round((Date.now() - x.startedAt) / 100) / 10;
+
+  function go(n) {
+    const x = sRef.current; if (!x || x.endT != null || n === x.cur) return;
+    const q = x.questions.find((y) => y.n === n); if (!q) return;
+    put({ ...x, cur: n, ev: [...x.ev, { t: nowT(x), k: "go", q: n }] });
+    setBuf(q.type === "short" && mxAnswered(x, n) ? String(x.answers[n]) : "");
+  }
+  function setAnswer(n, v) {
+    if (busy.current) return;
+    let x = sRef.current; if (!x || x.endT != null) return;
+    if (x.answers[n] !== v) {       // 같은 답을 다시 누르면 기록하지 않고 넘어가기만
+      x = { ...x, answers: { ...x.answers, [n]: v }, ev: [...x.ev, { t: nowT(x), k: "ans", q: n, v }] };
+      put(x);
+    }
+    const nx = mxNextOpen(x, n);
+    if (nx == null) return;          // 다 풀었으면 그 자리에 둔다
+    busy.current = true;             // 누른 게 보이게 잠깐 두었다가 넘어간다
+    // ⚠ 그 사이에 학생이 **다른 번호를 눌러 옮겨 갔으면** 끌고 가지 않는다.
+    //    원형은 무조건 옮겨서, 10번을 눌러 둔 학생이 0.4초 뒤 엉뚱한 번호로 끌려갔다.
+    setTimeout(() => {
+      busy.current = false;
+      const y = sRef.current;
+      if (y && y.cur === n && y.endT == null) go(nx);
+    }, 380);
+  }
+  function clearAnswer(n) {
+    const x = sRef.current; if (!x || x.endT != null || !mxAnswered(x, n)) return;
+    const a = { ...x.answers }; delete a[n];
+    put({ ...x, answers: a, ev: [...x.ev, { t: nowT(x), k: "ans", q: n, v: null }] });
+    setBuf("");
+  }
+  async function submit(reason) {
+    const x = sRef.current; if (!x || x.sending) return;
+    // 끝난 시각을 **먼저 얼린다.** 보내다 실패해 다시 보낼 때 시간이 늘어나면 안 된다
+    const endT = x.endT != null ? x.endT : Math.min(nowT(x), x.limitSec);
+    const f = { ...x, endT, reason: x.reason || reason, sending: true };
+    put(f); setAsk(false); setErr("");
+    try {
+      const u = firebase.auth().currentUser;
+      if (!u) throw new Error("로그인이 풀렸어요. 다시 들어오면 이 화면으로 돌아와요.");
+      const idToken = await u.getIdToken();
+      const r = await fetch("/api/exam", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken, action: "submit", cid: cls.id, sid: me.id, name: me.name,
+          examId: f.examId, rid: f.rid, answers: f.answers, ev: f.ev, endT,
+          limitSec: f.limitSec, startedAt: f.startedAt, reason: f.reason }),
+      });
+      let j = null; try { j = await r.json(); } catch (e) {}
+      if (!r.ok) throw new Error((j && j.error) || "제출하지 못했어요 (" + r.status + ")");
+      mxSave(K, null);
+      onDone(j.log);
+    } catch (e) {
+      put({ ...f, sending: false });
+      setErr(e.message || "제출하지 못했어요");
+    }
+  }
+
+  useEffect(() => {
+    // 이미 끝난 시험(제출 실패 뒤 새로고침)이면 바로 다시 보낸다. 서버는 같은 rid 면 덮어쓴다
+    if (sRef.current && sRef.current.endT != null) submit(sRef.current.reason || "submit");
+    const t = setInterval(() => {
+      const x = sRef.current; if (!x) return;
+      setTick((k) => k + 1);
+      if (x.endT == null && x.limitSec - nowT(x) <= 0) submit("time");
+    }, 250);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    let wake = null, gone = false;
+    const grab = async () => {
+      try { if (!gone && !wake && "wakeLock" in navigator) { wake = await navigator.wakeLock.request("screen"); wake.addEventListener("release", () => { wake = null; }); } } catch (e) {}
+    };
+    grab();   // 시험 중에 화면이 꺼지면 시계가 안 보인다
+    const vis = () => { if (document.visibilityState === "visible") grab(); };
+    const leave = (e) => { if (sRef.current) { e.preventDefault(); e.returnValue = ""; } };
+    document.addEventListener("visibilitychange", vis);
+    window.addEventListener("beforeunload", leave);
+    return () => {
+      gone = true;
+      document.removeEventListener("visibilitychange", vis);
+      window.removeEventListener("beforeunload", leave);
+      try { if (wake) wake.release(); } catch (e) {}
+    };
+  }, []);
+
+  if (!S) return null;
+  const frozen = S.endT != null;   // 시간이 끝났거나 제출했다 — 더는 답을 못 바꾼다
+  const q = S.questions.find((x) => x.n === S.cur) || S.questions[0], mine = S.answers[q.n];
+  const left = frozen ? S.limitSec - S.endT : S.limitSec - nowT(S);
+  const idx = S.questions.indexOf(q), prev = S.questions[idx - 1], next = S.questions[idx + 1];
+  const allDone = S.questions.every((x) => mxAnswered(S, x.n));
+  const blanks = S.questions.filter((x) => !mxAnswered(S, x.n)).map((x) => x.n);
+  const early = !frozen && nowT(S) < 120 && S.ev.every((e) => e.k === "go");
+  // 넘어가는 0.4초 동안은 번호판을 안 받는다. 받으면 숫자는 들어가는데 «답 적기» 는
+  // 막혀 있어서, 다음 문제 칸에 앞 문제에서 친 숫자가 붙어 있게 된다 (-3 뒤에 0.5 → «-30.5»)
+  const padKey = (k) => { if (busy.current) return; setBuf((b) => (k === "⌫" ? b.slice(0, -1) : k === "C" ? "" : b.length < 12 ? b + k : b)); };
+  const padOk = () => { const v = bufRef.current.trim(); if (!v) clearAnswer(q.n); else setAnswer(q.n, v); };
+
+  let body;
+  if (q.type === "mc") {
+    body = (
+      <div className="mx-choices">
+        {[1, 2, 3, 4, 5].map((c) => (
+          <button key={c} className={"mx-choice" + (Number(mine) === c ? " on" : "")} onClick={() => setAnswer(q.n, c)}>{MX_CIRC[c]}</button>
+        ))}
+      </div>
+    );
+  } else if (q.type === "short") {
+    body = (<>
+      <div className={"mx-disp" + (mxAnswered(S, q.n) && buf === String(mine) ? " saved" : "")}>{buf || "\u00a0"}</div>
+      <div className="mx-pad">
+        {["7", "8", "9", "-", "⌫", "4", "5", "6", "/", "C", "1", "2", "3", ".", "0"].map((k) => (
+          <button key={k} onClick={() => padKey(k)}>{k}</button>
+        ))}
+        <button className="ok" onClick={padOk}>답 적기</button>
+      </div>
+    </>);
+  } else {
+    body = (
+      <div className="mx-essay">
+        <button className="mx-btn primary big" onClick={() => setAnswer(q.n, "✓")}>{mxAnswered(S, q.n) ? "다 풀었음 ✓" : "다 풀었음"}</button>
+        <div className="cm-hint" style={{marginTop: 10}}>서술형은 시험지에 풀고, 다 쓰면 눌러요.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-run">
+      <div className="mx-top">
+        <div><div className="mx-who">{me.name}</div><div className="mx-ttl">{S.title}</div></div>
+        <div className={"mx-clock" + (left <= 300 ? " low" : "")}>{mxClock(left)}</div>
+        <button className="mx-sub" disabled={frozen} onClick={() => setAsk(true)}>제출</button>
+      </div>
+      <div className="mx-body">
+        <div className="mx-q">
+          <div className="mx-num">{q.n}번<small>{MX_TYPE[q.type]}{q.pt ? " · " + q.pt + "점" : ""}</small></div>
+          {body}
+          {allDone && <div className="mx-note">모든 문제에 답했어요. 검토할 번호를 눌러 보거나 제출하세요.</div>}
+          <div className="mx-foot">
+            <button className="mx-btn" disabled={!prev} onClick={() => prev && go(prev.n)}>◀ 이전</button>
+            {mxAnswered(S, q.n) && <button className="mx-btn" onClick={() => clearAnswer(q.n)}>답 지우기</button>}
+            <span style={{flex: 1}} />
+            <button className="mx-btn" disabled={!next} onClick={() => next && go(next.n)}>넘기기 ▶</button>
+          </div>
+        </div>
+        <div className="mx-side">
+          <div className="mx-grid">
+            {S.questions.map((x) => {
+              const v = S.answers[x.n];
+              const show = v == null || v === "" ? "" : x.type === "mc" ? MX_CIRC[v] : String(v);
+              return (
+                <button key={x.n} className={"mx-chip" + (mxAnswered(S, x.n) ? " done" : "") + (x.n === S.cur ? " cur" : "")}
+                  onClick={() => go(x.n)}><b>{x.n}</b><i>{show}</i></button>
+              );
+            })}
+          </div>
+          <div className="cm-hint" style={{marginTop: 10}}>지금 푸는 문제 번호를 눌러요. 파란 칸은 답을 적은 문제.</div>
+          {/* 시험지를 잘못 골랐을 때만. 답을 하나라도 적었으면 안 보인다 — 서버엔 아직 아무것도 안 갔다 */}
+          {early && (
+            <button className="cm-link" style={{marginTop: 12, fontSize: 12}}
+              onClick={() => { if (confirm("이 시험을 그만두고 처음으로 돌아갈까요?\n(아직 아무것도 제출되지 않았어요)")) { mxSave(K, null); sRef.current = null; onAbandon(); } }}>
+              시험지를 잘못 골랐어요
+            </button>
+          )}
+        </div>
+      </div>
+
+      {ask && !frozen && (
+        <div className="mx-modal"><div className="box">
+          <h4>제출할까요?</h4>
+          <div style={{fontSize: 14}}>제출하면 답을 더 고칠 수 없어요.</div>
+          <div className="mx-note">{blanks.length ? <>안 푼 문제 <b>{blanks.length}개</b> — {blanks.join(", ")}번</> : "모든 문제에 답했어요."}</div>
+          <div style={{display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 18}}>
+            <button className="mx-btn" onClick={() => setAsk(false)}>계속 풀기</button>
+            <button className="mx-btn primary" onClick={() => submit("submit")}>제출</button>
+          </div>
+        </div></div>
+      )}
+      {frozen && (
+        <div className="mx-modal"><div className="box">
+          <h4>{S.sending ? (S.reason === "time" ? "시간이 끝났어요 — 채점하는 중…" : "채점하는 중…") : "제출하지 못했어요"}</h4>
+          {S.sending ? <div className="cm-hint">잠깐만요. 창을 닫지 마세요.</div> : (<>
+            <div style={{fontSize: 14, lineHeight: 1.6}}>{err || "인터넷 연결을 확인해 주세요."}</div>
+            <div className="mx-note">답은 <b>지워지지 않았어요.</b> 이 기기에 그대로 있어요.</div>
+            <div style={{display: "flex", justifyContent: "flex-end", marginTop: 18}}>
+              <button className="mx-btn primary" onClick={() => submit(S.reason || "submit")}>제출 다시 하기</button>
+            </div>
+          </>)}
+        </div></div>
+      )}
+    </div>
+  );
+}
+
+function MockExamResult({ log, canMark, onBack }) {
+  const [L, setL] = useState(log);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setL(log); }, [log]);
+  const A = mxAnalyze(L), T = L.endT || 1, N = L.questions.length;
+
+  // 단답형: 맞음 ↔ 틀림 · 서술형: 채점 전 → 맞음 → 틀림 → 맞음
+  async function toggle(n) {
+    if (!canMark || saving) return;
+    const q = L.questions.find((x) => x.n === n), ov0 = L.override || {};
+    const cur = n in ov0 ? ov0[n] : q.auto;
+    const ov = { ...ov0, [n]: cur === true ? false : true };
+    const t = mxTally(L.questions, ov);
+    const before = L;
+    setL({ ...L, override: ov, score: t.score, got: t.got, correct: t.correct, pending: t.pending });
+    setSaving(true);
+    try {
+      // override 는 통째로 쓴다 — 번호를 칸 이름으로 점을 찍어 쓰면 경로로 읽힌다
+      await examLogCol(L.cid, L.date).doc(L.rid).update({ override: ov, score: t.score, got: t.got, correct: t.correct, pending: t.pending });
+      // 점수 칸도 같이 — 보고서·위험신호가 읽는 것은 이쪽이다. 선생님 모드 기록엔 점수 칸이 없다
+      if (!L.teacher) await scoresCol(L.cid, L.date).doc(L.rid).update({ score: t.score, correct: t.correct });
+    } catch (e) {
+      alert("저장하지 못했어요: " + e.message);
+      setL(before);
+    }
+    setSaving(false);
+  }
+
+  const kind = (r) => (r.ok === null ? "q" : r.ok ? "o" : (r.q.answer == null || r.q.answer === "") ? "u" : "x");
+  const kindOf = {}; A.rows.forEach((r) => { kindOf[r.q.n] = kind(r); });
+  const step = T > 1800 ? 600 : 300, ticks = [];
+  for (let t = 0; t <= T; t += step) ticks.push(t);
+  const avg = T / N;   // 한 문제 평균 시간의 두 배를 넘으면 붉게
+  const slow = A.rows.filter((r) => r.sec > 0).sort((a, b) => b.sec - a.sec).slice(0, 3);
+  const half = Math.ceil(N / 2);
+  const firstHalf = A.rows.slice(0, half).reduce((a, r) => a + r.sec, 0);
+  const shown = (q, v) => (v == null || v === "" ? "–" : q.type === "mc" ? MX_CIRC[v] : q.type === "essay" ? "✓" : String(v));
+  const keyShown = (q) => (q.type === "essay" ? "–" : q.type === "mc" ? MX_CIRC[q.key] : [].concat(q.key).join(" / "));
+
+  return (<>
+    <div className="cm-card">
+      <div style={{display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, flexWrap: "wrap"}}>
+        <h3 className="cm-h3" style={{margin: 0}}>{L.name} · {L.title}{L.teacher ? " (선생님 확인용)" : ""}</h3>
+        <button className="cm-link" onClick={onBack}>← 목록</button>
+      </div>
+      <div className="cm-hint" style={{margin: "4px 0 14px"}}>
+        {L.date} {hhmm(L.startedAt)} · {L.reason === "time" ? "시간 종료로 제출" : "직접 제출"}
+        {L.teacher && " · 점수 칸에는 안 들어가요"}
+      </div>
+      <div className="mx-score">
+        <div><div className="v">{A.score}<span style={{fontSize: 18, color: "var(--muted)"}}>점</span></div>
+          <div className="l">{A.hasPt ? "배점 " + A.got + " / " + A.totalPt : "맞은 개수로 셈"}</div></div>
+        <div><div className="v s">{A.correct} / {N}</div><div className="l">맞은 문제</div></div>
+        <div><div className="v s">{mxClock(T)}</div><div className="l">쓴 시간 (제한 {Math.round(L.limitSec / 60)}분)</div></div>
+        <div><div className="v s">{A.blank}</div><div className="l">안 푼 문제</div></div>
+      </div>
+      {A.pending > 0 && <div className="mx-note">서술형 {A.pending}개가 아직 채점 전이에요. 아래 표에서 «채점» 을 눌러 O/X 를 정해 주세요.</div>}
+    </div>
+
+    <div className="cm-card">
+      <h3 className="cm-h3" style={{marginBottom: 4}}>시간 흐름</h3>
+      <div className="cm-hint">초록 맞음 · 빨강 틀림 · 회색 답 안 함 · 노랑 채점 전</div>
+      <div className="mx-tl">
+        {A.segs.map((x, i) => {
+          const w = (x.to - x.from) / T * 100;
+          return <div key={i} className={kindOf[x.q] || "u"} style={{width: w + "%"}} title={x.q + "번 " + mxClock(x.from) + "–" + mxClock(x.to)}>{w > 2.4 ? x.q : ""}</div>;
+        })}
+      </div>
+      <div className="mx-axis">{ticks.map((t) => <span key={t} style={{left: (t / T * 100) + "%"}}>{Math.round(t / 60)}분</span>)}</div>
+      <div style={{marginTop: 10, fontSize: 14, lineHeight: 1.7}}>
+        앞 {half}문제에 <b>{mxHm(firstHalf)}</b>, 나머지 {N - half}문제에 <b>{mxHm(Math.max(0, T - firstHalf))}</b>.
+        {slow.length > 0 && <> 오래 걸린 문제: {slow.map((r, i) => <span key={r.q.n}>{i ? " · " : ""}<b>{r.q.n}번</b> {mxHm(r.sec)}{r.ok === false ? "(틀림)" : ""}</span>)}</>}
+      </div>
+    </div>
+
+    <div className="cm-card">
+      <div className="mx-tw">
+        <table className="mx-table">
+          <thead><tr><th>번호</th><th>내 답</th><th>정답</th><th>채점</th><th>시간</th><th>들른 횟수</th><th>답 바꿈</th></tr></thead>
+          <tbody>
+            {A.rows.map((r) => {
+              const k = kind(r), txt = r.ok === null ? "채점" : r.ok ? "O" : "X";
+              return (
+                <tr key={r.q.n}>
+                  <td><b>{r.q.n}</b></td>
+                  <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{shown(r.q, r.q.answer)}</td>
+                  <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{keyShown(r.q)}</td>
+                  <td>{r.q.type !== "mc" && canMark
+                    ? <button className={"mx-mark " + (k === "u" ? "x" : k)} onClick={() => toggle(r.q.n)} title="눌러서 고치기">{txt}</button>
+                    : <span className={"mx-mark " + (k === "u" ? "x" : k)}>{txt}</span>}</td>
+                  <td className={r.sec > avg * 2 ? "mx-long" : ""}>{r.sec ? mxClock(r.sec) : "–"}</td>
+                  <td>{r.visits ? r.visits + "번" : "–"}</td>
+                  <td>{r.changes > 1 ? (r.changes - 1) + "번" : ""}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="cm-hint" style={{marginTop: 8}}>
+        {canMark ? "단답형·서술형의 채점 표시는 눌러서 고칠 수 있어요. " : ""}붉은 시간은 한 문제 평균({mxHm(avg)})의 두 배를 넘은 것.
+      </div>
+      <div style={{display: "flex", justifyContent: "flex-end", marginTop: 12}}>
+        <button className="cm-btn cm-btn-ghost" onClick={() => mxDownload(L.date + "_" + L.name + "_" + L.title + ".json", L)}>결과 파일로 저장</button>
+      </div>
+    </div>
+  </>);
+}
+
+// 학생 탭 — 시험지 고르고 시작 · 보는 중이면 이어서 · 지난 기록
+function MockExamTab({ cls, me }) {
+  const K = mxKey(cls.id, me.id);
+  const [running, setRunning] = useState(() => !!mxLoad(K));
+  const [view, setView] = useState(null);
+  const [exams, setExams] = useState(null);
+  const [pick, setPick] = useState("");
+  const [mins, setMins] = useState("");
+  const [past, setPast] = useState(null);
+  const [again, setAgain] = useState(0);
+
+  useEffect(() => examListDoc().onSnapshot((d) => {
+    const all = (d.exists && d.data().exams) || [];
+    // test 는 선생님 모드에서만 — 올려서 확인할 때 쓴다. cids 가 있으면 그 반에만
+    setExams(all.filter((e) => (!e.test || me.teacher) && (!(e.cids || []).length || e.cids.includes(cls.id))));
+  }, () => setExams([])), [cls.id, me.teacher]);
+  useEffect(() => {
+    if (!exams || !exams.length || exams.find((e) => e.id === pick)) return;
+    setPick(exams[0].id); setMins(String(exams[0].minutes));
+  }, [exams]);
+  useEffect(() => {
+    let live = true;
+    mxLogs(cls.id, me.id, 60).then((a) => { if (live) setPast(a); }).catch(() => { if (live) setPast([]); });
+    return () => { live = false; };
+  }, [cls.id, me.id, again]);
+
+  function start() {
+    const e = (exams || []).find((x) => x.id === pick), m = Number(mins);
+    if (!e || !(m > 0)) return;
+    const first = e.questions[0].n;
+    mxSave(K, {
+      rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      examId: e.id, title: e.title, questions: e.questions,
+      limitSec: Math.round(m * 60), startedAt: Date.now(),
+      ev: [{ t: 0, k: "go", q: first }], answers: {}, cur: first,
+    });
+    setRunning(true);
+  }
+
+  if (running) {
+    return <MockExamRun cls={cls} me={me}
+      onDone={(log) => { setRunning(false); setView(log); setAgain((x) => x + 1); }}
+      onAbandon={() => setRunning(false)} />;
+  }
+  if (view) return <MockExamResult log={view} canMark onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
+
+  return (<>
+    <div className="cm-card">
+      <h3 className="cm-h3">실전 시험 <span className="cm-h-hint">(시간 재며 풀기)</span></h3>
+      {exams === null ? <div className="cm-empty">불러오는 중…</div>
+        : !exams.length ? <div className="cm-empty">아직 올라온 시험지가 없어요</div>
+        : (<>
+          <label className="cm-label">시험지</label>
+          <select className="cm-input" style={{margin: 0}} value={pick}
+            onChange={(e) => { setPick(e.target.value); const x = exams.find((y) => y.id === e.target.value); if (x) setMins(String(x.minutes)); }}>
+            {exams.map((e) => <option key={e.id} value={e.id}>{e.title} · {e.questions.length}문항 · {e.minutes}분{e.test ? " (시험용)" : ""}</option>)}
+          </select>
+          <label className="cm-label">제한 시간(분)</label>
+          <input className="cm-input" style={{margin: 0, maxWidth: 120}} inputMode="numeric" value={mins}
+            onChange={(e) => setMins(e.target.value.replace(/\D/g, ""))} />
+          <div className="mx-note">풀고 있는 문제 번호를 눌러 두고 풀어요. 답을 고르면 다음 문제로 저절로 넘어가요.<br />
+            연습장 말고 <b>시험지 여백에</b> 풀고, 틀린 풀이는 <b>지우지 말고 줄만 그어요.</b></div>
+          <button className="cm-btn cm-btn-primary" disabled={!(Number(mins) > 0)} onClick={start}>시작</button>
+        </>)}
+    </div>
+    <div className="cm-card">
+      <h3 className="cm-h3">지난 기록</h3>
+      {past === null ? <div className="cm-empty">불러오는 중…</div>
+        : !past.length ? <div className="cm-empty">아직 없어요</div>
+        : (
+          <div className="mx-tw"><table className="mx-table">
+            <thead><tr><th>날짜</th><th style={{textAlign: "left"}}>시험지</th><th>점수</th><th>쓴 시간</th></tr></thead>
+            <tbody>{past.map((l) => (
+              <tr key={l.rid} className="go" onClick={() => setView(l)}>
+                <td>{l.date.slice(5).replace("-", "/")}</td>
+                <td style={{textAlign: "left"}}>{l.title}</td>
+                <td><b>{l.score}</b>점{l.pending ? <span className="cm-hint"> · 미채점 {l.pending}</span> : null}</td>
+                <td>{mxClock(l.endT || 0)}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+    </div>
+  </>);
+}
+
+// 선생님 — 반 전체 결과. 눌러서 문항별로 보고 O/X 를 고친다
+function MockExamBoard({ cls }) {
+  const [logs, setLogs] = useState(null);
+  const [view, setView] = useState(null);
+  const [again, setAgain] = useState(0);
+  useEffect(() => {
+    let live = true;
+    mxLogs(cls.id, null, 90).then((a) => { if (live) setLogs(a); }).catch(() => { if (live) setLogs([]); });
+    return () => { live = false; };
+  }, [cls.id, again]);
+  if (view) return <MockExamResult log={view} canMark onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">실전 시험 결과 <span className="cm-h-hint">(최근 90일)</span></h3>
+      {logs === null ? <div className="cm-empty">불러오는 중…</div>
+        : !logs.length ? <div className="cm-empty">아직 본 학생이 없어요. 학생 화면의 «실전 시험» 에서 봅니다.</div>
+        : (
+          <div className="mx-tw"><table className="mx-table">
+            <thead><tr><th>날짜</th><th style={{textAlign: "left"}}>이름</th><th style={{textAlign: "left"}}>시험지</th><th>점수</th><th>맞은 문제</th><th>쓴 시간</th></tr></thead>
+            <tbody>{logs.map((l) => (
+              <tr key={l.rid} className="go" onClick={() => setView(l)}>
+                <td>{l.date.slice(5).replace("-", "/")}</td>
+                <td style={{textAlign: "left"}}>{l.name}{l.teacher ? <span className="cm-hint"> (선생님)</span> : null}</td>
+                <td style={{textAlign: "left"}}>{l.title}</td>
+                <td><b>{l.score}</b>점{l.pending ? <span className="cm-hint"> · 미채점 {l.pending}</span> : null}</td>
+                <td>{l.correct} / {l.n}</td>
+                <td>{mxClock(l.endT || 0)}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      <div className="cm-hint" style={{marginTop: 8}}>점수는 «점수 추이» 와 학습관리 보고서에도 저절로 들어가요. 선생님 모드로 본 것만 빠져요.</div>
+    </div>
+  );
+}
+
 function StudentHome({ cls, me, onLogout }) {
   const [tab, setTab] = useState(me.teacher ? "q" : "att");
   const [att, setAtt] = useState(null);
@@ -2636,7 +3229,8 @@ function StudentHome({ cls, me, onLogout }) {
   // 내신 접수는 선생님이 회차를 연 동안에만 학생에게 보인다
   const [examTerm, setExamTerm] = useState("");
   useEffect(() => listenExamTerm(setExamTerm), []);
-  const noGateTabs = ["prog", "notes", "ai", "flyer", "exam"]; // 출석 없이도 볼 수 있는 탭
+  // 실전 시험은 출석과 묶지 않는다 — 시간 재는 시험을 «출석부터» 에서 막으면 시작부터 어긋난다
+  const noGateTabs = ["prog", "notes", "ai", "flyer", "exam", "mock"]; // 출석 없이도 볼 수 있는 탭
   const activeTab = me.teacher ? tab : (att || noGateTabs.includes(tab) ? tab : "att");
   const showDmBanner = !!(dmNotice && dmNotice.active && dmNotice.text && !dmDismissed);
   const showClassBanner = !!(notice && notice.active && notice.text && !noticeDismissed) && !showDmBanner;
@@ -2654,6 +3248,7 @@ function StudentHome({ cls, me, onLogout }) {
         { key: "score", ico: "◈", label: "점수", disabled: !me.teacher && !att },
         { sep: true },
         { key: "prog", ico: "▦", label: "진도계획표" },
+        { key: "mock", ico: "⏱", label: "실전 시험" },
         ...(hasFlyer ? [{ key: "flyer", ico: "▤", label: "안내문" }] : []),
         ...(examTerm ? [{ key: "exam", ico: "▣", label: "내신" }] : []),
         { key: "notes", ico: "✎", label: "강의노트" },
@@ -2714,6 +3309,7 @@ function StudentHome({ cls, me, onLogout }) {
         </div>
       </>)}
       {activeTab === "prog" && <StudentProgressView cls={cls} me={me} />}
+      {activeTab === "mock" && <MockExamTab cls={cls} me={me} />}
       {activeTab === "flyer" && <FlyerView cls={cls} />}
       {activeTab === "exam" && <ExamForm cls={cls} me={me} />}
       {activeTab === "notes" && (
@@ -6159,6 +6755,7 @@ function AdminView() {
           ...(isIndividual(cls) && !isClassEnded(cls) ? [{ key: "c:live", ico: "◐", label: "수업 로그" }] : []),
           { key: "c:book", ico: "▦", label: "월간 출석부" },
           { key: "c:scores", ico: "◐", label: "점수 추이" },
+          { key: "c:mock", ico: "⏱", label: "실전 시험" },
           { key: "c:notice", ico: "◑", label: "공지" },
           { key: "c:flyer", ico: "▤", label: "안내문" },
           ...(isIndividual(cls) || hasProgFile ? [{ key: "c:progress", ico: "◈", label: "진도표" }] : []),
@@ -7750,6 +8347,8 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
           <ScoreTrendBoard cls={cls} />
         </div>
       )}
+
+      {activeView === "mock" && <MockExamBoard cls={cls} />}
 
       {activeView === "flyer" && (
         <div className="cm-card">
