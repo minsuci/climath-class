@@ -255,6 +255,8 @@ html,body{margin:0; padding:0;}
 .mx-qtop h4{margin:0;}
 .mx-qimg{overflow:auto; background:#fff; border:1px solid var(--line); border-radius:10px; padding:8px; min-height:120px;}
 .mx-qimg img{display:block; width:100%; height:auto;}
+.mx-sol{margin-top:10px; padding-top:8px; border-top:2px dashed var(--line);}
+.mx-sol-h{font-size:13px; font-weight:800; color:var(--navy); margin:0 0 6px 2px;}
 .mx-table{width:100%; border-collapse:collapse; font-size:14px;}
 .mx-table th,.mx-table td{padding:7px 5px; border-bottom:1px solid var(--line); text-align:center;}
 .mx-table th{font-size:12px; color:var(--muted); font-weight:600; white-space:nowrap;}
@@ -2997,22 +2999,26 @@ function MockExamResult({ log, canMark, onBack }) {
   // 번호를 누르면 그 문항 그림 — 서버가 «제출한 사람» 에게만 준다 (api/examimg.js)
   const [see, setSee] = useState(null);
   const [imgs, setImgs] = useState({});
-  async function openQ(n) {
-    setSee(n);
-    if (imgs[n]) return;
-    setImgs((m) => ({ ...m, [n]: { wait: true } }));
+  // 해설은 눌러야 열린다 — 먼저 다시 풀어 보게. 한 번 열면 다음 번호에서도 열린 채로
+  const [showSol, setShowSol] = useState(false);
+  useEffect(() => { if (see != null && showSol) fetchImg(see, "sol"); }, [see, showSol]);
+  function openQ(n) { setSee(n); fetchImg(n, "q"); }
+  async function fetchImg(n, kind) {
+    const key = kind + n;
+    if (imgs[key]) return;
+    setImgs((m) => ({ ...m, [key]: { wait: true } }));
     try {
       const u = firebase.auth().currentUser;
       if (!u) throw new Error("로그인이 풀렸어요");
       const r = await fetch("/api/examimg", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken: await u.getIdToken(), examId: L.examId, n, cid: L.cid, date: L.date, rid: L.rid }),
+        body: JSON.stringify({ idToken: await u.getIdToken(), examId: L.examId, n, kind, cid: L.cid, date: L.date, rid: L.rid }),
       });
       let j = null; try { j = await r.json(); } catch (e) {}
-      if (!r.ok) throw new Error((j && j.error) || "문제를 불러오지 못했어요 (" + r.status + ")");
-      setImgs((m) => ({ ...m, [n]: { src: "data:image/png;base64," + j.png } }));
+      if (!r.ok) throw new Error((j && j.error) || "불러오지 못했어요 (" + r.status + ")");
+      setImgs((m) => ({ ...m, [key]: { src: "data:image/png;base64," + j.png } }));
     } catch (e) {
-      setImgs((m) => ({ ...m, [n]: { err: e.message || "문제를 불러오지 못했어요" } }));
+      setImgs((m) => ({ ...m, [key]: { err: e.message || "불러오지 못했어요" } }));
     }
   }
   const A = mxAnalyze(L), T = L.endT || 1, N = L.questions.length;
@@ -3118,7 +3124,7 @@ function MockExamResult({ log, canMark, onBack }) {
       </div>
     </div>
     {see != null && (() => {
-      const r = A.rows.find((x) => x.q.n === see), i = A.rows.indexOf(r), im = imgs[see] || {};
+      const r = A.rows.find((x) => x.q.n === see), i = A.rows.indexOf(r), im = imgs["q" + see] || {}, sm = imgs["sol" + see] || {};
       const pv = A.rows[i - 1], nx = A.rows[i + 1], k = kind(r);
       return (
         <div className="mx-modal" onClick={() => setSee(null)}>
@@ -3134,9 +3140,19 @@ function MockExamResult({ log, canMark, onBack }) {
               {im.src ? <img src={im.src} alt={see + "번 문제"} />
                 : im.err ? <div className="cm-empty">{im.err}</div>
                 : <div className="cm-empty">불러오는 중…</div>}
+              {showSol && (
+                <div className="mx-sol">
+                  <div className="mx-sol-h">해설</div>
+                  {sm.src ? <img src={sm.src} alt={see + "번 해설"} />
+                    : sm.err ? <div className="cm-empty">{sm.err}</div>
+                    : <div className="cm-empty">불러오는 중…</div>}
+                </div>
+              )}
             </div>
             <div className="mx-foot">
               <button className="mx-btn" disabled={!pv} onClick={() => pv && openQ(pv.q.n)}>◀ {pv ? pv.q.n + "번" : ""}</button>
+              <span style={{flex: 1}} />
+              <button className={"mx-btn" + (showSol ? "" : " primary")} onClick={() => setShowSol((v) => !v)}>{showSol ? "해설 접기" : "해설 보기"}</button>
               <span style={{flex: 1}} />
               <button className="mx-btn" disabled={!nx} onClick={() => nx && openQ(nx.q.n)}>{nx ? nx.q.n + "번" : ""} ▶</button>
             </div>

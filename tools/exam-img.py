@@ -7,6 +7,9 @@
   python tools/exam-img.py --id 대성고-2중간-1회 --list                                     올라간 번호
   python tools/exam-img.py --id 대성고-2중간-1회 --del                                      빼기
 
+해설: «정답과 해설» 쪽(2단)에서 굵은 «N.» 머리부터 같은 단의 다음 머리까지를 자른다. 단의 마지막
+해설은 줄 사이가 크게 벌어지는 곳(출처 표 등)에서 끊는다. 해설 쪽이 없는 시험지(선덕고)는 문제만 올라간다.
+
 자르는 법: 변형교재 시험지는 2단이고 문항 번호가 «N.» 13pt 굵은 글자다. 번호에서 같은 단의
 다음 번호(또는 쪽 끝)까지를 자르고, 아래 풀이 여백은 내용이 끝나는 곳까지 걷어 낸다.
 «빠른 정답» 쪽부터는 안 본다 (해설에 번호가 또 나온다).
@@ -87,6 +90,65 @@ def crops(pdf):
     return got
 
 
+def sol_heads(pg):
+    """해설 머리 «N.» — 굵은 맑은 고딕, 본문 크기(9pt 안팎). 문제 번호(13pt)와 다르다"""
+    out = []
+    for b in pg.get_text("dict")["blocks"]:
+        for l in b.get("lines", []):
+            sps = l["spans"]
+            for k, sp in enumerate(sps):
+                t = sp["text"].strip()
+                if re.fullmatch(r"\d{1,2}\.", t) and (sp["flags"] & 16) and 8 < sp["size"] < 11 and k == 0:
+                    out.append((int(t[:-1]), sp["bbox"][0], sp["bbox"][1]))
+    return out
+
+
+def elements(pg):
+    """줄·선·그림의 상자 (위에서 아래로)"""
+    el = []
+    for b in pg.get_text("dict")["blocks"]:
+        for l in b.get("lines", []):
+            el.append(pymupdf.Rect(l["bbox"]))
+    for dr in pg.get_drawings():
+        el.append(pymupdf.Rect(dr["rect"]))
+    for im in pg.get_image_info():
+        el.append(pymupdf.Rect(im["bbox"]))
+    return el
+
+
+def sol_crops(pdf):
+    d = pymupdf.open(pdf)
+    start = next((i for i in range(d.page_count) if "빠른 정답" in d[i].get_text()), None)
+    got = {}
+    if start is None:
+        return got
+    for i in range(start, d.page_count):
+        pg = d[i]
+        hs = sol_heads(pg)
+        if not hs:
+            continue
+        el = elements(pg)
+        for n, x, y in hs:
+            col = pymupdf.Rect(x - 4, y - 3, min(x + COL_W, pg.rect.x1 - 10), FOOT)
+            below = [yy for nn, xx, yy in hs if abs(xx - x) < 30 and yy > y + 5]
+            if below:
+                col.y1 = min(below) - 5
+            # 내용이 끝나는 곳까지 — 줄 사이가 크게 벌어지면(22pt 넘게) 거기서 끊는다
+            bottom = y + 10
+            for r in sorted((r & col for r in el), key=lambda r: r.y0):
+                if r.is_empty or r.y1 <= y or r.width > col.width * 0.98 and r.height < 2:
+                    continue
+                if r.y0 > bottom + 22:
+                    break
+                bottom = max(bottom, r.y1)
+            col.y1 = min(col.y1, bottom + 6)
+            if n in got:
+                raise SystemExit("해설 %d번이 두 번 나옵니다" % n)
+            got[n] = pg.get_pixmap(dpi=DPI, clip=col)
+    d.close()
+    return got
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pdf"); ap.add_argument("--id", required=True)
@@ -94,26 +156,33 @@ def main():
     ap.add_argument("--del", dest="delete", action="store_true"); ap.add_argument("--out")
     a = ap.parse_args()
     if a.list:
-        print(a.id, "→", call({"action": "imgList", "examId": a.id})["ns"]); return
+        r = call({"action": "imgList", "examId": a.id}); print(a.id, "→ 문제", r["ns"], "
+  해설", r.get("sols")); return
     if a.delete:
         print("뺐습니다:", call({"action": "imgDel", "examId": a.id})["deleted"], "장"); return
     if not a.pdf:
         raise SystemExit("--pdf 가 필요합니다")
     got = crops(a.pdf)
-    print("%d문항 잘랐습니다" % len(got))
+    sols = sol_crops(a.pdf)
+    print("%d문항 잘랐습니다 · 해설 %d개" % (len(got), len(sols)))
+    if sols and sorted(sols) != sorted(got):
+        print("  ⚠ 해설 번호가 문제와 다릅니다 — 없는 것:", sorted(set(got) - set(sols)), "남는 것:", sorted(set(sols) - set(got)))
     if a.dry:
         out = a.out or os.path.join(os.getcwd(), "examimg_" + a.id)
         os.makedirs(out, exist_ok=True)
         for n, pix in got.items():
             pix.save(os.path.join(out, "%02d.png" % n))
+        for n, pix in sols.items():
+            pix.save(os.path.join(out, "%02d_해설.png" % n))
         print("→", out); return
     total = 0
-    for n, pix in sorted(got.items()):
-        png = pix.tobytes("png"); total += len(png)
-        call({"action": "imgPut", "examId": a.id, "n": n, "png": base64.b64encode(png).decode("ascii"),
-              "w": pix.width, "h": pix.height})
-    print("올렸습니다 — %d장 · %.1f MB" % (len(got), total / 1e6))
-    print(a.id, "→", call({"action": "imgList", "examId": a.id})["ns"])
+    for kind, dd in (("q", got), ("sol", sols)):
+        for n, pix in sorted(dd.items()):
+            png = pix.tobytes("png"); total += len(png)
+            call({"action": "imgPut", "examId": a.id, "n": n, "kind": kind,
+                  "png": base64.b64encode(png).decode("ascii"), "w": pix.width, "h": pix.height})
+    print("올렸습니다 — 문제 %d장 · 해설 %d장 · %.1f MB" % (len(got), len(sols), total / 1e6))
+    r = call({"action": "imgList", "examId": a.id}); print(a.id, "→ 문제", len(r["ns"]), "장 · 해설", len(r.get("sols") or []), "장")
 
 
 if __name__ == "__main__":

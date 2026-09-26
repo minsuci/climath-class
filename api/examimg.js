@@ -4,7 +4,8 @@
 // 제출 길에는 손대지 않는다.
 //
 // 저장 자리
-//   examImgs/{examId}__{n}   { png: base64, w, h }  — 규칙 맨 아래 «전부 거절» 에 걸려
+//   examImgs/{examId}__{n}   { png: base64, w, h }  문제 그림
+//   examImgs/{examId}__{n}s  해설 그림 (해설 쪽이 있는 시험지만)      — 규칙 맨 아래 «전부 거절» 에 걸려
 //                            서비스 계정만 읽는다. 시험 전에 문제가 새지 않게
 //
 // 누가 받나: 선생님은 언제나. 학생은 **그 시험을 제출한 기록이 있을 때만** —
@@ -14,7 +15,7 @@
 import { verifyIdToken, getDoc, patchDoc, listDocs, deleteDoc } from "./_google.js";
 
 const ID_RE = /^[0-9A-Za-z가-힣_.\-]{2,80}$/;
-const imgPath = (examId, n) => "examImgs/" + examId + "__" + n;
+const imgPath = (examId, n, kind) => "examImgs/" + examId + "__" + n + (kind === "sol" ? "s" : "");
 
 async function toolOk(k) {
   if (!k) return false;
@@ -35,13 +36,15 @@ export default async function handler(req, res) {
         const n = Number(body.n), png = String(body.png || "");
         if (!Number.isInteger(n) || n <= 0) { res.status(400).json({ error: "번호가 이상해요" }); return; }
         if (!/^[A-Za-z0-9+/=]+$/.test(png) || png.length > 900000) { res.status(400).json({ error: "그림이 없거나 너무 커요" }); return; }
-        await patchDoc(imgPath(examId, n), { png, w: Number(body.w) || 0, h: Number(body.h) || 0, updated: Date.now() });
+        await patchDoc(imgPath(examId, n, body.kind), { png, w: Number(body.w) || 0, h: Number(body.h) || 0, updated: Date.now() });
         res.status(200).json({ ok: true }); return;
       }
       if (body.action === "imgList") {
         const all = await listDocs("examImgs").catch(() => []);
-        const ns = all.filter((d) => d.id.startsWith(examId + "__")).map((d) => Number(d.id.split("__")[1])).sort((a, b) => a - b);
-        res.status(200).json({ ok: true, ns }); return;
+        const ids = all.filter((d) => d.id.startsWith(examId + "__")).map((d) => d.id.split("__")[1]);
+        const ns = ids.filter((x) => /^\d+$/.test(x)).map(Number).sort((a, b) => a - b);
+        const sols = ids.filter((x) => /^\d+s$/.test(x)).map((x) => parseInt(x, 10)).sort((a, b) => a - b);
+        res.status(200).json({ ok: true, ns, sols }); return;
       }
       if (body.action === "imgDel") {
         const all = await listDocs("examImgs").catch(() => []);
@@ -68,8 +71,9 @@ export default async function handler(req, res) {
         res.status(403).json({ error: "제출한 시험만 문제를 볼 수 있어요" }); return;
       }
     }
-    const img = await getDoc(imgPath(examId, n)).catch(() => null);
-    if (!img || !img.png) { res.status(404).json({ error: "이 문항 그림은 아직 없어요" }); return; }
+    const sol = body.kind === "sol";
+    const img = await getDoc(imgPath(examId, n, sol ? "sol" : "q")).catch(() => null);
+    if (!img || !img.png) { res.status(404).json({ error: sol ? "이 시험지는 해설이 없어요" : "이 문항 그림은 아직 없어요" }); return; }
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.status(200).json({ ok: true, png: img.png, w: img.w || 0, h: img.h || 0 });
   } catch (e) {
