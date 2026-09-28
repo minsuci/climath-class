@@ -191,6 +191,17 @@ html,body{margin:0; padding:0;}
 .mx-ttl{font-size:12.5px; opacity:.75; max-width:40vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .mx-clock{margin-left:auto; font-size:26px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.02em;}
 .mx-clock.low{color:#ffb3a7;}
+.mx-clock.over{color:#ff8a7a;}
+.mx-lb{display:inline-block; vertical-align:middle; margin-left:10px; font-family:'Noto Sans KR',sans-serif; font-size:17px; font-weight:800; color:#fff; background:var(--navy); border-radius:8px; padding:3px 10px; line-height:1.3;}
+.mx-overnote{margin:10px 0 4px; padding:9px 12px; border-radius:10px; background:#fdecec; color:#7a1f18; font-size:14px; line-height:1.55;}
+.mx-chip u{display:block; text-decoration:none; font-size:10.5px; font-weight:800; color:var(--navy); line-height:1; margin-bottom:1px;}
+.mx-qno small{display:block; font-size:10.5px; font-weight:700; color:var(--muted); line-height:1.1;}
+.mx-latetag{font-size:11px; font-weight:700; color:#b3261e; white-space:nowrap;}
+.mx-overtag{display:inline-block; font-size:12.5px; font-weight:800; color:#b3261e; background:#fdecec; border-radius:99px; padding:2px 9px; white-space:nowrap;}
+.mx-overtag.sm{font-size:11px; padding:1px 7px; margin-left:5px;}
+.mx-overbox{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; padding:10px 12px; border-radius:12px; background:#fff6f4; border:1.5px solid #f3c9c3; font-size:14px; line-height:1.55;}
+.mx-limitline{position:absolute; top:-4px; bottom:-4px; width:0; border-left:2.5px dashed #b3261e; z-index:2;}
+.mx-limit{color:#b3261e !important; font-weight:800;}
 .mx-sub{background:#fff; color:var(--navy); border:0; border-radius:10px; padding:9px 18px; font-weight:800; font-size:15px; cursor:pointer; font-family:inherit;}
 .mx-sub[disabled]{opacity:.4;}
 .mx-body{max-width:1100px; margin:0 auto; padding:16px; display:grid; gap:16px; grid-template-columns:1fr;}
@@ -2706,8 +2717,14 @@ function mxSegments(ev, endT) {
 }
 // ⚠ api/exam.js 의 tally 와 **같은 식**이다. 제출 때는 서버가, O/X 를 고칠 때는 여기서 낸다.
 //    점수는 100점 기준 — 점수 칸의 다른 줄(«17/22» → 77점)과 같은 날 평균에 섞인다.
-function mxTally(qs, override) {
-  const ok = (q) => (override && q.n in override ? override[q.n] : q.auto);
+// 시간이 끝나도 바로 걷지 않는다 — 이만큼 더 풀 수 있고, 시간 뒤에 적은 답은 따로 채점된다 (api/exam.js 와 같게)
+const MX_OVER = 30 * 60;
+// 학교 번호(«서술형1») 가 있으면 같이 — 통번호와 학교 번호를 아이들이 헷갈린다
+const mxQName = (q) => q.n + "번" + (q.label ? " · " + q.label : "");
+const mxShort = (lb) => String(lb || "").replace("서술형", "서").replace("서답형", "서").replace("단답형", "단");
+// inTime: 시간 안 점수 — 시간 뒤에 답이 바뀐 문항(late)은 끝난 순간의 답으로 센다 (서버 tally 와 같게)
+function mxTally(qs, override, inTime) {
+  const ok = (q) => (inTime && q.late ? q.autoIn : override && q.n in override ? override[q.n] : q.auto);
   const hasPt = qs.every((q) => typeof q.pt === "number" && q.pt > 0);
   const totalPt = hasPt ? qs.reduce((a, q) => a + q.pt, 0) : qs.length;
   const got = qs.reduce((a, q) => a + (ok(q) ? (hasPt ? q.pt : 1) : 0), 0);
@@ -2730,7 +2747,8 @@ function mxAnalyze(log) {
       firstAt: my.length ? my[0].from : null,
     };
   });
-  return { rows, segs, ...mxTally(log.questions, ov), blank: rows.filter((r) => r.q.answer == null || r.q.answer === "").length };
+  return { rows, segs, ...mxTally(log.questions, ov, !!log.overSec), all: log.overSec ? mxTally(log.questions, ov) : null,
+           blank: rows.filter((r) => r.q.answer == null || r.q.answer === "").length };
 }
 // 답을 적으면 다음 «안 푼» 문제로 — 앞에서부터 차례로 풀면 n+1 과 같다.
 // 앞 문제로 돌아가 답을 고쳤으면 그 바로 뒤가 아니라 **아직 안 푼 곳**으로 간다.
@@ -2835,7 +2853,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
   async function submit(reason) {
     const x = sRef.current; if (!x || x.sending) return;
     // 끝난 시각을 **먼저 얼린다.** 보내다 실패해 다시 보낼 때 시간이 늘어나면 안 된다
-    const endT = x.endT != null ? x.endT : Math.min(nowT(x), x.limitSec);
+    const endT = x.endT != null ? x.endT : Math.min(nowT(x), x.limitSec + MX_OVER);
     const f = { ...x, endT, reason: x.reason || reason, sending: true };
     put(f); setAsk(false); setErr("");
     try {
@@ -2866,7 +2884,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
     const t = setInterval(() => {
       const x = sRef.current; if (!x) return;
       setTick((k) => k + 1);
-      if (x.endT == null && x.limitSec - nowT(x) <= 0) submit("time");
+      if (x.endT == null && x.limitSec + MX_OVER - nowT(x) <= 0) submit("time");
     }, 250);
     return () => clearInterval(t);
   }, []);
@@ -2934,12 +2952,16 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
     <div className="mx-run">
       <div className="mx-top">
         <div><div className="mx-who">{me.name}</div><div className="mx-ttl">{S.title}</div></div>
-        <div className={"mx-clock" + (left <= 300 ? " low" : "")}>{mxClock(left)}</div>
+        <div className={"mx-clock" + (left < 0 ? " over" : left <= 300 ? " low" : "")}>{left < 0 ? "+" + mxClock(-left) : mxClock(left)}</div>
         <button className="mx-sub" disabled={frozen} onClick={() => setAsk(true)}>제출</button>
       </div>
       <div className="mx-body">
         <div className="mx-q">
-          <div className="mx-num">{q.n}번<small>{MX_TYPE[q.type]}{q.pt ? " · " + q.pt + "점" : ""}</small></div>
+          <div className="mx-num">{q.n}번{q.label && <span className="mx-lb">{q.label}</span>}<small>{MX_TYPE[q.type]}{q.pt ? " · " + q.pt + "점" : ""}</small></div>
+          {left < 0 && !frozen && (
+            <div className="mx-overnote">시간이 끝났어요 <b>(+{mxClock(-left)})</b>. 계속 풀어도 되지만, 지금부터 적거나 바꾼 답은 <b>«시간 초과»</b> 로 따로 채점돼요.
+              {left < -(MX_OVER - 300) && " 5분 안에 저절로 제출돼요."}</div>
+          )}
           {body}
           {allDone && <div className="mx-note">모든 문제에 답했어요. 검토할 번호를 눌러 보거나 제출하세요.</div>}
           <div className="mx-foot">
@@ -2956,7 +2978,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
               const show = v == null || v === "" ? "" : x.type === "mc" ? MX_CIRC[v] : String(v);
               return (
                 <button key={x.n} className={"mx-chip" + (mxAnswered(S, x.n) ? " done" : "") + (x.n === S.cur ? " cur" : "")}
-                  onClick={() => go(x.n)}><b>{x.n}</b><i>{show}</i></button>
+                  onClick={() => go(x.n)}>{x.label ? <u>{mxShort(x.label)}</u> : null}<b>{x.n}</b><i>{show}</i></button>
               );
             })}
           </div>
@@ -2975,7 +2997,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
         <div className="mx-modal"><div className="box">
           <h4>제출할까요?</h4>
           <div style={{fontSize: 14}}>제출하면 답을 더 고칠 수 없어요.</div>
-          <div className="mx-note">{blanks.length ? <>안 푼 문제 <b>{blanks.length}개</b> — {blanks.join(", ")}번</> : "모든 문제에 답했어요."}</div>
+          <div className="mx-note">{blanks.length ? <>안 푼 문제 <b>{blanks.length}개</b> — {blanks.map((n) => { const x = S.questions.find((y) => y.n === n); return x && x.label ? n + "(" + x.label + ")" : String(n); }).join(", ")}번</> : "모든 문제에 답했어요."}</div>
           <div style={{display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 18}}>
             <button className="mx-btn" onClick={() => setAsk(false)}>계속 풀기</button>
             <button className="mx-btn primary" onClick={() => submit("submit")}>제출</button>
@@ -3067,13 +3089,16 @@ function MockExamResult({ log, canMark, canVoid, onBack }) {
     const q = L.questions.find((x) => x.n === n), ov0 = L.override || {};
     const cur = n in ov0 ? ov0[n] : q.auto;
     const ov = { ...ov0, [n]: cur === true ? false : true };
-    const t = mxTally(L.questions, ov);
+    // 공식 점수는 시간 안 점수. 시간을 넘긴 기록은 «끝까지» 점수도 같이 고친다
+    const t = mxTally(L.questions, ov, !!L.overSec), tA = mxTally(L.questions, ov);
+    const patch = { override: ov, score: t.score, got: t.got, correct: t.correct, pending: t.pending,
+                    ...(L.overSec ? { all: { score: tA.score, got: tA.got, correct: tA.correct, pending: tA.pending } } : {}) };
     const before = L;
-    setL({ ...L, override: ov, score: t.score, got: t.got, correct: t.correct, pending: t.pending });
+    setL({ ...L, ...patch });
     setSaving(true);
     try {
       // override 는 통째로 쓴다 — 번호를 칸 이름으로 점을 찍어 쓰면 경로로 읽힌다
-      await examLogCol(L.cid, L.date).doc(L.rid).update({ override: ov, score: t.score, got: t.got, correct: t.correct, pending: t.pending });
+      await examLogCol(L.cid, L.date).doc(L.rid).update(patch);
       // 점수 칸도 같이 — 보고서·위험신호가 읽는 것은 이쪽이다. 선생님 모드 기록엔 점수 칸이 없다
       if (!L.teacher) await scoresCol(L.cid, L.date).doc(L.rid).update({ score: t.score, correct: t.correct });
     } catch (e) {
@@ -3101,7 +3126,7 @@ function MockExamResult({ log, canMark, canVoid, onBack }) {
         <button className="cm-link" onClick={onBack}>← 목록</button>
       </div>
       <div className="cm-hint" style={{margin: "4px 0 14px"}}>
-        {L.date} {hhmm(L.startedAt)} · {L.reason === "time" ? "시간 종료로 제출" : "직접 제출"}
+        {L.date} {hhmm(L.startedAt)} · {L.reason === "time" ? (L.overSec ? "초과 시간까지 다 써서 저절로 제출" : "시간 종료로 제출") : "직접 제출"}
         {L.teacher && " · 점수 칸에는 안 들어가요"}
       </div>
       {L.voided && (
@@ -3118,19 +3143,27 @@ function MockExamResult({ log, canMark, canVoid, onBack }) {
         <div><div className="v s">{mxClock(T)}</div><div className="l">쓴 시간 (제한 {Math.round(L.limitSec / 60)}분)</div></div>
         <div><div className="v s">{A.blank}</div><div className="l">안 푼 문제</div></div>
       </div>
+      {L.overSec > 0 && A.all && (
+        <div className="mx-overbox">
+          <span className="mx-overtag">시간 초과 +{mxClock(L.overSec)}</span>
+          <span>위 점수는 <b>시간 안</b>에 적은 답으로 낸 것이에요. 초과 시간까지 끝까지 풀면 <b>{A.all.score}점</b> ({A.all.correct} / {N}).</span>
+        </div>
+      )}
       {A.pending > 0 && <div className="mx-note">서술형 {A.pending}개가 아직 채점 전이에요. 아래 표에서 «채점» 을 눌러 O/X 를 정해 주세요.</div>}
     </div>
 
     <div className="cm-card">
       <h3 className="cm-h3" style={{marginBottom: 4}}>시간 흐름</h3>
       <div className="cm-hint">초록 맞음 · 빨강 틀림 · 회색 답 안 함 · 노랑 채점 전</div>
-      <div className="mx-tl">
+      <div className="mx-tl" style={{position: "relative"}}>
+        {L.overSec > 0 && <i className="mx-limitline" style={{left: (L.limitSec / T * 100) + "%"}} />}
         {A.segs.map((x, i) => {
           const w = (x.to - x.from) / T * 100;
           return <div key={i} className={kindOf[x.q] || "u"} style={{width: w + "%"}} title={x.q + "번 " + mxClock(x.from) + "–" + mxClock(x.to)}>{w > 2.4 ? x.q : ""}</div>;
         })}
       </div>
-      <div className="mx-axis">{ticks.map((t) => <span key={t} style={{left: (t / T * 100) + "%"}}>{Math.round(t / 60)}분</span>)}</div>
+      <div className="mx-axis">{ticks.map((t) => <span key={t} style={{left: (t / T * 100) + "%"}}>{Math.round(t / 60)}분</span>)}
+        {L.overSec > 0 && <span className="mx-limit" style={{left: (L.limitSec / T * 100) + "%"}}>▲ 시간 끝</span>}</div>
       <div style={{marginTop: 10, fontSize: 14, lineHeight: 1.7}}>
         앞 {half}문제에 <b>{mxHm(firstHalf)}</b>, 나머지 {N - half}문제에 <b>{mxHm(Math.max(0, T - firstHalf))}</b>.
         {slow.length > 0 && <> 오래 걸린 문제: {slow.map((r, i) => <span key={r.q.n}>{i ? " · " : ""}<b>{r.q.n}번</b> {mxHm(r.sec)}{r.ok === false ? "(틀림)" : ""}</span>)}</>}
@@ -3146,10 +3179,11 @@ function MockExamResult({ log, canMark, canVoid, onBack }) {
               const k = kind(r), txt = r.ok === null ? "채점" : r.ok ? "O" : "X";
               return (
                 <tr key={r.q.n}>
-                  <td><button className="mx-qno" onClick={() => openQ(r.q.n)} title="문제 보기">{r.q.n}</button></td>
-                  <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{shown(r.q, r.q.answer)}</td>
+                  <td><button className="mx-qno" onClick={() => openQ(r.q.n)} title="문제 보기">{r.q.n}{r.q.label ? <small>{r.q.label}</small> : null}</button></td>
+                  <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{shown(r.q, r.q.answer)}
+                    {r.q.late ? <div className="mx-latetag" title="시간이 끝난 뒤에 적거나 바꾼 답">시간 뒤{r.q.answerIn != null ? " · 그때 " + shown(r.q, r.q.answerIn) : ""}</div> : null}</td>
                   <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{keyShown(r.q)}</td>
-                  <td>{r.q.type !== "mc" && canMark
+                  <td>{canMark
                     ? <button className={"mx-mark " + (k === "u" ? "x" : k)} onClick={() => toggle(r.q.n)} title="눌러서 고치기">{txt}</button>
                     : <span className={"mx-mark " + (k === "u" ? "x" : k)}>{txt}</span>}</td>
                   <td className={r.sec > avg * 2 ? "mx-long" : ""}>{r.sec ? mxClock(r.sec) : "–"}</td>
@@ -3162,7 +3196,7 @@ function MockExamResult({ log, canMark, canVoid, onBack }) {
         </table>
       </div>
       <div className="cm-hint" style={{marginTop: 8}}>
-        번호를 누르면 그 문제를 볼 수 있어요. {canMark ? "단답형·서술형의 채점 표시는 눌러서 고칠 수 있어요. " : ""}붉은 시간은 한 문제 평균({mxHm(avg)})의 두 배를 넘은 것.
+        번호를 누르면 그 문제를 볼 수 있어요. {canMark ? "O/X 는 눌러서 고칠 수 있어요. " : ""}붉은 시간은 한 문제 평균({mxHm(avg)})의 두 배를 넘은 것.
       </div>
       <div style={{display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12}}>
         {canVoid && !L.voided && <button className="cm-btn cm-btn-ghost mx-voidbtn" disabled={saving} onClick={() => setVoided(true)}>이 제출 취소</button>}
@@ -3176,7 +3210,7 @@ function MockExamResult({ log, canMark, canVoid, onBack }) {
         <div className="mx-modal" onClick={() => setSee(null)}>
           <div className="box mx-qbox" onClick={(e) => e.stopPropagation()}>
             <div className="mx-qtop">
-              <h4>{see}번</h4>
+              <h4>{mxQName(r.q)}</h4>
               <span className={"mx-mark " + (k === "u" ? "x" : k)}>{r.ok === null ? "채점" : r.ok ? "O" : "X"}</span>
               <span className="cm-hint">내 답 <b>{shown(r.q, r.q.answer)}</b> · 정답 <b>{keyShown(r.q)}</b>{r.sec ? " · " + mxClock(r.sec) : ""}</span>
               <span style={{flex: 1}} />
@@ -3287,7 +3321,7 @@ function MockExamTab({ cls, me }) {
               <tr key={l.rid} className={"go" + (l.voided ? " voided" : "")} onClick={() => setView(l)}>
                 <td>{l.date.slice(5).replace("-", "/")}</td>
                 <td style={{textAlign: "left"}}>{l.title}</td>
-                <td>{l.voided ? <span className="mx-voidtag">취소됨</span> : null}<b>{l.score}</b>점{l.pending ? <span className="cm-hint"> · 미채점 {l.pending}</span> : null}</td>
+                <td>{l.voided ? <span className="mx-voidtag">취소됨</span> : null}<b>{l.score}</b>점{l.overSec ? <span className="mx-overtag sm" title={"시간 안 " + l.score + "점 · 끝까지 " + (l.all ? l.all.score : "?") + "점"}>초과 +{mxClock(l.overSec)}{l.all ? " → " + l.all.score + "점" : ""}</span> : null}{l.pending ? <span className="cm-hint"> · 미채점 {l.pending}</span> : null}</td>
                 <td>{mxClock(l.endT || 0)}</td>
               </tr>
             ))}</tbody>
@@ -3307,7 +3341,7 @@ function MockExamLive({ cls }) {
   useEffect(() => { const t = setInterval(() => setTick((k) => k + 1), 1000); return () => clearInterval(t); }, []);
   const now = Date.now();
   // 지금 보고 있는 학생만 — 낸 것은 아래 «결과» 에 있다. 시간이 2분 넘게 지났는데 안 낸 것은 남겨 둔다(끊긴 것일 수 있다)
-  const on = (r) => r.state !== "done" && (r.limitSec - (now - r.startedAt) / 1000) > -120;
+  const on = (r) => r.state !== "done" && (r.limitSec + MX_OVER - (now - r.startedAt) / 1000) > -120;
   const stuck = (r) => r.state !== "done" && !on(r) && now - r.updated < 3 * 3600e3;
   const list = (rows || []).filter((r) => on(r) || stuck(r))
     .sort((a, b) => (on(b) - on(a)) || String(a.name).localeCompare(String(b.name), "ko"));
@@ -3329,6 +3363,7 @@ function MockExamLive({ cls }) {
                 {r.state === "done" ? <span className="mx-lbadge ok">제출함{r.score != null ? " · " + r.score + "점" : ""}</span>
                   : r.state === "sending" ? <span className="mx-lbadge">제출하는 중</span>
                   : left > 0 ? <span className={"mx-lbadge" + (left <= 300 ? " low" : "")}>남은 {mxClock(left)}</span>
+                  : going ? <span className="mx-lbadge low">시간 초과 +{mxClock(-left)}</span>
                   : <span className="mx-lbadge low">시간 끝 · 제출 안 됨</span>}
               </div>
               {going && r.state === "run" && (
@@ -3372,7 +3407,7 @@ function MockExamBoard({ cls }) {
                 <td>{l.date.slice(5).replace("-", "/")}</td>
                 <td style={{textAlign: "left"}}>{l.name}{l.teacher ? <span className="cm-hint"> (선생님)</span> : null}</td>
                 <td style={{textAlign: "left"}}>{l.title}<span className="cm-hint"> · {hhmm(l.startedAt)}</span></td>
-                <td>{l.voided ? <span className="mx-voidtag">취소됨</span> : null}<b>{l.score}</b>점{l.pending ? <span className="cm-hint"> · 미채점 {l.pending}</span> : null}</td>
+                <td>{l.voided ? <span className="mx-voidtag">취소됨</span> : null}<b>{l.score}</b>점{l.overSec ? <span className="mx-overtag sm" title={"시간 안 " + l.score + "점 · 끝까지 " + (l.all ? l.all.score : "?") + "점"}>초과 +{mxClock(l.overSec)}{l.all ? " → " + l.all.score + "점" : ""}</span> : null}{l.pending ? <span className="cm-hint"> · 미채점 {l.pending}</span> : null}</td>
                 <td>{l.correct} / {l.n}</td>
                 <td>{mxClock(l.endT || 0)}</td>
               </tr>

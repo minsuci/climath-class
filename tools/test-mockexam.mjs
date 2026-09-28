@@ -23,8 +23,8 @@ const line = (src, name) => {
 
 const S = new Function([
   fn(SERVER, "numVal"), fn(SERVER, "sameShort"), fn(SERVER, "autoCorrect"),
-  fn(SERVER, "tally"), line(SERVER, "kstDate"), fn(SERVER, "checkExam"),
-  "return { numVal, sameShort, autoCorrect, tally, kstDate, checkExam };",
+  fn(SERVER, "tally"), line(SERVER, "kstDate"), fn(SERVER, "checkExam"), fn(SERVER, "answersAt"),
+  "return { numVal, sameShort, autoCorrect, tally, kstDate, checkExam, answersAt };",
 ].join("\n"))();
 const C = new Function([
   line(APP, "mxAnswered"), fn(APP, "mxSegments"), fn(APP, "mxTally"),
@@ -75,10 +75,30 @@ for (let k = 0; k < 300; k++) {
              auto: type === "essay" ? null : (i + k) % 2 === 0 };
   });
   const ov = {}; qq.forEach((q) => { if ((q.n + k) % 5 === 0) ov[q.n] = (q.n % 2 === 0); });
-  const a = S.tally(qq, ov), b = C.mxTally(qq, ov);
-  if (["score", "got", "totalPt", "correct", "pending", "n"].some((f) => a[f] !== b[f])) diff++;
+  // 시간 초과 기록: 몇 문항은 시간 뒤에 답이 바뀌었다(late)
+  qq.forEach((q) => { if ((q.n + k) % 4 === 0) Object.assign(q, { late: true, autoIn: (q.n + k) % 3 === 0 }); });
+  for (const inTime of [false, true]) {
+    const a = S.tally(qq, ov, inTime), b = C.mxTally(qq, ov, inTime);
+    if (["score", "got", "totalPt", "correct", "pending", "n"].some((f) => a[f] !== b[f])) diff++;
+  }
 }
-eq(diff, 0, "300판 전부 같다");
+eq(diff, 0, "300판 전부 같다 (시간 안 점수도)");
+
+console.log("\n시간 초과");
+const evO = [{ t: 0, k: "go", q: 1 }, { t: 100, k: "ans", q: 1, v: "3" }, { t: 200, k: "ans", q: 2, v: "12" },
+             { t: 3100, k: "ans", q: 1, v: "4" }, { t: 3200, k: "ans", q: 3, v: "✓" }, { t: 3300, k: "ans", q: 2, v: null }];
+eq(S.answersAt(evO, 3000), { 1: "3", 2: "12" }, "시간 끝(3000초) 순간의 답으로 되감는다");
+eq(S.answersAt(evO, 3250), { 1: "4", 2: "12", 3: "✓" }, "지운 답(v:null)은 그 뒤에야 지워진다");
+const qo = [
+  { n: 1, type: "mc", auto: true, late: true, autoIn: false },    // 시간 뒤에 고쳐서 맞힘
+  { n: 2, type: "short", auto: true },                            // 시간 안에 맞힘
+  { n: 3, type: "essay", auto: null, late: true, autoIn: false }, // 시간 뒤에 다 풂
+];
+eq(S.tally(qo, {}, true).correct, 1, "시간 안: 시간 뒤에 고친 답은 안 친다");
+eq(S.tally(qo, {}).correct, 2, "끝까지: 시간 뒤에 고친 답도 친다");
+eq(S.tally(qo, { 3: true }, true).correct, 1, "시간 뒤에 푼 서술형은 O 로 바꿔도 시간 안 점수엔 안 들어간다");
+eq(S.tally(qo, { 3: true }).correct, 3, "끝까지 점수엔 들어간다");
+eq(S.tally(qo, { 2: false }, true).correct, 0, "시간 안에 적은 답의 O/X 고침은 시간 안 점수에 들어간다");
 
 // ── 시간 흐름 ──
 // 원형에서 확인한 흐름: 5번을 넘기고 20번까지 푼 뒤 5번으로 돌아온다
@@ -130,6 +150,8 @@ eq(S.checkExam({ ...base, questions: [{ n: 1, type: "mc", ans: 6 }] }), "1번 �
 eq(S.checkExam({ ...base, questions: [{ n: 1, type: "short", ans: ["", "1"] }] }), "1번 단답형 답이 없어요", "빈 단답 답은 거절");
 eq(S.checkExam({ ...base, id: "a/b" }), "id 가 이상해요: a/b", "id 에 / 는 안 된다 (문서 경로가 된다)");
 eq(S.checkExam({ ...base, id: "영동고-2025-1학기-중간" }), null, "한글 id 는 된다");
+eq(S.checkExam({ ...base, questions: [{ n: 1, type: "mc", ans: 3, label: "서술형1" }] }), null, "학교 번호(label)는 된다");
+eq(S.checkExam({ ...base, questions: [{ n: 1, type: "mc", ans: 3, label: "" }] }), "1번 이름(label)이 이상해요", "빈 label 은 거절");
 
 console.log(bad ? "\n실패 " + bad + "건" : "\n다 통과");
 process.exit(bad ? 1 : 0);

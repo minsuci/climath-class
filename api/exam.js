@@ -17,7 +17,10 @@ import { verifyIdToken, getDoc, patchDoc, listDocs, deleteDoc } from "./_google.
 
 const TOOLKEY_PATH = "team/tools";
 const LIST_PATH = "appConfig/examList";
-const MAX_EV = 3000;          // 50분에 문항 25개면 넉넉히 몇 백. 이보다 많으면 무언가 잘못된 것
+const MAX_EV = 3000;
+// 시간이 끝나도 바로 걷지 않는다 — 더 풀게 두고, 시간 뒤에 적은 답은 따로 채점한다(«시간 초과»).
+// 끝없이 열려 있지 않게 이만큼 지나면 그때 저절로 낸다
+const OVER_MAX = 30 * 60;          // 50분에 문항 25개면 넉넉히 몇 백. 이보다 많으면 무언가 잘못된 것
 
 async function toolOk(k) {
   if (!k) return false;
@@ -49,8 +52,9 @@ function autoCorrect(q, mine) {
 }
 // 점수는 **100점 기준**으로 낸다. 점수 칸의 다른 줄(학생이 «17/22» 로 적는 것)이
 // round(맞은/전체×100) 이라, 같은 날 반 평균에 섞여도 뜻이 맞아야 한다.
-function tally(qs, override) {
-  const ok = (q) => (override && q.n in override ? override[q.n] : q.auto);
+// inTime: 시간 안 점수 — 시간이 끝난 뒤 답이 바뀐 문항(late)은 끝난 순간의 답(autoIn)으로 센다
+function tally(qs, override, inTime) {
+  const ok = (q) => (inTime && q.late ? q.autoIn : override && q.n in override ? override[q.n] : q.auto);
   const hasPt = qs.every((q) => typeof q.pt === "number" && q.pt > 0);
   const totalPt = hasPt ? qs.reduce((a, q) => a + q.pt, 0) : qs.length;
   const got = qs.reduce((a, q) => a + (ok(q) ? (hasPt ? q.pt : 1) : 0), 0);
@@ -60,6 +64,16 @@ function tally(qs, override) {
     pending: qs.filter((q) => ok(q) === null).length,
     score: totalPt > 0 ? Math.round((got / totalPt) * 100) : 0,
   };
+}
+
+// 시간 흐름(ev)을 limit 초까지 되감아 그때의 답을 낸다. 기기가 보낸 답(answers)은 «끝까지» 의 답이다
+function answersAt(ev, limit) {
+  const a = {};
+  for (const e of ev || []) {
+    if (e.k !== "ans" || !(e.t <= limit)) continue;
+    if (e.v == null || e.v === "") delete a[e.q]; else a[e.q] = e.v;
+  }
+  return a;
 }
 
 // 서버는 UTC 로 돈다. 수업 날짜는 한국 날짜여야 한다 — 밤 9시 시험이 «다음 날» 로 가면 안 된다
@@ -84,6 +98,7 @@ function checkExam(e) {
       if (!ks.length || ks.some((k) => !String(k == null ? "" : k).trim())) return q.n + "번 단답형 답이 없어요";
     }
     if (q.pt != null && !(typeof q.pt === "number" && q.pt > 0)) return q.n + "번 배점이 이상해요";
+    if (q.label != null && !(typeof q.label === "string" && q.label.trim() && q.label.length <= 16)) return q.n + "번 이름(label)이 이상해요";
   }
   return null;
 }
@@ -94,7 +109,8 @@ async function rebuildList() {
   const exams = all.map((e) => ({
     id: e.id, title: e.title, minutes: e.minutes,
     cids: e.cids || [], sids: e.sids || [], test: !!e.test, order: e.order || 0,
-    questions: (e.questions || []).map((q) => ({ n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}) })),
+    questions: (e.questions || []).map((q) => ({ n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}),
+                                                 ...(q.label ? { label: q.label } : {}) })),
   })).sort((a, b) => (a.order - b.order) || String(a.title).localeCompare(String(b.title), "ko"));
   await patchDoc(LIST_PATH, { exams, updated: Date.now() });
   return exams.length;
@@ -134,16 +150,25 @@ async function submit(res, claims, b) {
     ...(e.k === "ans" ? { v: e.v == null ? null : String(e.v).slice(0, 20) } : {}),
   })) : [];
   const limitSec = Math.max(60, Math.min(6 * 3600, Number(b.limitSec) || key.minutes * 60));
-  const endT = Math.max(0, Math.min(limitSec, Number(b.endT) || 0));
+  const endT = Math.max(0, Math.min(limitSec + OVER_MAX, Number(b.endT) || 0));
   const startedAt = Number(b.startedAt) || Date.now();
+  const overSec = Math.max(0, Math.round((endT - limitSec) * 10) / 10);
+  const inAns = overSec > 0 ? answersAt(ev, limitSec) : null;
 
+  const norm = (q, raw) => (raw == null || raw === "" ? null : (q.type === "mc" ? Number(raw) : String(raw).slice(0, 20)));
   const qs = key.questions.map((q) => {
-    const raw = answers[q.n];
-    const mine = raw == null || raw === "" ? null : (q.type === "mc" ? Number(raw) : String(raw).slice(0, 20));
-    return { n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}),
-             key: q.type === "essay" ? null : q.ans, answer: mine, auto: autoCorrect(q, mine) };
+    const mine = norm(q, answers[q.n]);
+    const row = { n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}), ...(q.label ? { label: q.label } : {}),
+                  key: q.type === "essay" ? null : q.ans, answer: mine, auto: autoCorrect(q, mine) };
+    // 시간이 끝난 뒤 답이 바뀌었으면 끝난 순간의 답을 따로 둔다. 그때 비어 있었으면 시간 안에는 틀림
+    if (inAns) {
+      const was = norm(q, inAns[q.n]);
+      if (String(was) !== String(mine)) Object.assign(row, { late: true, answerIn: was, autoIn: was == null ? false : autoCorrect(q, was) });
+    }
+    return row;
   });
-  const t = tally(qs, {});
+  const tAll = tally(qs, {});
+  const t = overSec > 0 ? tally(qs, {}, true) : tAll;   // 공식 점수는 **시간 안** — 학교 시험과 같은 조건
   const date = kstDate(startedAt);
   const now = Date.now();
   const log = {
@@ -151,6 +176,7 @@ async function submit(res, claims, b) {
     limitSec, endT, startedAt, reason: b.reason === "time" ? "time" : "submit",
     date, questions: qs, ev, override: {},
     score: t.score, got: t.got, totalPt: t.totalPt, correct: t.correct, n: t.n, pending: t.pending,
+    ...(overSec > 0 ? { overSec, all: { score: tAll.score, got: tAll.got, correct: tAll.correct, pending: tAll.pending } } : {}),
     teacher, time: now,
   };
   const base = "classes/" + cid + "/days/" + date;
@@ -204,6 +230,7 @@ export default async function handler(req, res) {
         await patchDoc("examKeys/" + e.id, {
           title: String(e.title).trim(), minutes: Number(e.minutes),
           questions: e.questions.map((q) => ({ n: q.n, type: q.type, ...(q.ans != null ? { ans: q.ans } : {}),
+                                               ...(q.label ? { label: String(q.label).trim() } : {}),
                                                ...(q.pt != null ? { pt: q.pt } : {}) })),
           cids: Array.isArray(e.cids) ? e.cids.map(String) : [], sids, names, test: !!e.test,
           order: Number(e.order) || 0, updated: Date.now(),
