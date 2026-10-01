@@ -2771,6 +2771,27 @@ async function mxLogs(cid, sid, maxDays) {
   }));
   return out.sort((a, b) => (b.time || 0) - (a.time || 0));
 }
+// 반 전체 점수표(엑셀로 열린다). 맨 앞 BOM 이 있어야 엑셀이 한글을 안 깨뜨린다
+function mxCsv(logs) {
+  const qs = (logs[0] && logs[0].questions) || [];
+  const cell = (v) => { const t = v == null ? "" : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const head = ["이름", "점수", "맞은 문제", "문항 수", "쓴 시간", "시간 초과", "시작"].concat(qs.map((q) => q.n + "번" + (q.label ? "(" + q.label + ")" : "")));
+  const rows = logs.map((l) => {
+    const ov = l.override || {};
+    return [l.name, l.score, l.correct, l.n, mxClock(l.endT || 0), l.overSec ? "+" + mxClock(l.overSec) : "", l.date + " " + hhmm(l.startedAt)]
+      .concat(l.questions.map((q) => {
+        const ok = q.n in ov ? ov[q.n] : q.auto;
+        const a = q.answer == null || q.answer === "" ? "–" : q.type === "mc" ? MX_CIRC[q.answer] || q.answer : q.answer;
+        return a + " " + (ok === null ? "?" : ok ? "O" : "X");
+      }));
+  });
+  return "\ufeff" + [head].concat(rows).map((r) => r.map(cell).join(",")).join("\r\n");
+}
+function mxDownloadText(name, text, type) {
+  const blob = new Blob([text], { type: type || "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name.replace(/[\\/:*?"<>|]/g, "_");
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
 function mxDownload(name, obj) {
   const blob = new Blob([JSON.stringify(obj, null, 1)], { type: "application/json" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name.replace(/[\\/:*?"<>|]/g, "_");
@@ -3418,6 +3439,7 @@ function MockExamLive({ cls }) {
 
 function MockExamBoard({ cls }) {
   const [logs, setLogs] = useState(null);
+  const [bulk, setBulk] = useState("");
   const [view, setView] = useState(null);
   const [again, setAgain] = useState(0);
   useEffect(() => {
@@ -3426,8 +3448,34 @@ function MockExamBoard({ cls }) {
     return () => { live = false; };
   }, [cls.id, again]);
   if (view) return <MockExamResult log={view} canMark canVoid canFix onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
+  // 한 번에 저장 — 같은 날 같은 시험지를 본 학생 전원. 취소한 제출 · 선생님 모드로 본 것은 뺀다
+  const groups = [];
+  (logs || []).forEach((l) => {
+    if (l.voided || l.teacher) return;
+    const k = l.date + "|" + l.examId;
+    let g = groups.find((x) => x.k === k);
+    if (!g) { g = { k, date: l.date, title: l.title, logs: [] }; groups.push(g); }
+    g.logs.push(l);
+  });
+  groups.forEach((g) => g.logs.sort((a, b) => String(a.name).localeCompare(String(b.name), "ko")));
+  const g0 = groups.find((g) => g.k === bulk) || groups[0];
+  const fileBase = g0 ? g0.date + "_" + cls.name + "_" + g0.title : "";
   return (<>
     <MockExamLive cls={cls} />
+    {g0 && (
+      <div className="cm-card">
+        <h3 className="cm-h3">반 전체 결과 한 번에 저장</h3>
+        <select className="cm-input" style={{margin: "0 0 10px"}} value={g0.k} onChange={(e) => setBulk(e.target.value)}>
+          {groups.map((g) => <option key={g.k} value={g.k}>{g.date.slice(5).replace("-", "/")} · {g.title} · {g.logs.length}명</option>)}
+        </select>
+        <div className="cm-hint" style={{marginBottom: 10}}>{g0.logs.map((l) => l.name + " " + l.score).join(" · ")}</div>
+        <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
+          <button className="cm-btn cm-btn-primary" onClick={() => mxDownloadText(fileBase + "_점수표.csv", mxCsv(g0.logs))}>점수표 (엑셀)</button>
+          <button className="cm-btn cm-btn-ghost" onClick={() => mxDownload(fileBase + "_결과 " + g0.logs.length + "명.json", g0.logs)}>결과 파일 (전원 한 파일)</button>
+        </div>
+        <div className="cm-hint" style={{marginTop: 8}}>점수표는 학생마다 한 줄 — 문항별로 «적은 답 O/X». 결과 파일은 학생 한 명씩 «결과 파일로 저장» 한 것을 모두 모은 것(분석용). 취소한 제출과 선생님 모드로 본 것은 빠져요.</div>
+      </div>
+    )}
     <div className="cm-card">
       <h3 className="cm-h3">실전 시험 결과 <span className="cm-h-hint">(최근 90일)</span></h3>
       {logs === null ? <div className="cm-empty">불러오는 중…</div>
