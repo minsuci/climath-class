@@ -76,6 +76,18 @@ function answersAt(ev, limit) {
   return a;
 }
 
+// 답 고정(lock) 시험 — 문항마다 **처음 적은 답**만 남긴다. 기기에서 막아 두었지만
+// 저장된 기록(localStorage)을 고쳐 보내도 바뀐 답은 안 받는다. 지운 기록(v=null)도 안 받는다
+function firstAnswers(ev) {
+  const seen = {}, out = [];
+  for (const e of ev || []) {
+    if (e.k !== "ans") { out.push(e); continue; }
+    if (e.v == null || e.v === "" || seen[e.q]) continue;
+    seen[e.q] = 1; out.push(e);
+  }
+  return out;
+}
+
 // 서버는 UTC 로 돈다. 수업 날짜는 한국 날짜여야 한다 — 밤 9시 시험이 «다음 날» 로 가면 안 된다
 const kstDate = (ms) => new Date(Number(ms) + 9 * 3600e3).toISOString().slice(0, 10);
 
@@ -100,6 +112,7 @@ function checkExam(e) {
     if (q.pt != null && !(typeof q.pt === "number" && q.pt > 0)) return q.n + "번 배점이 이상해요";
     if (q.label != null && !(typeof q.label === "string" && q.label.trim() && q.label.length <= 16)) return q.n + "번 이름(label)이 이상해요";
   }
+  if (e.lock != null && typeof e.lock !== "boolean") return "lock 은 true/false";
   return null;
 }
 
@@ -108,7 +121,7 @@ async function rebuildList() {
   const all = await listDocs("examKeys").catch(() => []);
   const exams = all.map((e) => ({
     id: e.id, title: e.title, minutes: e.minutes,
-    cids: e.cids || [], sids: e.sids || [], test: !!e.test, order: e.order || 0,
+    cids: e.cids || [], sids: e.sids || [], test: !!e.test, lock: !!e.lock, order: e.order || 0,
     questions: (e.questions || []).map((q) => ({ n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}),
                                                  ...(q.label ? { label: q.label } : {}) })),
   })).sort((a, b) => (a.order - b.order) || String(a.title).localeCompare(String(b.title), "ko"));
@@ -144,11 +157,18 @@ async function submit(res, claims, b) {
   const key = await getDoc("examKeys/" + examId).catch(() => null);
   if (!key) { res.status(404).json({ error: "그 시험지가 없어요 (지워졌을 수 있어요)" }); return; }
 
-  const answers = b.answers && typeof b.answers === "object" ? b.answers : {};
-  const ev = Array.isArray(b.ev) ? b.ev.slice(0, MAX_EV).map((e) => ({
+  let answers = b.answers && typeof b.answers === "object" ? b.answers : {};
+  let ev = Array.isArray(b.ev) ? b.ev.slice(0, MAX_EV).map((e) => ({
     t: Number(e.t) || 0, k: e.k === "ans" ? "ans" : "go", q: Number(e.q) || 0,
     ...(e.k === "ans" ? { v: e.v == null ? null : String(e.v).slice(0, 20) } : {}),
   })) : [];
+  // 답 고정 시험: 학생 답은 시간 흐름의 **첫 답**으로만 채점한다 (선생님 모드는 그대로)
+  const lock = !!key.lock && !teacher;
+  if (lock) {
+    ev = firstAnswers(ev);
+    answers = {};
+    ev.forEach((e) => { if (e.k === "ans") answers[e.q] = e.v; });
+  }
   const limitSec = Math.max(60, Math.min(6 * 3600, Number(b.limitSec) || key.minutes * 60));
   const endT = Math.max(0, Math.min(limitSec + OVER_MAX, Number(b.endT) || 0));
   const startedAt = Number(b.startedAt) || Date.now();
@@ -174,7 +194,7 @@ async function submit(res, claims, b) {
   const log = {
     rid, cid, sid, name, examId, title: key.title, minutes: key.minutes,
     limitSec, endT, startedAt, reason: b.reason === "time" ? "time" : "submit",
-    date, questions: qs, ev, override: {},
+    date, questions: qs, ev, override: {}, ...(key.lock ? { lock: true } : {}),
     score: t.score, got: t.got, totalPt: t.totalPt, correct: t.correct, n: t.n, pending: t.pending,
     ...(overSec > 0 ? { overSec, all: { score: tAll.score, got: tAll.got, correct: tAll.correct, pending: tAll.pending } } : {}),
     teacher, time: now,
@@ -193,6 +213,43 @@ async function submit(res, claims, b) {
     });
   }
   res.status(200).json({ ok: true, log });
+}
+
+// ───────────── 선생님이 답을 고친다 ─────────────
+// 답 고정 시험에서 학생이 잘못 누른 답을 선생님이 바꾼다. 정답은 여기(서버)에만 있으니
+// 다시 채점도 여기서 한다. 고친 흔적(fixed)을 문항에 남기고, 그 문항의 O/X 고침(override)은 푼다.
+async function fixAnswer(res, claims, b) {
+  if (!(claims.role === "teacher" || claims.role === "owner")) { res.status(403).json({ error: "선생님만 답을 고칠 수 있어요" }); return; }
+  const cid = String(b.cid || ""), date = String(b.date || ""), rid = String(b.rid || ""), n = Number(b.n);
+  if (!cid || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^[A-Za-z0-9_-]{6,40}$/.test(rid) || !Number.isInteger(n)) {
+    res.status(400).json({ error: "빠진 값이 있어요" }); return;
+  }
+  const path = "classes/" + cid + "/days/" + date + "/examLogs/" + rid;
+  const log = await getDoc(path).catch(() => null);
+  if (!log) { res.status(404).json({ error: "그 기록이 없어요" }); return; }
+  const key = await getDoc("examKeys/" + log.examId).catch(() => null);
+  const kq = key && (key.questions || []).find((q) => q.n === n);
+  const i = (log.questions || []).findIndex((q) => q.n === n);
+  if (!kq || i < 0) { res.status(404).json({ error: n + "번 정답을 찾지 못했어요" }); return; }
+  const raw = b.value == null ? "" : String(b.value).trim().slice(0, 20);
+  const mine = raw === "" ? null : (kq.type === "mc" ? Number(raw) : raw);
+  if (kq.type === "mc" && mine != null && !(Number.isInteger(mine) && mine >= 1 && mine <= 5)) { res.status(400).json({ error: "객관식은 1~5" }); return; }
+  const old = log.questions[i];
+  const who = claims.tid ? await getDoc("teachers/" + claims.tid).catch(() => null) : null;
+  const { late: _l, answerIn: _a, autoIn: _x, ...rest } = old;   // 선생님이 정한 답은 시간 안 답으로 본다
+  const row = { ...rest, answer: mine, auto: autoCorrect(kq, mine),
+                fixed: { from: old.answer == null ? null : old.answer, by: (who && who.name) || claims.tid || claims.role, at: Date.now() } };
+  const questions = log.questions.map((q, k) => (k === i ? row : q));
+  const override = { ...(log.override || {}) }; delete override[n];
+  const tAll = tally(questions, override);
+  const t = log.overSec > 0 ? tally(questions, override, true) : tAll;
+  const patch = { questions, override, score: t.score, got: t.got, correct: t.correct, pending: t.pending,
+                  ...(log.overSec > 0 ? { all: { score: tAll.score, got: tAll.got, correct: tAll.correct, pending: tAll.pending } } : {}) };
+  await patchDoc(path, patch);
+  if (!log.teacher && !log.voided) {
+    await patchDoc("classes/" + cid + "/days/" + date + "/scores/" + rid, { score: t.score, correct: t.correct }).catch(() => {});
+  }
+  res.status(200).json({ ok: true, log: { ...log, ...patch } });
 }
 
 // ───────────── 핸들러 ─────────────
@@ -232,7 +289,7 @@ export default async function handler(req, res) {
           questions: e.questions.map((q) => ({ n: q.n, type: q.type, ...(q.ans != null ? { ans: q.ans } : {}),
                                                ...(q.label ? { label: String(q.label).trim() } : {}),
                                                ...(q.pt != null ? { pt: q.pt } : {}) })),
-          cids: Array.isArray(e.cids) ? e.cids.map(String) : [], sids, names, test: !!e.test,
+          cids: Array.isArray(e.cids) ? e.cids.map(String) : [], sids, names, test: !!e.test, lock: !!e.lock,
           order: Number(e.order) || 0, updated: Date.now(),
         });
         const n = await rebuildList();
@@ -274,6 +331,7 @@ export default async function handler(req, res) {
     const claims = await verifyIdToken(body.idToken);
     if (!claims) { res.status(403).json({ error: "로그인이 풀렸어요. 다시 들어와 주세요." }); return; }
     if (body.action === "submit") return await submit(res, claims, body);
+    if (body.action === "fix") return await fixAnswer(res, claims, body);
     res.status(400).json({ error: "그런 동작이 없어요" });
   } catch (e) {
     console.error("[exam]", e);

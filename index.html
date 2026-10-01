@@ -194,6 +194,9 @@ html,body{margin:0; padding:0;}
 .mx-clock.over{color:#ff8a7a;}
 .mx-lb{display:inline-block; vertical-align:middle; margin-left:10px; font-family:'Noto Sans KR',sans-serif; font-size:17px; font-weight:800; color:#fff; background:var(--navy); border-radius:8px; padding:3px 10px; line-height:1.3;}
 .mx-overnote{margin:10px 0 4px; padding:9px 12px; border-radius:10px; background:#fdecec; color:#7a1f18; font-size:14px; line-height:1.55;}
+.mx-locknote{margin:14px 0 4px; padding:10px 12px; border-radius:10px; background:#fff4dc; color:#6b4a00; font-size:14px; line-height:1.55; text-align:center;}
+.mx-choice:disabled{opacity:.28;}
+.mx-fixtag{display:block; font-size:10.5px; color:#8a5a00; font-weight:700;}
 .mx-chip u{display:block; text-decoration:none; font-size:10.5px; font-weight:800; color:var(--navy); line-height:1; margin-bottom:1px;}
 .mx-qno small{display:block; font-size:10.5px; font-weight:700; color:var(--muted); line-height:1.1;}
 .mx-latetag{font-size:11px; font-weight:700; color:#b3261e; white-space:nowrap;}
@@ -2796,6 +2799,10 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
   const [err, setErr] = useState("");
   const [, setTick] = useState(0);
   const busy = useRef(false);
+  // 답 고정 시험 — 한 번 적은 답은 학생이 못 바꾼다(선생님이 결과 화면에서 고친다).
+  // 객관식은 잘못 누르기 쉬워서 «고르기 → 답 적기» 두 번으로 받는다. 선생님 모드는 고정하지 않는다
+  const locked = !!(S && S.lock) && !me.teacher;
+  const [pend, setPend] = useState(null);
 
   function put(next) { sRef.current = next; mxSave(K, next); setS(next); live(next); }
   const nowT = (x) => Math.round((Date.now() - x.startedAt) / 100) / 10;
@@ -2825,10 +2832,13 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
     const q = x.questions.find((y) => y.n === n); if (!q) return;
     put({ ...x, cur: n, ev: [...x.ev, { t: nowT(x), k: "go", q: n }] });
     setBuf(q.type === "short" && mxAnswered(x, n) ? String(x.answers[n]) : "");
+    setPend(null);
   }
   function setAnswer(n, v) {
     if (busy.current) return;
     let x = sRef.current; if (!x || x.endT != null) return;
+    if (locked && mxAnswered(x, n)) return;   // 고정 — 이미 적은 답은 그대로
+    setPend(null);
     if (x.answers[n] !== v) {       // 같은 답을 다시 누르면 기록하지 않고 넘어가기만
       x = { ...x, answers: { ...x.answers, [n]: v }, ev: [...x.ev, { t: nowT(x), k: "ans", q: n, v }] };
       put(x);
@@ -2845,7 +2855,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
     }, 380);
   }
   function clearAnswer(n) {
-    const x = sRef.current; if (!x || x.endT != null || !mxAnswered(x, n)) return;
+    const x = sRef.current; if (!x || x.endT != null || !mxAnswered(x, n) || locked) return;
     const a = { ...x.answers }; delete a[n];
     put({ ...x, answers: a, ev: [...x.ev, { t: nowT(x), k: "ans", q: n, v: null }] });
     setBuf("");
@@ -2917,11 +2927,29 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
   const early = !frozen && nowT(S) < 120 && S.ev.every((e) => e.k === "go");
   // 넘어가는 0.4초 동안은 번호판을 안 받는다. 받으면 숫자는 들어가는데 «답 적기» 는
   // 막혀 있어서, 다음 문제 칸에 앞 문제에서 친 숫자가 붙어 있게 된다 (-3 뒤에 0.5 → «-30.5»)
-  const padKey = (k) => { if (busy.current) return; setBuf((b) => (k === "⌫" ? b.slice(0, -1) : k === "C" ? "" : b.length < 12 ? b + k : b)); };
+  const fixedHere = locked && mxAnswered(S, q.n);   // 이 문항은 이미 답이 고정됐다
+  const padKey = (k) => { if (busy.current || fixedHere) return; setBuf((b) => (k === "⌫" ? b.slice(0, -1) : k === "C" ? "" : b.length < 12 ? b + k : b)); };
   const padOk = () => { const v = bufRef.current.trim(); if (!v) clearAnswer(q.n); else setAnswer(q.n, v); };
 
+  const lockNote = fixedHere && <div className="mx-locknote">답이 적혔어요. 이 시험은 답을 바꿀 수 없어요 — 잘못 적었으면 <b>선생님께</b> 말해요.</div>;
   let body;
-  if (q.type === "mc") {
+  if (q.type === "mc" && locked) {
+    body = (<>
+      <div className="mx-choices">
+        {[1, 2, 3, 4, 5].map((c) => (
+          <button key={c} disabled={fixedHere && Number(mine) !== c}
+            className={"mx-choice" + ((fixedHere ? Number(mine) === c : pend === c) ? " on" : "")}
+            onClick={() => { if (!fixedHere && !busy.current) setPend(c); }}>{MX_CIRC[c]}</button>
+        ))}
+      </div>
+      {fixedHere ? lockNote : (
+        <div style={{display: "flex", justifyContent: "center", marginTop: 14}}>
+          <button className="mx-btn primary big" disabled={pend == null} onClick={() => pend != null && setAnswer(q.n, pend)}>
+            {pend == null ? "답을 골라요" : MX_CIRC[pend] + " 로 답 적기"}</button>
+        </div>
+      )}
+    </>);
+  } else if (q.type === "mc") {
     body = (
       <div className="mx-choices">
         {[1, 2, 3, 4, 5].map((c) => (
@@ -2932,12 +2960,14 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
   } else if (q.type === "short") {
     body = (<>
       <div className={"mx-disp" + (mxAnswered(S, q.n) && buf === String(mine) ? " saved" : "")}>{buf || "\u00a0"}</div>
+      {fixedHere ? lockNote : (
       <div className="mx-pad">
         {["7", "8", "9", "-", "⌫", "4", "5", "6", "/", "C", "1", "2", "3", ".", "0"].map((k) => (
           <button key={k} onClick={() => padKey(k)}>{k}</button>
         ))}
         <button className="ok" onClick={padOk}>답 적기</button>
       </div>
+      )}
     </>);
   } else {
     body = (
@@ -2966,7 +2996,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
           {allDone && <div className="mx-note">모든 문제에 답했어요. 검토할 번호를 눌러 보거나 제출하세요.</div>}
           <div className="mx-foot">
             <button className="mx-btn" disabled={!prev} onClick={() => prev && go(prev.n)}>◀ 이전</button>
-            {mxAnswered(S, q.n) && <button className="mx-btn" onClick={() => clearAnswer(q.n)}>답 지우기</button>}
+            {mxAnswered(S, q.n) && !locked && <button className="mx-btn" onClick={() => clearAnswer(q.n)}>답 지우기</button>}
             <span style={{flex: 1}} />
             <button className="mx-btn" disabled={!next} onClick={() => next && go(next.n)}>넘기기 ▶</button>
           </div>
@@ -3020,7 +3050,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
   );
 }
 
-function MockExamResult({ log, canMark, canVoid, onBack }) {
+function MockExamResult({ log, canMark, canVoid, canFix, onBack }) {
   const [L, setL] = useState(log);
   const [saving, setSaving] = useState(false);
   useEffect(() => { setL(log); }, [log]);
@@ -3108,6 +3138,30 @@ function MockExamResult({ log, canMark, canVoid, onBack }) {
     setSaving(false);
   }
 
+  // 선생님이 학생 답을 바꾼다 — 정답은 서버에만 있으니 다시 채점도 서버가 한다 (api/exam.js fix)
+  async function fixAns(n) {
+    if (!canFix || saving || L.voided) return;
+    const q = L.questions.find((x) => x.n === n);
+    const cur = q.answer == null ? "" : String(q.answer);
+    const v = window.prompt(L.name + " · " + mxQName(q) + " 답 고치기\n" + (q.type === "mc" ? "객관식 번호 1~5" : "숫자") + " (비우면 «안 씀»)", cur);
+    if (v == null || v.trim() === cur) return;
+    setSaving(true);
+    try {
+      const u = firebase.auth().currentUser;
+      if (!u) throw new Error("로그인이 풀렸어요");
+      const r = await fetch("/api/exam", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken: await u.getIdToken(), action: "fix", cid: L.cid, date: L.date, rid: L.rid, n, value: v.trim() }),
+      });
+      let j = null; try { j = await r.json(); } catch (e) {}
+      if (!r.ok) throw new Error((j && j.error) || "고치지 못했어요 (" + r.status + ")");
+      setL(j.log);
+    } catch (e) {
+      alert("저장하지 못했어요: " + e.message);
+    }
+    setSaving(false);
+  }
+
   const kind = (r) => (r.ok === null ? "q" : r.ok ? "o" : (r.q.answer == null || r.q.answer === "") ? "u" : "x");
   const kindOf = {}; A.rows.forEach((r) => { kindOf[r.q.n] = kind(r); });
   const step = T > 1800 ? 600 : 300, ticks = [];
@@ -3181,6 +3235,8 @@ function MockExamResult({ log, canMark, canVoid, onBack }) {
                 <tr key={r.q.n}>
                   <td><button className="mx-qno" onClick={() => openQ(r.q.n)} title="문제 보기">{r.q.n}{r.q.label ? <small>{r.q.label}</small> : null}</button></td>
                   <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{shown(r.q, r.q.answer)}
+                    {r.q.fixed ? <span className="mx-fixtag" title={"고친 선생님: " + (r.q.fixed.by || "")}>선생님 고침 · 원래 {shown(r.q, r.q.fixed.from)}</span> : null}
+                    {canFix && !L.voided ? <button className="cm-link" style={{display: "block", fontSize: 11, margin: "2px auto 0"}} disabled={saving} onClick={() => fixAns(r.q.n)}>답 고치기</button> : null}
                     {r.q.late ? <div className="mx-latetag" title="시간이 끝난 뒤에 적거나 바꾼 답">시간 뒤{r.q.answerIn != null ? " · 그때 " + shown(r.q, r.q.answerIn) : ""}</div> : null}</td>
                   <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{keyShown(r.q)}</td>
                   <td>{canMark
@@ -3196,7 +3252,7 @@ function MockExamResult({ log, canMark, canVoid, onBack }) {
         </table>
       </div>
       <div className="cm-hint" style={{marginTop: 8}}>
-        번호를 누르면 그 문제를 볼 수 있어요. {canMark ? "O/X 는 눌러서 고칠 수 있어요. " : ""}붉은 시간은 한 문제 평균({mxHm(avg)})의 두 배를 넘은 것.
+        번호를 누르면 그 문제를 볼 수 있어요. {canMark ? "O/X 는 눌러서 고칠 수 있어요. " : ""}{canFix ? "«답 고치기» 는 학생 답을 바꾸고 다시 채점해요. " : ""}{L.lock && !canFix ? "이 시험은 선생님만 답을 고칠 수 있어요. " : ""}붉은 시간은 한 문제 평균({mxHm(avg)})의 두 배를 넘은 것.
       </div>
       <div style={{display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12}}>
         {canVoid && !L.voided && <button className="cm-btn cm-btn-ghost mx-voidbtn" disabled={saving} onClick={() => setVoided(true)}>이 제출 취소</button>}
@@ -3277,7 +3333,7 @@ function MockExamTab({ cls, me }) {
     const first = e.questions[0].n;
     mxSave(K, {
       rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
-      examId: e.id, title: e.title, questions: e.questions,
+      examId: e.id, title: e.title, questions: e.questions, ...(e.lock ? { lock: true } : {}),
       limitSec: Math.round(m * 60), startedAt: Date.now(),
       ev: [{ t: 0, k: "go", q: first }], answers: {}, cur: first,
     });
@@ -3289,7 +3345,8 @@ function MockExamTab({ cls, me }) {
       onDone={(log) => { setRunning(false); setView(log); setAgain((x) => x + 1); }}
       onAbandon={() => setRunning(false)} />;
   }
-  if (view) return <MockExamResult log={view} canMark onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
+  if (view) return <MockExamResult log={view} canMark={!view.lock || !!me.teacher} canFix={!!me.teacher}
+    onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
 
   return (<>
     <div className="cm-card">
@@ -3305,6 +3362,10 @@ function MockExamTab({ cls, me }) {
           <label className="cm-label">제한 시간(분)</label>
           <input className="cm-input" style={{margin: 0, maxWidth: 120}} inputMode="numeric" value={mins}
             onChange={(e) => setMins(e.target.value.replace(/\D/g, ""))} />
+          {(exams.find((x) => x.id === pick) || {}).lock && !me.teacher && (
+            <div className="mx-locknote" style={{textAlign: "left"}}>이 시험은 <b>한 번 적은 답을 바꿀 수 없어요.</b> 객관식은 번호를 고른 뒤 «답 적기» 를 눌러야 적혀요.
+              잘못 적었으면 선생님께 말해요 — 선생님만 고칠 수 있어요.</div>
+          )}
           <div className="mx-note">풀고 있는 문제 번호를 눌러 두고 풀어요. 답을 고르면 다음 문제로 저절로 넘어가요.<br />
             연습장 말고 <b>시험지 여백에</b> 풀고, 틀린 풀이는 <b>지우지 말고 줄만 그어요.</b></div>
           <button className="cm-btn cm-btn-primary" disabled={!(Number(mins) > 0)} onClick={start}>시작</button>
@@ -3392,7 +3453,7 @@ function MockExamBoard({ cls }) {
     mxLogs(cls.id, null, 90).then((a) => { if (live) setLogs(a); }).catch(() => { if (live) setLogs([]); });
     return () => { live = false; };
   }, [cls.id, again]);
-  if (view) return <MockExamResult log={view} canMark canVoid onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
+  if (view) return <MockExamResult log={view} canMark canVoid canFix onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
   return (<>
     <MockExamLive cls={cls} />
     <div className="cm-card">

@@ -13,6 +13,7 @@
 //     cids?: [반ID…]  (없으면 모든 반)
 //     names?: [학생 이름…]  (그 학생만 본다. cids 필요. 명단 표기 그대로 — 동명이인은 A·B·C 까지)
 //     test?: true      (선생님 모드에서만 보인다 — 올려서 확인할 때)
+//     lock?: true      (답 고정 — 학생은 한 번 적은 답을 못 바꾼다. 선생님이 결과 화면 «답 고치기» 로 고친다)
 //     order?: 숫자     (목록 순서) }
 //
 // 열쇠는 tools/lesson-key.json (강의노트 도구와 같은 것). 저장소에 안 들어간다.
@@ -59,7 +60,7 @@ function summary(e) {
   const pt = qs.every((q) => typeof q.pt === "number") ? qs.reduce((a, q) => a + q.pt, 0) : null;
   return `${e.id}  「${e.title}」 ${e.minutes}분 · ${qs.length}문항 (객관식 ${kind("mc")} · 단답 ${kind("short")} · 서술 ${kind("essay")})`
     + (pt != null ? ` · 배점합 ${Math.round(pt * 10) / 10}` : " · 배점 없음(개수로 셈)")
-    + (e.test ? "  [시험용 — 선생님만]" : "") + ((e.cids || []).length ? `  [반 ${e.cids.length}곳만]` : "")
+    + (e.test ? "  [시험용 — 선생님만]" : "") + (e.lock ? "  [답 고정 — 선생님만 고침]" : "") + ((e.cids || []).length ? `  [반 ${e.cids.length}곳만]` : "")
     + ((e.names || []).length ? `  [학생: ${e.names.join(", ")}]` : "");
 }
 

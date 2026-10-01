@@ -23,8 +23,8 @@ const line = (src, name) => {
 
 const S = new Function([
   fn(SERVER, "numVal"), fn(SERVER, "sameShort"), fn(SERVER, "autoCorrect"),
-  fn(SERVER, "tally"), line(SERVER, "kstDate"), fn(SERVER, "checkExam"), fn(SERVER, "answersAt"),
-  "return { numVal, sameShort, autoCorrect, tally, kstDate, checkExam, answersAt };",
+  fn(SERVER, "tally"), line(SERVER, "kstDate"), fn(SERVER, "checkExam"), fn(SERVER, "answersAt"), fn(SERVER, "firstAnswers"),
+  "return { numVal, sameShort, autoCorrect, tally, kstDate, checkExam, answersAt, firstAnswers };",
 ].join("\n"))();
 const C = new Function([
   line(APP, "mxAnswered"), fn(APP, "mxSegments"), fn(APP, "mxTally"),
@@ -152,6 +152,18 @@ eq(S.checkExam({ ...base, id: "a/b" }), "id 가 이상해요: a/b", "id 에 / �
 eq(S.checkExam({ ...base, id: "영동고-2025-1학기-중간" }), null, "한글 id 는 된다");
 eq(S.checkExam({ ...base, questions: [{ n: 1, type: "mc", ans: 3, label: "서술형1" }] }), null, "학교 번호(label)는 된다");
 eq(S.checkExam({ ...base, questions: [{ n: 1, type: "mc", ans: 3, label: "" }] }), "1번 이름(label)이 이상해요", "빈 label 은 거절");
+
+eq(S.checkExam({ ...base, lock: true }), null, "답 고정(lock: true)은 된다");
+eq(S.checkExam({ ...base, lock: "yes" }), "lock 은 true/false", "lock 에 글자는 거절");
+
+// ── 답 고정 ──
+console.log("\n답 고정 (처음 적은 답만)");
+const evL = [{ t: 0, k: "go", q: 1 }, { t: 5, k: "ans", q: 1, v: "3" }, { t: 9, k: "ans", q: 1, v: "4" },
+             { t: 10, k: "go", q: 2 }, { t: 12, k: "ans", q: 2, v: null }, { t: 15, k: "ans", q: 2, v: "7" }, { t: 20, k: "ans", q: 2, v: null }];
+const fa = S.firstAnswers(evL);
+eq(fa.filter((e) => e.k === "ans").map((e) => [e.q, e.v]), [[1, "3"], [2, "7"]], "바꾼 답·지운 답은 버리고 첫 답만");
+eq(fa.filter((e) => e.k === "go").length, 2, "번호 이동(go)은 그대로 — 시간 계산이 안 바뀐다");
+eq(S.answersAt(fa, 13), { 1: "3" }, "시간 안 답도 첫 답 기준");
 
 console.log(bad ? "\n실패 " + bad + "건" : "\n다 통과");
 process.exit(bad ? 1 : 0);
