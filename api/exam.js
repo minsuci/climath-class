@@ -13,6 +13,9 @@
 //                                              손대지 않아도 이걸 받아 간다
 //
 // 도구 열쇠(team/tools.lessonKey)로 시험지를 넣고 뺀다 — tools/exam-push.py
+//
+// 답 고정(lock) — 푸는 동안은 자유롭게 고치고, **제출한 뒤에는** 학생이 결과(O/X)를 못 고친다.
+//   고치는 건 선생님만: 결과 화면 O/X 고침 · «답 고치기»(action "fix", 여기서 다시 채점)
 import { verifyIdToken, getDoc, patchDoc, listDocs, deleteDoc } from "./_google.js";
 
 const TOOLKEY_PATH = "team/tools";
@@ -74,18 +77,6 @@ function answersAt(ev, limit) {
     if (e.v == null || e.v === "") delete a[e.q]; else a[e.q] = e.v;
   }
   return a;
-}
-
-// 답 고정(lock) 시험 — 문항마다 **처음 적은 답**만 남긴다. 기기에서 막아 두었지만
-// 저장된 기록(localStorage)을 고쳐 보내도 바뀐 답은 안 받는다. 지운 기록(v=null)도 안 받는다
-function firstAnswers(ev) {
-  const seen = {}, out = [];
-  for (const e of ev || []) {
-    if (e.k !== "ans") { out.push(e); continue; }
-    if (e.v == null || e.v === "" || seen[e.q]) continue;
-    seen[e.q] = 1; out.push(e);
-  }
-  return out;
 }
 
 // 서버는 UTC 로 돈다. 수업 날짜는 한국 날짜여야 한다 — 밤 9시 시험이 «다음 날» 로 가면 안 된다
@@ -157,18 +148,11 @@ async function submit(res, claims, b) {
   const key = await getDoc("examKeys/" + examId).catch(() => null);
   if (!key) { res.status(404).json({ error: "그 시험지가 없어요 (지워졌을 수 있어요)" }); return; }
 
-  let answers = b.answers && typeof b.answers === "object" ? b.answers : {};
-  let ev = Array.isArray(b.ev) ? b.ev.slice(0, MAX_EV).map((e) => ({
+  const answers = b.answers && typeof b.answers === "object" ? b.answers : {};
+  const ev = Array.isArray(b.ev) ? b.ev.slice(0, MAX_EV).map((e) => ({
     t: Number(e.t) || 0, k: e.k === "ans" ? "ans" : "go", q: Number(e.q) || 0,
     ...(e.k === "ans" ? { v: e.v == null ? null : String(e.v).slice(0, 20) } : {}),
   })) : [];
-  // 답 고정 시험: 학생 답은 시간 흐름의 **첫 답**으로만 채점한다 (선생님 모드는 그대로)
-  const lock = !!key.lock && !teacher;
-  if (lock) {
-    ev = firstAnswers(ev);
-    answers = {};
-    ev.forEach((e) => { if (e.k === "ans") answers[e.q] = e.v; });
-  }
   const limitSec = Math.max(60, Math.min(6 * 3600, Number(b.limitSec) || key.minutes * 60));
   const endT = Math.max(0, Math.min(limitSec + OVER_MAX, Number(b.endT) || 0));
   const startedAt = Number(b.startedAt) || Date.now();
