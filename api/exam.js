@@ -263,8 +263,10 @@ export default async function handler(req, res) {
           }
           for (const nm of names) {
             const hit = rows.filter((r) => String(r.name || "").trim() === nm);
-            if (hit.length !== 1) { res.status(400).json({ error: (hit.length ? "명단에 둘 이상: " : "명단에 없는 이름: ") + nm }); return; }
-            sids.push(hit[0].id);
+            // 한 학생이 반 둘에 있으면(정규반 + 개진반) 이름이 두 번 잡힌다 — 같은 사람(pid)이면 두 자리 다 연다
+            const people = new Set(hit.map((r) => r.pid || r.id));
+            if (!hit.length || people.size !== 1) { res.status(400).json({ error: (hit.length ? "명단에 둘 이상: " : "명단에 없는 이름: ") + nm }); return; }
+            hit.forEach((r) => sids.push(r.id));
           }
         }
         // patchDoc 은 보낸 칸만 고친다. 전에 있던 cids·test 가 남지 않게 **전부 적는다**
