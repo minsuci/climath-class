@@ -71,6 +71,14 @@ function summary(e) {
     exams.forEach((e) => console.log(summary(e)));
     return;
   }
+  // 시험지를 잘못 골라 낸 제출을 옮긴다 — 서버가 옮길 시험지의 정답으로 다시 채점하고, 옛 기록은 «취소» 처리
+  //   node tools/exam-push.mjs --move <rid> --cid <반ID> --date 2026-10-02 --to <시험지id>
+  if (arg("--move")) {
+    const r = await call({ action: "examMove", rid: arg("--move"), cid: arg("--cid"), date: arg("--date"), to: arg("--to") });
+    console.log(`옮김 → ${r.rid}  ${r.score}점 · ${r.correct}/${r.n}` + (r.pending ? ` · 미채점 ${r.pending}` : ""));
+    r.questions.forEach((q) => console.log(`  ${q.n}번  ${q.answer == null ? "(빈칸)" : q.answer}  ${q.auto === null ? "손채점" : q.auto ? "O" : "X"}`));
+    return;
+  }
   // 코칭용 결과 꺼내기 — 파일로 떨군다. 시험지 스캔과 같이 넣어 문항별 코칭을 쓴다
   //   node tools/exam-push.mjs --logs <반ID> [--since 2026-09-01] [--out 결과.json]
   if (arg("--logs")) {

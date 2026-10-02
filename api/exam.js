@@ -120,6 +120,68 @@ async function rebuildList() {
   return exams.length;
 }
 
+// ───────────── 문항별 채점 줄 — 제출(submit)과 옮기기(examMove)가 같이 쓴다 ─────────────
+function gradeRows(key, answers, ev, limitSec, overSec) {
+  const inAns = overSec > 0 ? answersAt(ev, limitSec) : null;
+  const norm = (q, raw) => (raw == null || raw === "" ? null : (q.type === "mc" ? Number(raw) : String(raw).slice(0, 20)));
+  return key.questions.map((q) => {
+    const mine = norm(q, answers[q.n]);
+    const row = { n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}), ...(q.label ? { label: q.label } : {}),
+                  key: q.type === "essay" ? null : q.ans, answer: mine, auto: autoCorrect(q, mine) };
+    // 시간이 끝난 뒤 답이 바뀌었으면 끝난 순간의 답을 따로 둔다. 그때 비어 있었으면 시간 안에는 틀림
+    if (inAns) {
+      const was = norm(q, inAns[q.n]);
+      if (String(was) !== String(mine)) Object.assign(row, { late: true, answerIn: was, autoIn: was == null ? false : autoCorrect(q, was) });
+    }
+    return row;
+  });
+}
+
+// ───────────── 다른 시험지로 옮기기 (도구) ─────────────
+// 학생이 시험지를 잘못 골라 낸 것(10/2 양성은 — 2회를 풀고 1회 칸에 냄). 같은 답·같은 시간 흐름을
+// 옮길 시험지의 정답으로 **여기서 다시 채점해** 새 기록으로 두고, 옛 기록은 선생님 «이 제출 취소» 와
+// 똑같이 취소한다(voided + voidedScore 사본, 점수 칸 삭제). 옛 기록은 지우지 않는다 — «복원» 으로 되돌릴 수 있다.
+async function moveLog(res, b) {
+  const cid = String(b.cid || ""), date = String(b.date || ""), rid = String(b.rid || ""), to = String(b.to || "");
+  if (!cid || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !rid || !to) { res.status(400).json({ error: "cid·date·rid·to 가 필요해요" }); return; }
+  const base = "classes/" + cid + "/days/" + date;
+  const old = await getDoc(base + "/examLogs/" + rid).catch(() => null);
+  if (!old) { res.status(404).json({ error: "그 기록이 없어요" }); return; }
+  if (old.voided) { res.status(400).json({ error: "이미 취소된 기록이에요" }); return; }
+  if (old.examId === to) { res.status(400).json({ error: "같은 시험지예요" }); return; }
+  const key = await getDoc("examKeys/" + to).catch(() => null);
+  if (!key) { res.status(404).json({ error: "옮길 시험지가 없어요: " + to }); return; }
+  const answers = {};
+  (old.questions || []).forEach((q) => { if (q.answer != null) answers[q.n] = q.answer; });
+  const qs = gradeRows(key, answers, old.ev || [], old.limitSec, old.overSec || 0);
+  const tAll = tally(qs, {});
+  const t = old.overSec > 0 ? tally(qs, {}, true) : tAll;
+  const nrid = (rid + "m").slice(0, 40);
+  const now = Date.now();
+  const { voided: _v, voidedScore: _s, id: _i, ...keep } = old;
+  const log = {
+    ...keep, rid: nrid, examId: to, title: key.title, minutes: key.minutes, questions: qs, override: {},
+    ...(key.lock ? { lock: true } : {}),
+    score: t.score, got: t.got, totalPt: t.totalPt, correct: t.correct, n: t.n, pending: t.pending,
+    ...(old.overSec > 0 ? { all: { score: tAll.score, got: tAll.got, correct: tAll.correct, pending: tAll.pending } } : {}),
+    movedFrom: { examId: old.examId, rid, at: now }, time: now,
+  };
+  await patchDoc(base + "/examLogs/" + nrid, log);
+  let copy = null;
+  if (!old.teacher) {
+    copy = await getDoc(base + "/scores/" + rid).catch(() => null);
+    await patchDoc(base + "/scores/" + nrid, {
+      sid: old.sid, name: old.name, score: t.score, correct: t.correct, total: t.n,
+      label: key.title, time: now, examLog: nrid,
+    });
+  }
+  await patchDoc(base + "/examLogs/" + rid, { voided: { at: now, by: "tool:examMove → " + to }, voidedScore: copy ? stripId(copy) : null });
+  if (copy) await deleteDoc(base + "/scores/" + rid);
+  res.status(200).json({ ok: true, rid: nrid, score: t.score, correct: t.correct, n: t.n, pending: t.pending,
+                         questions: qs.map((q) => ({ n: q.n, answer: q.answer, auto: q.auto })) });
+}
+const stripId = (d) => { const { id: _i, ...r } = d || {}; return r; };
+
 // ───────────── 제출 ─────────────
 async function submit(res, claims, b) {
   const cid = String(b.cid || ""), sid = String(b.sid || ""), examId = String(b.examId || "");
@@ -157,20 +219,7 @@ async function submit(res, claims, b) {
   const endT = Math.max(0, Math.min(limitSec + OVER_MAX, Number(b.endT) || 0));
   const startedAt = Number(b.startedAt) || Date.now();
   const overSec = Math.max(0, Math.round((endT - limitSec) * 10) / 10);
-  const inAns = overSec > 0 ? answersAt(ev, limitSec) : null;
-
-  const norm = (q, raw) => (raw == null || raw === "" ? null : (q.type === "mc" ? Number(raw) : String(raw).slice(0, 20)));
-  const qs = key.questions.map((q) => {
-    const mine = norm(q, answers[q.n]);
-    const row = { n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}), ...(q.label ? { label: q.label } : {}),
-                  key: q.type === "essay" ? null : q.ans, answer: mine, auto: autoCorrect(q, mine) };
-    // 시간이 끝난 뒤 답이 바뀌었으면 끝난 순간의 답을 따로 둔다. 그때 비어 있었으면 시간 안에는 틀림
-    if (inAns) {
-      const was = norm(q, inAns[q.n]);
-      if (String(was) !== String(mine)) Object.assign(row, { late: true, answerIn: was, autoIn: was == null ? false : autoCorrect(q, was) });
-    }
-    return row;
-  });
+  const qs = gradeRows(key, answers, ev, limitSec, overSec);
   const tAll = tally(qs, {});
   const t = overSec > 0 ? tally(qs, {}, true) : tAll;   // 공식 점수는 **시간 안** — 학교 시험과 같은 조건
   const date = kstDate(startedAt);
@@ -311,6 +360,7 @@ export default async function handler(req, res) {
         logs.sort((a, b) => (b.time || 0) - (a.time || 0));
         res.status(200).json({ ok: true, logs }); return;
       }
+      if (body.action === "examMove") return await moveLog(res, body);
       res.status(400).json({ error: "그런 동작이 없어요" }); return;
     }
 
