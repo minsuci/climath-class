@@ -2749,7 +2749,8 @@ function mxAnalyze(log) {
       firstAt: my.length ? my[0].from : null,
     };
   });
-  return { rows, segs, ...mxTally(log.questions, ov, !!log.overSec), all: log.overSec ? mxTally(log.questions, ov) : null,
+  // 공식 점수는 낸 답 그대로. 시간을 넘긴 기록은 «시간 안» 점수를 참고로 같이 (서버 inTimeOf 와 같게)
+  return { rows, segs, ...mxTally(log.questions, ov), inTime: log.overSec ? mxTally(log.questions, ov, true) : null,
            blank: rows.filter((r) => r.q.answer == null || r.q.answer === "").length };
 }
 // 답을 적으면 다음 «안 푼» 문제로 — 앞에서부터 차례로 풀면 n+1 과 같다.
@@ -3112,10 +3113,10 @@ function MockExamResult({ log, canMark, canVoid, canFix, onBack }) {
     const q = L.questions.find((x) => x.n === n), ov0 = L.override || {};
     const cur = n in ov0 ? ov0[n] : q.auto;
     const ov = { ...ov0, [n]: cur === true ? false : true };
-    // 공식 점수는 시간 안 점수. 시간을 넘긴 기록은 «끝까지» 점수도 같이 고친다
-    const t = mxTally(L.questions, ov, !!L.overSec), tA = mxTally(L.questions, ov);
+    // 공식 점수는 낸 답 그대로(시간 넘겨 낸 것도). 시간을 넘긴 기록은 «시간 안» 점수도 참고로 같이 고친다
+    const t = mxTally(L.questions, ov), tI = L.overSec ? mxTally(L.questions, ov, true) : null;
     const patch = { override: ov, score: t.score, got: t.got, correct: t.correct, pending: t.pending,
-                    ...(L.overSec ? { all: { score: tA.score, got: tA.got, correct: tA.correct, pending: tA.pending } } : {}) };
+                    ...(tI ? { inTime: { score: tI.score, got: tI.got, correct: tI.correct, pending: tI.pending }, all: null } : {}) };
     const before = L;
     setL({ ...L, ...patch });
     setSaving(true);
@@ -3190,10 +3191,10 @@ function MockExamResult({ log, canMark, canVoid, canFix, onBack }) {
         <div><div className="v s">{mxClock(T)}</div><div className="l">쓴 시간 (제한 {Math.round(L.limitSec / 60)}분)</div></div>
         <div><div className="v s">{A.blank}</div><div className="l">안 푼 문제</div></div>
       </div>
-      {L.overSec > 0 && A.all && (
+      {L.overSec > 0 && A.inTime && (
         <div className="mx-overbox">
           <span className="mx-overtag">시간 초과 +{mxClock(L.overSec)}</span>
-          <span>위 점수는 <b>시간 안</b>에 적은 답으로 낸 것이에요. 초과 시간까지 끝까지 풀면 <b>{A.all.score}점</b> ({A.all.correct} / {N}).</span>
+          <span>위 점수는 시간을 넘겨 적은 답까지 <b>낸 그대로</b> 매긴 거예요. 제한 시간 안에 적은 답만 치면 <b>{A.inTime.score}점</b> ({A.inTime.correct} / {N}).</span>
         </div>
       )}
       {A.pending > 0 && <div className="mx-note">서술형 {A.pending}개가 아직 채점 전이에요. 아래 표에서 «채점» 을 눌러 O/X 를 정해 주세요.</div>}
@@ -3375,7 +3376,7 @@ function MockExamTab({ cls, me }) {
               <tr key={l.rid} className={"go" + (l.voided ? " voided" : "")} onClick={() => setView(l)}>
                 <td>{l.date.slice(5).replace("-", "/")}</td>
                 <td style={{textAlign: "left"}}>{l.title}</td>
-                <td>{l.voided ? <span className="mx-voidtag">취소됨</span> : null}<b>{l.score}</b>점{l.overSec ? <span className="mx-overtag sm" title={"시간 안 " + l.score + "점 · 끝까지 " + (l.all ? l.all.score : "?") + "점"}>초과 +{mxClock(l.overSec)}{l.all ? " → " + l.all.score + "점" : ""}</span> : null}{l.pending ? <span className="cm-hint"> · 미채점 {l.pending}</span> : null}</td>
+                <td>{l.voided ? <span className="mx-voidtag">취소됨</span> : null}<b>{l.score}</b>점{l.overSec ? <span className="mx-overtag sm" title={"낸 답 그대로 " + l.score + "점" + (l.inTime ? " · 시간 안 답만 " + l.inTime.score + "점" : "")}>초과 +{mxClock(l.overSec)}{l.inTime ? " · 시간 안 " + l.inTime.score + "점" : ""}</span> : null}{l.pending ? <span className="cm-hint"> · 미채점 {l.pending}</span> : null}</td>
                 <td>{mxClock(l.endT || 0)}</td>
               </tr>
             ))}</tbody>
@@ -3488,7 +3489,7 @@ function MockExamBoard({ cls }) {
                 <td>{l.date.slice(5).replace("-", "/")}</td>
                 <td style={{textAlign: "left"}}>{l.name}{l.teacher ? <span className="cm-hint"> (선생님)</span> : null}</td>
                 <td style={{textAlign: "left"}}>{l.title}<span className="cm-hint"> · {hhmm(l.startedAt)}</span></td>
-                <td>{l.voided ? <span className="mx-voidtag">취소됨</span> : null}<b>{l.score}</b>점{l.overSec ? <span className="mx-overtag sm" title={"시간 안 " + l.score + "점 · 끝까지 " + (l.all ? l.all.score : "?") + "점"}>초과 +{mxClock(l.overSec)}{l.all ? " → " + l.all.score + "점" : ""}</span> : null}{l.pending ? <span className="cm-hint"> · 미채점 {l.pending}</span> : null}</td>
+                <td>{l.voided ? <span className="mx-voidtag">취소됨</span> : null}<b>{l.score}</b>점{l.overSec ? <span className="mx-overtag sm" title={"낸 답 그대로 " + l.score + "점" + (l.inTime ? " · 시간 안 답만 " + l.inTime.score + "점" : "")}>초과 +{mxClock(l.overSec)}{l.inTime ? " · 시간 안 " + l.inTime.score + "점" : ""}</span> : null}{l.pending ? <span className="cm-hint"> · 미채점 {l.pending}</span> : null}</td>
                 <td>{l.correct} / {l.n}</td>
                 <td>{mxClock(l.endT || 0)}</td>
               </tr>

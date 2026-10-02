@@ -56,6 +56,8 @@ function autoCorrect(q, mine) {
 // 점수는 **100점 기준**으로 낸다. 점수 칸의 다른 줄(학생이 «17/22» 로 적는 것)이
 // round(맞은/전체×100) 이라, 같은 날 반 평균에 섞여도 뜻이 맞아야 한다.
 // inTime: 시간 안 점수 — 시간이 끝난 뒤 답이 바뀐 문항(late)은 끝난 순간의 답(autoIn)으로 센다
+// ⚠ 공식 점수는 **낸 답 그대로**다(inTime 없이). 시간 안 점수는 참고(코칭)로만 log.inTime 에 남긴다.
+//   2026-10-02 마왕님: «시간 지나도 낸 건 낸 거야» — 전엔 시간 안 점수가 공식이었다
 function tally(qs, override, inTime) {
   const ok = (q) => (inTime && q.late ? q.autoIn : override && q.n in override ? override[q.n] : q.auto);
   const hasPt = qs.every((q) => typeof q.pt === "number" && q.pt > 0);
@@ -67,6 +69,10 @@ function tally(qs, override, inTime) {
     pending: qs.filter((q) => ok(q) === null).length,
     score: totalPt > 0 ? Math.round((got / totalPt) * 100) : 0,
   };
+}
+function inTimeOf(qs, override) {
+  const t = tally(qs, override, true);
+  return { score: t.score, got: t.got, correct: t.correct, pending: t.pending };
 }
 
 // 시간 흐름(ev)을 limit 초까지 되감아 그때의 답을 낸다. 기기가 보낸 답(answers)은 «끝까지» 의 답이다
@@ -154,16 +160,15 @@ async function moveLog(res, b) {
   const answers = {};
   (old.questions || []).forEach((q) => { if (q.answer != null) answers[q.n] = q.answer; });
   const qs = gradeRows(key, answers, old.ev || [], old.limitSec, old.overSec || 0);
-  const tAll = tally(qs, {});
-  const t = old.overSec > 0 ? tally(qs, {}, true) : tAll;
+  const t = tally(qs, {});
   const nrid = (rid + "m").slice(0, 40);
   const now = Date.now();
-  const { voided: _v, voidedScore: _s, id: _i, ...keep } = old;
+  const { voided: _v, voidedScore: _s, id: _i, all: _al, inTime: _it, ...keep } = old;
   const log = {
     ...keep, rid: nrid, examId: to, title: key.title, minutes: key.minutes, questions: qs, override: {},
     ...(key.lock ? { lock: true } : {}),
     score: t.score, got: t.got, totalPt: t.totalPt, correct: t.correct, n: t.n, pending: t.pending,
-    ...(old.overSec > 0 ? { all: { score: tAll.score, got: tAll.got, correct: tAll.correct, pending: tAll.pending } } : {}),
+    ...(old.overSec > 0 ? { inTime: inTimeOf(qs, {}) } : {}),
     movedFrom: { examId: old.examId, rid, at: now }, time: now,
   };
   await patchDoc(base + "/examLogs/" + nrid, log);
@@ -220,8 +225,7 @@ async function submit(res, claims, b) {
   const startedAt = Number(b.startedAt) || Date.now();
   const overSec = Math.max(0, Math.round((endT - limitSec) * 10) / 10);
   const qs = gradeRows(key, answers, ev, limitSec, overSec);
-  const tAll = tally(qs, {});
-  const t = overSec > 0 ? tally(qs, {}, true) : tAll;   // 공식 점수는 **시간 안** — 학교 시험과 같은 조건
+  const t = tally(qs, {});   // 공식 점수는 **낸 답 그대로** — 시간을 넘겨 낸 것도 점수다(10/2)
   const date = kstDate(startedAt);
   const now = Date.now();
   const log = {
@@ -229,7 +233,7 @@ async function submit(res, claims, b) {
     limitSec, endT, startedAt, reason: b.reason === "time" ? "time" : "submit",
     date, questions: qs, ev, override: {}, ...(key.lock ? { lock: true } : {}),
     score: t.score, got: t.got, totalPt: t.totalPt, correct: t.correct, n: t.n, pending: t.pending,
-    ...(overSec > 0 ? { overSec, all: { score: tAll.score, got: tAll.got, correct: tAll.correct, pending: tAll.pending } } : {}),
+    ...(overSec > 0 ? { overSec, inTime: inTimeOf(qs, {}) } : {}),
     teacher, time: now,
   };
   const base = "classes/" + cid + "/days/" + date;
@@ -274,10 +278,9 @@ async function fixAnswer(res, claims, b) {
                 fixed: { from: old.answer == null ? null : old.answer, by: (who && who.name) || claims.tid || claims.role, at: Date.now() } };
   const questions = log.questions.map((q, k) => (k === i ? row : q));
   const override = { ...(log.override || {}) }; delete override[n];
-  const tAll = tally(questions, override);
-  const t = log.overSec > 0 ? tally(questions, override, true) : tAll;
+  const t = tally(questions, override);
   const patch = { questions, override, score: t.score, got: t.got, correct: t.correct, pending: t.pending,
-                  ...(log.overSec > 0 ? { all: { score: tAll.score, got: tAll.got, correct: tAll.correct, pending: tAll.pending } } : {}) };
+                  ...(log.overSec > 0 ? { inTime: inTimeOf(questions, override), all: null } : {}) };
   await patchDoc(path, patch);
   if (!log.teacher && !log.voided) {
     await patchDoc("classes/" + cid + "/days/" + date + "/scores/" + rid, { score: t.score, correct: t.correct }).catch(() => {});
@@ -361,6 +364,30 @@ export default async function handler(req, res) {
         res.status(200).json({ ok: true, logs }); return;
       }
       if (body.action === "examMove") return await moveLog(res, body);
+      // 시간을 넘겨 낸 기록을 «낸 답 그대로» 점수로 다시 매긴다(10/2 전에 낸 것). 몇 번 돌려도 같다
+      if (body.action === "examRescore") {
+        const since = String(body.since || "0000-00-00");
+        const cids = body.cid ? [String(body.cid)] : (await listDocs("classes").catch(() => [])).map((c) => c.id);
+        const done = [];
+        for (const cid of cids) {
+          const days = (await listDocs("classes/" + cid + "/days").catch(() => [])).map((d) => d.id).filter((d) => d >= since);
+          for (const d of days) {
+            const ls = await listDocs("classes/" + cid + "/days/" + d + "/examLogs").catch(() => []);
+            for (const l of ls) {
+              if (!(l.overSec > 0) || !Array.isArray(l.questions)) continue;
+              const rid = l.rid || l.id, ov = l.override || {};
+              const t = tally(l.questions, ov);
+              const patch = { score: t.score, got: t.got, correct: t.correct, pending: t.pending, inTime: inTimeOf(l.questions, ov), all: null };
+              if (body.dry !== true) {
+                await patchDoc("classes/" + cid + "/days/" + d + "/examLogs/" + rid, patch);
+                if (!l.teacher && !l.voided) await patchDoc("classes/" + cid + "/days/" + d + "/scores/" + rid, { score: t.score, correct: t.correct }).catch(() => {});
+              }
+              done.push({ cid, date: d, name: l.name, examId: l.examId, voided: !!l.voided, teacher: !!l.teacher, from: l.score, to: t.score });
+            }
+          }
+        }
+        res.status(200).json({ ok: true, dry: body.dry === true, done }); return;
+      }
       res.status(400).json({ error: "그런 동작이 없어요" }); return;
     }
 

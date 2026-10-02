@@ -79,6 +79,14 @@ function summary(e) {
     r.questions.forEach((q) => console.log(`  ${q.n}번  ${q.answer == null ? "(빈칸)" : q.answer}  ${q.auto === null ? "손채점" : q.auto ? "O" : "X"}`));
     return;
   }
+  // 시간을 넘겨 낸 기록을 «낸 답 그대로» 점수로 다시 매긴다 (10/2 전 기록용 · 몇 번 돌려도 같다)
+  //   node tools/exam-push.mjs --rescore [--cid <반ID>] [--since 2026-09-26] [--dry]
+  if (has("--rescore")) {
+    const r = await call({ action: "examRescore", cid: arg("--cid") || undefined, since: arg("--since") || undefined, dry: has("--dry") });
+    r.done.forEach((x) => console.log(`  ${x.date}  ${x.name}  ${x.examId}  ${x.from} → ${x.to}점` + (x.voided ? "  (취소됨)" : "") + (x.teacher ? "  (선생님 모드)" : "")));
+    console.log((r.dry ? "(--dry — 안 고침) " : "다시 매김 ") + r.done.length + "건");
+    return;
+  }
   // 코칭용 결과 꺼내기 — 파일로 떨군다. 시험지 스캔과 같이 넣어 문항별 코칭을 쓴다
   //   node tools/exam-push.mjs --logs <반ID> [--since 2026-09-01] [--out 결과.json]
   if (arg("--logs")) {
