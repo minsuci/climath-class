@@ -912,8 +912,10 @@ function LinkPicker({ row, people, teachers, onDone, onCancel }) {
 //   classes/{cid}/exams/{회차}__{sid}
 // 회차는 선생님이 연다 — 학생이 고르게 하면 엉뚱한 회차에 내는 사고가 난다.
 const examCol = (cid) => classDoc(cid).collection("exams");
-// 회차는 반별이 아니라 학원 전체로 하나다 — "2026 2학기 중간"은 모든 반에 같은 말이고,
+// 회차는 반별이 아니라 학원 전체의 것이다 — "2026 2학기 중간"은 모든 반에 같은 말이고,
 // 선생님은 반을 고르기 전에 전체 기간을 본다.
+// 2026-10-05부터 **여럿 열 수 있다** (appConfig/examTerm.terms). 고1 중간 직보가 남았는데 중3 졸업·기말이
+// 시작해서다 — 하나만 열리면 기말을 여는 순간 중간이 화면에서 사라진다. .term 은 옛 판을 위해 첫 회차를 적어 둔다.
 const examTermDoc = () => db.collection("appConfig").doc("examTerm");
 const examKey = (term, sid) => String(term).replace(/[\/\s]+/g, "_") + "__" + sid;
 async function saveExam(cid, term, sid, data) {
@@ -970,10 +972,32 @@ function matchSchool(typed, opts) {
   return raw;
 }
 
-function listenExamTerm(cb) {
-  return examTermDoc().onSnapshot((d) => cb(d.exists ? (d.data().term || "") : ""), () => cb(""));
+function examTermsOf(d) {
+  d = d || {};
+  let list = Array.isArray(d.terms) ? d.terms.filter(Boolean) : [];
+  if (!list.length && d.term) list = [d.term];
+  return list.filter((t, i) => list.indexOf(t) === i);
 }
-async function saveExamTerm(term) { await examTermDoc().set({ term, time: Date.now() }, { merge: true }); }
+function listenExamTerms(cb) {
+  return examTermDoc().onSnapshot((d) => cb(examTermsOf(d.exists ? d.data() : {})), () => cb([]));
+}
+async function readExamTerms() {
+  const d = await examTermDoc().get();
+  return examTermsOf(d.exists ? d.data() : {});
+}
+async function writeExamTerms(list) {
+  await examTermDoc().set({ terms: list, term: list[0] || "", time: Date.now() }, { merge: true });
+}
+// 회차를 연다 — 열린 것은 그대로 두고 뒤에 붙인다
+async function openExamTerm(term) {
+  const list = await readExamTerms();
+  if (list.indexOf(term) < 0) list.push(term);
+  await writeExamTerms(list);
+}
+// 닫기는 목록에서만 뺀다 — 참여표는 그대로 남고, 다시 열면 돌아온다
+async function closeExamTerm(term) {
+  await writeExamTerms((await readExamTerms()).filter((t) => t !== term));
+}
 
 // ----- 학교 일정 -----
 // 내신 기간과 수학시험 날짜는 학교·학년마다 하나로 정해져 있다. 그런데 지금까지는
@@ -1026,10 +1050,11 @@ async function buildAttendRows(cls, from, to, people, examRows) {
   const pidOf = (r) => (r.pid && people.find((p) => p.pid === r.pid)) || null;
 
   // 시험으로 빠지는 구간: 수학시험 당일 ~ 복귀 전날 (직보 다음날부터다)
+  // 회차가 여럿 열려 있으면 한 학생에게 구간이 둘일 수 있다 — 하나로 덮으면 앞 회차 결석이 «결석»으로 나간다
   const examGap = {};
   (examRows || []).forEach((v) => {
     if (!v.math) return;
-    examGap[v.sid] = { from: v.math, to: v.back ? dayBefore(v.back) : (v.end || v.math) };
+    (examGap[v.sid] = examGap[v.sid] || []).push({ from: v.math, to: v.back ? dayBefore(v.back) : (v.end || v.math) });
   });
 
   const mk = {};
@@ -1042,8 +1067,8 @@ async function buildAttendRows(cls, from, to, people, examRows) {
     (await attCol(cls.id, d).get()).forEach((x) => { att[x.id] = true; });
     for (const st of roster) {
       if (!attendsOn(cls, st, d)) continue;              // 그날 수업 대상이 아니다
-      const g = examGap[st.id];
-      if (g && d >= g.from && d <= g.to) { skipped.push(st.name + " " + d); continue; }
+      const gs = examGap[st.id] || [];
+      if (gs.some((g) => d >= g.from && d <= g.to)) { skipped.push(st.name + " " + d); continue; }
       const p = pidOf(st);
       const sid26 = p && p.sid26;
       if (!sid26) { if (noId.indexOf(st.name) < 0) noId.push(st.name); continue; }
@@ -3552,8 +3577,8 @@ function StudentHome({ cls, me, onLogout }) {
   const [hasFlyer, setHasFlyer] = useState(false);
   useEffect(() => listenFlyerPub(cls.id, (d) => setHasFlyer(!!(d && d.active))), [cls.id]);
   // 내신 접수는 선생님이 회차를 연 동안에만 학생에게 보인다
-  const [examTerm, setExamTerm] = useState("");
-  useEffect(() => listenExamTerm(setExamTerm), []);
+  const [examTerms, setExamTerms] = useState([]);
+  useEffect(() => listenExamTerms(setExamTerms), []);
   // 실전 시험은 출석과 묶지 않는다 — 시간 재는 시험을 «출석부터» 에서 막으면 시작부터 어긋난다
   const noGateTabs = ["prog", "notes", "ai", "flyer", "exam", "mock"]; // 출석 없이도 볼 수 있는 탭
   const activeTab = me.teacher ? tab : (att || noGateTabs.includes(tab) ? tab : "att");
@@ -3575,7 +3600,7 @@ function StudentHome({ cls, me, onLogout }) {
         { key: "prog", ico: "▦", label: "진도계획표" },
         { key: "mock", ico: "⏱", label: "실전 시험" },
         ...(hasFlyer ? [{ key: "flyer", ico: "▤", label: "안내문" }] : []),
-        ...(examTerm ? [{ key: "exam", ico: "▣", label: "내신" }] : []),
+        ...(examTerms.length ? [{ key: "exam", ico: "▣", label: "내신" }] : []),
         { key: "notes", ico: "✎", label: "강의노트" },
         { key: "ai", ico: "✦", label: "AI 힌트" },
       ]} />
@@ -3770,6 +3795,7 @@ function StudentHomework({ cls, me }) {
 // ----- 내신: 학생 입력 -----
 function ExamForm({ cls, me }) {
   const [term, setTerm] = useState(null);
+  const [terms, setTerms] = useState([]);
   const [mine, setMine] = useState(undefined);
   const [f, setF] = useState({ school: "", grade: "", start: "", end: "", math: "", prep: "", back: "", note: "" });
   const [msg, setMsg] = useState("");
@@ -3783,7 +3809,18 @@ function ExamForm({ cls, me }) {
   const [sched, setSched] = useState({});   // 선생님이 적어둔 학교 일정
   const autoRef = useRef("");               // 어느 학교로 자동으로 채웠는지
 
-  useEffect(() => listenExamTerm(setTerm), []);
+  useEffect(() => listenExamTerms((list) => {
+    setTerms(list);
+    setTerm((t) => (t && list.indexOf(t) >= 0 ? t : (list[0] || "")));
+  }), []);
+  // 회차를 바꾸면 날짜 칸은 비운다 — 다른 회차의 날짜가 남아 그대로 내지면 안 된다. 학교·학년은 둔다.
+  function pickTerm(t) {
+    if (t === term) return;
+    autoRef.current = "";
+    setMine(undefined); setMsg("");
+    setF((p) => ({ school: p.school, grade: p.grade, start: "", end: "", math: "", prep: "", back: "", note: "" }));
+    setTerm(t);
+  }
   useEffect(() => {
     if (!term) return;
     return listenExams(cls.id, term, (m) => {
@@ -3885,6 +3922,16 @@ function ExamForm({ cls, me }) {
   return (
     <div className="cm-card">
       <h3 className="cm-h3">내신 참여 <span className="cm-h-hint">({term})</span></h3>
+      {terms.length > 1 && (
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
+          {terms.map((t) => (
+            <button key={t} className={"cm-chip" + (t === term ? " on" : "")}
+              style={{border: "1px solid " + (t === term ? "#3f7d5e" : "#e3ddd3"), background: t === term ? "#e6f0e9" : "#fff",
+                      color: t === term ? "#3f7d5e" : "#7c6f5f", cursor: "pointer"}}
+              onClick={() => pickTerm(t)}>{t}</button>
+          ))}
+        </div>
+      )}
       {mySched && !mine && (
         <div className="cm-done" style={{marginBottom: 8}}>
           {f.school} {f.grade} 일정을 선생님이 올려둬서 미리 채워놨어 · {shortDate(mySched.start)}~{shortDate(mySched.end)}
@@ -4822,9 +4869,8 @@ function OpsSend({ onBack }) {
     try {
       const ex = [];
       // 구독을 걸었다 푸는 것보다 한 번 읽는 게 낫다 — 콜백이 먼저 돌면 u 가 아직 없다
-      const td = await examTermDoc().get();
-      const term = td.exists ? (td.data().term || "") : "";
-      if (term) {
+      // 열린 회차 모두 — 고1 중간 복귀 전에 중3 기말이 시작할 수 있다
+      for (const term of await readExamTerms()) {
         const snap = await examCol(cls.id).where("term", "==", term).get();
         snap.forEach((d) => ex.push(d.data()));
       }
@@ -5003,7 +5049,11 @@ function ExamBoard({ onBack }) {
   // 지금 화면에 없는 사람에게 복귀일이 들어간다.
   useEffect(() => { setSel({}); }, [grade, term, classes.map((c) => c.id).join(",")]);
 
-  useEffect(() => listenExamTerm((t) => { setTerm(t); setDraft(t); }), []);
+  const [terms, setTerms] = useState([]);
+  useEffect(() => listenExamTerms((list) => {
+    setTerms(list);
+    setTerm((t) => (t && list.indexOf(t) >= 0 ? t : (list[0] || "")));
+  }), []);
   useEffect(() => {
     if (!term) return;
     const unsubs = classes.map((c) => listenExams(c.id, term, (m) => setByClass((p) => ({ ...p, [c.id]: m }))));
@@ -5355,16 +5405,27 @@ function ExamBoard({ onBack }) {
         </div>
 
         <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10}}>
-          {!editTerm && <span className="cm-chip" style={{background: term ? "#e6f0e9" : "#f0ece5", color: term ? "#3f7d5e" : "#7c6f5f"}}>
-            {term ? "접수 중 · " + term : "아직 안 열었어요"}
-          </span>}
-          {!editTerm && <button className="cm-link" onClick={() => setEditTerm(true)}>{term ? "회차 바꾸기" : "회차 열기"}</button>}
+          {!editTerm && !terms.length && <span className="cm-chip" style={{background: "#f0ece5", color: "#7c6f5f"}}>아직 안 열었어요</span>}
+          {!editTerm && terms.map((t) => (
+            <button key={t} className="cm-chip" onClick={() => { setByClass({}); setTerm(t); }}
+              style={{border: "1px solid " + (t === term ? "#3f7d5e" : "#e3ddd3"), cursor: "pointer",
+                      background: t === term ? "#e6f0e9" : "#fff", color: t === term ? "#3f7d5e" : "#7c6f5f"}}>
+              {t === term ? "접수 중 · " + t : t}
+            </button>
+          ))}
+          {!editTerm && <button className="cm-link" onClick={() => { setDraft(/중간/.test(term || "") ? term.replace("중간", "기말") : ""); setEditTerm(true); }}>+ 회차 열기</button>}
+          {!editTerm && terms.length > 1 && term && (
+            <button className="cm-link" onClick={async () => {
+              if (!window.confirm("«" + term + "» 회차를 닫아요.\n참여표는 지우지 않아요 — 다시 열면 그대로 돌아와요.\n학생 화면의 내신 탭에서 이 회차가 빠져요.")) return;
+              await closeExamTerm(term);
+            }}>이 회차 닫기</button>
+          )}
           {editTerm && (<>
-            <input className="cm-input" style={{margin: 0, maxWidth: 220}} placeholder="예: 2026 2학기 중간"
+            <input className="cm-input" style={{margin: 0, maxWidth: 220}} placeholder="예: 2026 2학기 기말"
               value={draft} onChange={(e) => setDraft(e.target.value)} />
             <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "9px 14px"}}
-              onClick={async () => { await saveExamTerm(draft.trim()); setEditTerm(false); }}>저장</button>
-            <button className="cm-link" onClick={() => { setDraft(term); setEditTerm(false); }}>취소</button>
+              onClick={async () => { const t = draft.trim(); if (!t) return; await openExamTerm(t); setByClass({}); setTerm(t); setEditTerm(false); }}>열기</button>
+            <button className="cm-link" onClick={() => setEditTerm(false)}>취소</button>
           </>)}
         </div>
         {!term && <div className="cm-hint">회차를 열면 학생 화면에 <b>내신</b> 탭이 생겨요. 담당 반 전체가 여기 모입니다.</div>}
