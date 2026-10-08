@@ -3463,6 +3463,93 @@ function MockExamLive({ cls }) {
   );
 }
 
+// 맡은 반 전체의 실전 시험 결과를 한 번에 — 지점(서초·평촌) 담당 선생님이 분석지 스킬에 넣을 파일을 받는다.
+// 결과 파일(JSON)은 반 화면의 «결과 파일 (전원 한 파일)» 과 같은 꼴이라 스킬이 그대로 읽는다.
+// 문항별 시간표(CSV)는 학생 × 문항 한 줄 — 정답·적은 답·O/X·걸린 시간을 엑셀로 바로 본다.
+function mxTimeCsv(logs, cname) {
+  const cell = (v) => { const t = v == null ? "" : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const ans = (q, v) => v == null || v === "" ? "" : q.type === "mc" ? MX_CIRC[v] || v : v;
+  const head = ["날짜", "반", "시험지", "이름", "점수", "쓴 시간(초)", "번호", "학교 번호", "배점", "정답", "적은 답", "O/X", "걸린 시간(초)", "들른 횟수", "답 바꾼 횟수"];
+  const rows = [];
+  logs.forEach((l) => {
+    const A = mxAnalyze(l);
+    A.rows.forEach((r) => rows.push([l.date, cname(l.cid), l.title, l.name, l.score, Math.round(l.endT || 0),
+      r.q.n, r.q.label || "", r.q.pt == null ? "" : r.q.pt, ans(r.q, r.q.key), ans(r.q, r.q.answer),
+      r.ok === null ? "?" : r.ok ? "O" : "X", Math.round(r.sec), r.visits, r.changes]));
+  });
+  return "﻿" + [head].concat(rows).map((r) => r.map(cell).join(",")).join("\r\n");
+}
+function MockExamExport({ onBack }) {
+  // 관리자는 모든 반을 고를 수 있고, 처음엔 담당 반만 켜 둔다(관리자는 담당이 없으면 아무것도 안 켜짐)
+  const pool = (canSeeOtherClasses() ? allClasses() : activeClasses()).filter((c) => !isClassEnded(c))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), "ko"));
+  const [pick, setPick] = useState(() => pool.filter((c) => inScope(c) && MY_SCOPE && MY_SCOPE.length).map((c) => c.id));
+  const [days, setDays] = useState("30");
+  const [logs, setLogs] = useState(null);
+  const [busy, setBusy] = useState("");
+  const cname = (cid) => (CLASSES.find((c) => c.id === cid) || {}).name || cid;
+  async function load() {
+    setBusy("불러오는 중…"); setLogs(null);
+    const cut = ymd(new Date(Date.now() - Number(days) * 86400e3)), out = [];
+    try {
+      for (const cid of pick) {
+        setBusy(cname(cid) + " 불러오는 중…");
+        const ds = (await listDays(cid)).filter((d) => d >= cut);
+        await Promise.all(ds.map(async (d) => {
+          try { (await examLogCol(cid, d).get()).forEach((x) => out.push(x.data())); } catch (e) { /* 권한 없는 날은 건너뛴다 */ }
+        }));
+      }
+    } catch (e) { alert("불러오지 못했어요.\n" + e.message); }
+    // 취소한 제출 · 선생님 모드로 본 것은 뺀다 (반 화면의 «한 번에 저장» 과 같게)
+    setLogs(out.filter((l) => !l.voided && !l.teacher)
+      .sort((a, b) => (a.date + a.title + a.name).localeCompare(b.date + b.title + b.name, "ko")));
+    setBusy("");
+  }
+  const groups = {};
+  (logs || []).forEach((l) => { const k = cname(l.cid) + " · " + l.title; groups[k] = (groups[k] || 0) + 1; });
+  const fileBase = ymd(new Date()) + "_실전시험_" + (pick.length === 1 ? cname(pick[0]) : pick.length + "개 반");
+  return (<>
+    <div className="cm-card">
+      <div className="cm-admin-top" style={{marginBottom: 10}}>
+        <h2 className="cm-h2" style={{margin: 0}}>실전 시험 결과 모아 받기</h2>
+        <button className="cm-link" onClick={onBack}>← 돌아가기</button>
+      </div>
+      <div className="cm-hint" style={{marginBottom: 10}}>고른 반에서 학생들이 본 실전 시험을 전부 한 파일로 받아요. 반마다 시험지마다 따로 저장할 필요가 없어요.</div>
+      <label className="cm-label">반</label>
+      {!pool.length ? <div className="cm-empty">담당 반이 없어요. 관리자에게 담당 반 지정을 부탁해 주세요.</div> : (
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
+          {pool.map((c) => {
+            const on = pick.indexOf(c.id) >= 0;
+            return <button key={c.id} className={"cm-btn " + (on ? "cm-btn-primary" : "cm-btn-ghost")} style={{width: "auto", margin: 0, padding: "6px 12px"}}
+              onClick={() => { setPick(on ? pick.filter((x) => x !== c.id) : pick.concat(c.id)); setLogs(null); }}>{c.name}</button>;
+          })}
+        </div>
+      )}
+      <label className="cm-label">기간</label>
+      <select className="cm-input" style={{margin: "0 0 10px", maxWidth: 200}} value={days} onChange={(e) => { setDays(e.target.value); setLogs(null); }}>
+        <option value="7">최근 7일</option><option value="30">최근 30일</option><option value="90">최근 90일</option><option value="365">최근 1년</option>
+      </select>
+      <button className="cm-btn cm-btn-primary" disabled={!pick.length || !!busy} onClick={load}>{busy || "불러오기"}</button>
+    </div>
+    {logs && (
+      <div className="cm-card">
+        <h3 className="cm-h3">{logs.length}건</h3>
+        {!logs.length ? <div className="cm-empty">이 기간에 본 시험이 없어요.</div> : (<>
+          <div className="cm-hint" style={{marginBottom: 10}}>{Object.keys(groups).map((k) => k + " " + groups[k] + "명").join(" · ")}</div>
+          <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
+            <button className="cm-btn cm-btn-primary" onClick={() => mxDownload(fileBase + "_결과 " + logs.length + "건.json", logs)}>결과 파일 (분석지용 · JSON)</button>
+            <button className="cm-btn cm-btn-ghost" onClick={() => mxDownloadText(fileBase + "_문항별 시간.csv", mxTimeCsv(logs, cname))}>문항별 시간표 (엑셀)</button>
+          </div>
+          <div className="cm-hint" style={{marginTop: 8}}>
+            결과 파일에는 학생마다 정답·적은 답·채점·문항을 오간 기록(몇 초에 몇 번으로 갔는지)이 다 들어 있어요 — 분석지 스킬의 <b>응답</b> 폴더에 그대로 넣으면 돼요.<br />
+            문항별 시간표는 학생 × 문항 한 줄씩 — 정답, 적은 답, O/X, 그 문항에 머문 시간(초), 들른 횟수, 답 바꾼 횟수. 취소한 제출과 선생님 모드로 본 것은 빠져요.
+          </div>
+        </>)}
+      </div>
+    )}
+  </>);
+}
+
 function MockExamBoard({ cls }) {
   const [logs, setLogs] = useState(null);
   const [bulk, setBulk] = useState("");
@@ -7133,6 +7220,7 @@ function AdminView() {
         { key: "exams", ico: "▤", label: "내신 참여표" },
         { key: "roster", ico: "☰", label: "학생 명단" },
         { key: "opsdb", ico: "↗", label: "운영DB 보내기" },
+        { key: "mockexport", ico: "⏱", label: "실전 시험 모아 받기" },
         ...(cls ? [
           { sep: true },
           { group: cls.name + (isClassEnded(cls) ? " (종강)" : "") },
@@ -7194,6 +7282,7 @@ function AdminView() {
   if (mode === "report") return <>{homeSide}<ReportCenter onBack={() => setMode("login")} /></>;
   if (mode === "exams") return <>{homeSide}<ExamBoard onBack={() => setMode("login")} /></>;
   if (mode === "opsdb") return <>{homeSide}<OpsSend onBack={() => setMode("login")} /></>;
+  if (mode === "mockexport") return <>{homeSide}<MockExamExport onBack={() => setMode("login")} /></>;
   if (mode === "roster") return <>{homeSide}<StudentDirectory key={"dir" + (rosterCid || "")} me={me}
     initialCls={rosterCid} onBack={() => { setRosterCid(""); setMode("login"); }} /></>;
 
