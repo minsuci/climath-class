@@ -317,33 +317,79 @@ async function fixAnswer(res, claims, b) {
 // 열쇠(toolKey) 없이 부르므로 좁게 막는다: openRoster 표시가 있는 반 · 그 반 담당 · 학교 시험지만.
 const HK_TITLE = "학교 결정 모의고사 · ";
 const isHkSchoolExam = (k) => !!k && String(k.title || "").startsWith(HK_TITLE) && !String(k.id || "").startsWith("학교결정모의-공통");
-async function hkExam(res, claims, b) {
-  if (!(claims.role === "teacher" || claims.role === "owner")) { res.status(403).json({ error: "선생님만 할 수 있어요" }); return; }
-  const cid = String(b.cid || ""), sid = String(b.sid || ""), examId = String(b.examId || ""), on = b.on !== false;
+// 담당 확인 — openRoster 반 · 그 반 담당(관리자는 다) · 명단의 학생 한 줄
+async function hkGate(res, claims, cid, sid) {
+  if (!(claims.role === "teacher" || claims.role === "owner")) { res.status(403).json({ error: "선생님만 할 수 있어요" }); return null; }
   const cls = cid ? await getDoc("classes/" + cid).catch(() => null) : null;
-  if (!cls) { res.status(404).json({ error: "반이 없어요" }); return; }
-  if (!cls.openRoster) { res.status(403).json({ error: "학교결정 모의고사 반에서만 할 수 있어요" }); return; }
+  if (!cls) { res.status(404).json({ error: "반이 없어요" }); return null; }
+  if (!cls.openRoster) { res.status(403).json({ error: "학교결정 모의고사 반에서만 할 수 있어요" }); return null; }
   if (claims.role !== "owner") {
     const t = claims.tid ? await getDoc("teachers/" + claims.tid).catch(() => null) : null;
-    if (!t || !(t.classIds || []).includes(cid)) { res.status(403).json({ error: "담당 반이 아니에요" }); return; }
+    if (!t || !(t.classIds || []).includes(cid)) { res.status(403).json({ error: "담당 반이 아니에요" }); return null; }
   }
   const row = (cls.roster || []).find((r) => r && r.id === sid && !r.teacher);
-  if (!row) { res.status(404).json({ error: "이 반 명단에 없는 학생이에요" }); return; }
+  if (!row) { res.status(404).json({ error: "이 반 명단에 없는 학생이에요" }); return null; }
+  return { cls, row };
+}
+// 시험지의 학생 지정을 바꿔 쓴다. ⚠ 학생 지정이 비면 «반 전체에 열림» 이 되어 cids 의 모든 반 학생에게
+// 열린다 — 그래서 마지막 학생이 빠지면 시험지를 **숨긴다**(test = 선생님만 보임, hkEmpty 표시).
+// 다시 학생을 걸면 hkEmpty 인 것만 도로 연다(원래 시험용이던 것은 건드리지 않는다).
+async function hkSetNames(key, names, cids) {
+  if (!names.length) {
+    await patchDoc("examKeys/" + key.id, { names: [], cids: [], sids: [], test: true, hkEmpty: true, updated: Date.now() });
+    return { hidden: true };
+  }
+  const got = await resolveSids(cids, names);
+  if (got.error) return { error: got.error };
+  cids = cids.filter((c) => got.sids.some((x) => x.startsWith(c + "/")));   // 걸린 학생이 없는 반은 뺀다
+  await patchDoc("examKeys/" + key.id, { names, cids, sids: got.sids, updated: Date.now(),
+                                         ...(key.hkEmpty ? { test: false, hkEmpty: false } : {}) });
+  return { ok: true };
+}
+async function hkExam(res, claims, b) {
+  const cid = String(b.cid || ""), sid = String(b.sid || ""), examId = String(b.examId || ""), on = b.on !== false;
+  const g = await hkGate(res, claims, cid, sid); if (!g) return;
   const key = await getDoc("examKeys/" + examId).catch(() => null);
   if (!isHkSchoolExam(key)) { res.status(400).json({ error: "학교결정 모의고사 학교 시험지만 고를 수 있어요" }); return; }
-  const nm = String(row.name).trim();
+  key.id = key.id || examId;
+  const nm = String(g.row.name).trim();
   let names = (key.names || []).map((x) => String(x).trim()).filter(Boolean);
   let cids = (key.cids || []).map(String);
   if (on) { if (!names.includes(nm)) names.push(nm); if (!cids.includes(cid)) cids.push(cid); }
   else names = names.filter((x) => x !== nm);
-  // 학생 지정이 비면 «반 전체에 열림» 이 된다 — 다른 반 학생 모두에게 열리지 않게 막는다
-  if (!names.length) { res.status(400).json({ error: "이 시험지의 마지막 학생이라 뺄 수 없어요. 관리자에게 말해 주세요." }); return; }
-  const got = await resolveSids(cids, names);
-  if (got.error) { res.status(400).json({ error: got.error }); return; }
-  cids = cids.filter((c) => got.sids.some((x) => x.startsWith(c + "/")));   // 걸린 학생이 없는 반은 뺀다
-  await patchDoc("examKeys/" + examId, { names, cids, sids: got.sids, updated: Date.now() });
+  const r = await hkSetNames(key, names, cids);
+  if (r.error) { res.status(400).json({ error: r.error }); return; }
   await rebuildList();
-  res.status(200).json({ ok: true, examId, names: names.length });
+  res.status(200).json({ ok: true, examId, names: names.length, hidden: !!r.hidden });
+}
+// 학결모 반에서 학생을 지운다 (잘못 넣은 학생 · 안 오는 학생). 화면에서 하면 반 명단 · 사람 · 시험지 세 곳이
+// 따로 놀아서 서버가 한 번에 한다.
+//   1. 반 명단에서 뺀다   2. 다른 반에 없는 사람이면 학생 명단(students)에서도 지운다
+//   3. 그 이름이 걸린 시험지에서 뺀다 — 다른 반에 같은 사람이 남아 있으면 그대로 둔다
+// 이미 낸 시험 기록(days/…/examLogs · scores)은 지우지 않는다.
+async function hkRemove(res, claims, b) {
+  const cid = String(b.cid || ""), sid = String(b.sid || "");
+  const g = await hkGate(res, claims, cid, sid); if (!g) return;
+  const row = g.row, nm = String(row.name).trim();
+  await patchDoc("classes/" + cid, { roster: (g.cls.roster || []).filter((r) => !(r && r.id === sid)) });
+  let personGone = false;
+  if (row.pid) {
+    const cs = await listDocs("classes").catch(() => []);
+    const elsewhere = cs.some((c) => c.id !== cid && (c.roster || []).some((r) => r && r.pid === row.pid));
+    if (!elsewhere) { await deleteDoc("students/" + row.pid).catch(() => {}); personGone = true; }
+  }
+  const keys = await listDocs("examKeys").catch(() => []);
+  const exams = [], problems = [];
+  for (const k of keys) {
+    const names = (k.names || []).map((x) => String(x).trim()).filter(Boolean);
+    const cids = (k.cids || []).map(String);
+    if (!names.includes(nm) || !cids.includes(cid)) continue;
+    const still = await resolveSids(cids, names);           // 다른 반에 그 사람이 남았으면 이름은 그대로 두고 자리만 다시
+    const r = await hkSetNames(k, still.error ? names.filter((x) => x !== nm) : names, cids);
+    if (r.error) problems.push(k.id + ": " + r.error); else exams.push({ id: k.id, hidden: !!r.hidden });
+  }
+  await rebuildList();
+  res.status(200).json({ ok: true, name: nm, pid: row.pid || "", personGone, exams, problems });
 }
 
 // ───────────── 핸들러 ─────────────
@@ -455,6 +501,7 @@ export default async function handler(req, res) {
     if (body.action === "submit") return await submit(res, claims, body);
     if (body.action === "fix") return await fixAnswer(res, claims, body);
     if (body.action === "hkExam") return await hkExam(res, claims, body);
+    if (body.action === "hkRemove") return await hkRemove(res, claims, body);
     res.status(400).json({ error: "그런 동작이 없어요" });
   } catch (e) {
     console.error("[exam]", e);

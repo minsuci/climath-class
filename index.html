@@ -3634,16 +3634,17 @@ async function hkAddStudent(cls, name, school) {
   logStudentChange("반에 넣음", ref.id, nm, cls.name);
   return { id, pid: ref.id, name: nm };
 }
-async function hkExamCall(cid, sid, examId, on) {
+async function hkCall(body) {
   const u = firebase.auth().currentUser;
   if (!u) throw new Error("로그인이 풀렸어요. 다시 들어와 주세요.");
   const idToken = await u.getIdToken();
   const r = await fetch("/api/exam", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken, action: "hkExam", cid, sid, examId, on }) });
+    body: JSON.stringify({ idToken, ...body }) });
   let j = null; try { j = await r.json(); } catch (e) {}
   if (!r.ok) throw new Error((j && j.error) || "저장하지 못했어요 (" + r.status + ")");
   return j;
 }
+const hkExamCall = (cid, sid, examId, on) => hkCall({ action: "hkExam", cid, sid, examId, on });
 function HkRegister({ cls, onChanged }) {
   const [exams, setExams] = useState(null);
   const [rows, setRows] = useState(() => (cls.roster || []).filter((r) => r && !r.teacher));
@@ -3686,6 +3687,28 @@ function HkRegister({ cls, onChanged }) {
     catch (e) { alert(e.message || String(e)); }
     setBusy(false);
   }
+  // 학생 지우기 — 반 명단 · 학생 명단 · 걸린 시험지를 서버가 한 번에. 낸 기록은 남는다
+  async function remove(st) {
+    if (busy) return;
+    let sent = 0;
+    try { sent = (await mxLogs(cls.id, st.id, 30)).filter((l) => !l.voided && !l.teacher).length; } catch (e) {}
+    if (!confirm(st.name + " 학생을 이 반에서 지울까요?\n\n" +
+      "반 명단과 학생 명단에서 빠지고, 걸어 둔 학교 시험지에서도 빠져요." +
+      (sent ? "\n⚠ 이미 낸 실전 시험이 " + sent + "건 있어요. 기록은 남지만 이 반 명단에서는 안 보여요." : ""))) return;
+    setBusy(true); setMsg("");
+    try {
+      const r = await hkCall({ action: "hkRemove", cid: cls.id, sid: st.id });
+      setRows((x) => x.filter((y) => y.id !== st.id));
+      cls.roster = (cls.roster || []).filter((y) => y.id !== st.id);
+      logStudentChange("반에서 뺌", r.pid, st.name, cls.name + " (학결모 지움)");
+      if (r.personGone) logStudentChange("지움", r.pid, st.name, "학결모 등록 취소");
+      setMsg(st.name + " 지웠어요" + (r.exams.length ? " · 시험지 " + r.exams.length + "개에서 뺌" : "") +
+        (r.problems.length ? " · 확인 필요: " + r.problems.join(" / ") : ""));
+      try { await loadClasses(); } catch (e) {}
+      if (onChanged) onChanged();
+    } catch (e) { alert(e.message || String(e)); }
+    setBusy(false);
+  }
   if (exams === null) return <div className="cm-empty">불러오는 중…</div>;
   return (<>
     {!commonOpen && <div className="mx-void" style={{marginBottom: 10}}>공통 시험(공통수학1 22제)이 아직 이 반에 안 열려 있어요. 관리자에게 말해 주세요.</div>}
@@ -3706,7 +3729,7 @@ function HkRegister({ cls, onChanged }) {
     {msg && <div className="mx-note" style={{marginBottom: 10}}>{msg}</div>}
     {!rows.length ? <div className="cm-empty">아직 학생이 없어요</div> : (
       <div className="mx-tw"><table className="mx-table">
-        <thead><tr><th style={{textAlign: "left"}}>이름</th><th style={{textAlign: "left"}}>학교 시험지</th><th>더 넣기</th></tr></thead>
+        <thead><tr><th style={{textAlign: "left"}}>이름</th><th style={{textAlign: "left"}}>학교 시험지</th><th>더 넣기</th><th></th></tr></thead>
         <tbody>{rows.map((st) => {
           const m = mine(st.id);
           return (
@@ -3721,6 +3744,7 @@ function HkRegister({ cls, onChanged }) {
                   {schools.filter((e) => !m.includes(e)).map((e) => <option key={e.id} value={e.id}>{hkSchool(e)}</option>)}
                 </select>
               </td>
+              <td><button className="cm-link" style={{color: "#b3261e", whiteSpace: "nowrap"}} disabled={busy} onClick={() => remove(st)}>지우기</button></td>
             </tr>
           );
         })}</tbody>
