@@ -312,6 +312,40 @@ async function fixAnswer(res, claims, b) {
   res.status(200).json({ ok: true, log: { ...log, ...patch } });
 }
 
+// ───────────── 학결모 반에서 선생님이 학교 시험지를 학생에게 걸고 뺀다 (10/8 · 임시) ─────────────
+// 학교결정 모의고사를 대치 밖(서초 · 평촌)에서도 받는다. 거기 선생님이 학생을 넣고 바로 학교를 고르게 한다.
+// 열쇠(toolKey) 없이 부르므로 좁게 막는다: openRoster 표시가 있는 반 · 그 반 담당 · 학교 시험지만.
+const HK_TITLE = "학교 결정 모의고사 · ";
+const isHkSchoolExam = (k) => !!k && String(k.title || "").startsWith(HK_TITLE) && !String(k.id || "").startsWith("학교결정모의-공통");
+async function hkExam(res, claims, b) {
+  if (!(claims.role === "teacher" || claims.role === "owner")) { res.status(403).json({ error: "선생님만 할 수 있어요" }); return; }
+  const cid = String(b.cid || ""), sid = String(b.sid || ""), examId = String(b.examId || ""), on = b.on !== false;
+  const cls = cid ? await getDoc("classes/" + cid).catch(() => null) : null;
+  if (!cls) { res.status(404).json({ error: "반이 없어요" }); return; }
+  if (!cls.openRoster) { res.status(403).json({ error: "학교결정 모의고사 반에서만 할 수 있어요" }); return; }
+  if (claims.role !== "owner") {
+    const t = claims.tid ? await getDoc("teachers/" + claims.tid).catch(() => null) : null;
+    if (!t || !(t.classIds || []).includes(cid)) { res.status(403).json({ error: "담당 반이 아니에요" }); return; }
+  }
+  const row = (cls.roster || []).find((r) => r && r.id === sid && !r.teacher);
+  if (!row) { res.status(404).json({ error: "이 반 명단에 없는 학생이에요" }); return; }
+  const key = await getDoc("examKeys/" + examId).catch(() => null);
+  if (!isHkSchoolExam(key)) { res.status(400).json({ error: "학교결정 모의고사 학교 시험지만 고를 수 있어요" }); return; }
+  const nm = String(row.name).trim();
+  let names = (key.names || []).map((x) => String(x).trim()).filter(Boolean);
+  let cids = (key.cids || []).map(String);
+  if (on) { if (!names.includes(nm)) names.push(nm); if (!cids.includes(cid)) cids.push(cid); }
+  else names = names.filter((x) => x !== nm);
+  // 학생 지정이 비면 «반 전체에 열림» 이 된다 — 다른 반 학생 모두에게 열리지 않게 막는다
+  if (!names.length) { res.status(400).json({ error: "이 시험지의 마지막 학생이라 뺄 수 없어요. 관리자에게 말해 주세요." }); return; }
+  const got = await resolveSids(cids, names);
+  if (got.error) { res.status(400).json({ error: got.error }); return; }
+  cids = cids.filter((c) => got.sids.some((x) => x.startsWith(c + "/")));   // 걸린 학생이 없는 반은 뺀다
+  await patchDoc("examKeys/" + examId, { names, cids, sids: got.sids, updated: Date.now() });
+  await rebuildList();
+  res.status(200).json({ ok: true, examId, names: names.length });
+}
+
 // ───────────── 핸들러 ─────────────
 export default async function handler(req, res) {
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
@@ -420,6 +454,7 @@ export default async function handler(req, res) {
     if (!claims) { res.status(403).json({ error: "로그인이 풀렸어요. 다시 들어와 주세요." }); return; }
     if (body.action === "submit") return await submit(res, claims, body);
     if (body.action === "fix") return await fixAnswer(res, claims, body);
+    if (body.action === "hkExam") return await hkExam(res, claims, body);
     res.status(400).json({ error: "그런 동작이 없어요" });
   } catch (e) {
     console.error("[exam]", e);

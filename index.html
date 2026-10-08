@@ -276,6 +276,10 @@ html,body{margin:0; padding:0;}
 .mx-table tr.go{cursor:pointer;}
 .mx-table tr.voided td{color:var(--muted);}
 .mx-table tr.voided td b{text-decoration:line-through;}
+.hk-add{display:grid; grid-template-columns:1.2fr 1fr 1.3fr auto; gap:6px; align-items:center;}
+.hk-add .cm-input{margin:0;}
+@media (max-width:640px){.hk-add{grid-template-columns:1fr 1fr;}}
+.mx-asg span .cm-link{font-size:11px; padding:0 0 0 3px;}
 .mx-asg{display:flex; flex-wrap:wrap; gap:5px;}
 .mx-asg span{display:inline-block; font-size:12px; border:1px solid var(--line); border-radius:99px; padding:2px 9px; white-space:nowrap; color:var(--muted);}
 .mx-asg span.done{background:#e6f4ea; border-color:#a8d5b5; color:#1d6b3a; font-weight:700; cursor:pointer;}
@@ -3600,6 +3604,140 @@ function MockExamAssigned({ cls, logs, onOpen }) {
   );
 }
 
+// ───────────── 학결모 응시생 등록 (10/8 · 임시) ─────────────
+// 학교결정 모의고사를 서초 · 평촌에서도 받는다. 그쪽 선생님이 이 앱에서 학생을 넣고 바로 학교 시험지를 고른다.
+// 명단 고치기는 팀체크로 모았지만(ROSTER_RO) **반 문서에 openRoster 표시가 있는 반만** 예외로 연다.
+// 시즌이 끝나면 반 문서의 openRoster 를 지우면 닫힌다 — 코드는 그대로 두어도 된다.
+// 학교 시험지를 걸고 빼는 것은 서버(api/exam.js hkExam)가 한다. 정답이 든 시험지 문서는 서버만 고친다.
+const HK_TITLE = "학교 결정 모의고사 · ";
+const isHkSchool = (e) => String(e.title || "").startsWith(HK_TITLE) && !String(e.id || "").startsWith("학교결정모의-공통");
+const hkSchool = (e) => String(e.title || "").slice(HK_TITLE.length).replace(/\s*\(.*$/, "");
+const hkNm = (s) => String(s || "").replace(/\s+/g, "");   // 로그인도 띄어쓰기를 지우고 찾는다
+async function hkAddStudent(cls, name, school) {
+  if (!cls.openRoster) throw new Error("이 반에서는 학생을 넣을 수 없어요");
+  const nm = hkNm(name);
+  if (!nm) throw new Error("이름을 적어 주세요");
+  // ⚠ 학생 로그인은 **이름**으로 찾는다. 다른 반(대치)에 같은 이름이 있으면 두 학생이 한 계정이 된다
+  const [ps, cs] = await Promise.all([studentsCol().get(), classesCol().get()]);
+  const dup = ps.docs.some((d) => hkNm(d.data().name) === nm)
+    || cs.docs.some((d) => (d.data().roster || []).some((r) => r && !r.teacher && hkNm(r.name) === nm));
+  if (dup) throw new Error("«" + nm + "» 은 이미 있는 이름이에요.\n학생 로그인이 이름으로 돼서, 같은 이름이면 두 학생이 한 계정이 돼요.\n이름 뒤에 A · B 를 붙여 주세요 (예: " + nm + "B).");
+  const ref = await studentsCol().add({ name: nm, school: school || "", grade: "", homeroom: "", time: Date.now(), updated: Date.now() });
+  logStudentChange("만듦", ref.id, nm, cls.name + " (학결모 등록)");
+  // 명단은 **지금 것을 다시 읽어** 얹는다 — 옆 선생님이 방금 넣은 학생이 날아가지 않게
+  const cur = await classesCol().doc(cls.id).get();
+  const roster = (cur.exists && cur.data().roster) || [];
+  const id = "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  const next = roster.concat([{ id, pid: ref.id, name: nm, school: school || "", grade: "" }]);
+  await saveClassRoster(cls.id, next);
+  cls.roster = next;
+  logStudentChange("반에 넣음", ref.id, nm, cls.name);
+  return { id, pid: ref.id, name: nm };
+}
+async function hkExamCall(cid, sid, examId, on) {
+  const u = firebase.auth().currentUser;
+  if (!u) throw new Error("로그인이 풀렸어요. 다시 들어와 주세요.");
+  const idToken = await u.getIdToken();
+  const r = await fetch("/api/exam", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken, action: "hkExam", cid, sid, examId, on }) });
+  let j = null; try { j = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error((j && j.error) || "저장하지 못했어요 (" + r.status + ")");
+  return j;
+}
+function HkRegister({ cls, onChanged }) {
+  const [exams, setExams] = useState(null);
+  const [rows, setRows] = useState(() => (cls.roster || []).filter((r) => r && !r.teacher));
+  const [name, setName] = useState("");
+  const [school, setSchool] = useState("");
+  const [pick, setPick] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  useEffect(() => examListDoc().onSnapshot((d) => setExams((d.exists && d.data().exams) || []), () => setExams([])), []);
+  useEffect(() => { setRows((cls.roster || []).filter((r) => r && !r.teacher)); }, [cls.id]);
+  const schools = (exams || []).filter(isHkSchool).sort((a, b) => hkSchool(a).localeCompare(hkSchool(b), "ko"));
+  const common = (exams || []).find((e) => String(e.id).startsWith("학교결정모의-공통"));
+  const commonOpen = common && (!(common.cids || []).length || common.cids.includes(cls.id));
+  const mine = (sid) => schools.filter((e) => mxOpenTo(e, cls.id, sid) && (e.sids || []).length);
+  function onSchool(v) {
+    setSchool(v);
+    const hit = schools.find((e) => hkNm(hkSchool(e)) === hkNm(v));
+    if (hit) setPick(hit.id);
+  }
+  async function add() {
+    if (busy) return;
+    setBusy(true); setMsg("");
+    try {
+      const st = await hkAddStudent(cls, name, school);
+      setRows((x) => x.concat([st]));
+      if (pick) await hkExamCall(cls.id, st.id, pick, true);
+      const ex = schools.find((e) => e.id === pick);
+      setMsg(st.name + " 넣었어요" + (ex ? " · " + hkSchool(ex) + " 시험지" : " · 학교 시험지는 아래에서 골라 주세요"));
+      setName(""); setSchool(""); setPick("");
+      if (onChanged) onChanged();
+    } catch (e) { alert(e.message || String(e)); }
+    setBusy(false);
+  }
+  async function toggle(st, examId, on) {
+    if (busy || !examId) return;
+    const ex = schools.find((e) => e.id === examId);
+    if (!on && !confirm(st.name + " 학생에게서 " + (ex ? hkSchool(ex) : "") + " 시험지를 뺄까요?")) return;
+    setBusy(true); setMsg("");
+    try { await hkExamCall(cls.id, st.id, examId, on); setMsg(st.name + " · " + (ex ? hkSchool(ex) : "") + (on ? " 넣었어요" : " 뺐어요")); }
+    catch (e) { alert(e.message || String(e)); }
+    setBusy(false);
+  }
+  if (exams === null) return <div className="cm-empty">불러오는 중…</div>;
+  return (<>
+    {!commonOpen && <div className="mx-void" style={{marginBottom: 10}}>공통 시험(공통수학1 22제)이 아직 이 반에 안 열려 있어요. 관리자에게 말해 주세요.</div>}
+    <div className="hk-add">
+      <input className="cm-input" placeholder="학생 이름" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
+      <input className="cm-input" placeholder="학교" list="hk-schools" value={school} onChange={(e) => onSchool(e.target.value)} disabled={busy} />
+      <datalist id="hk-schools">{schools.map((e) => <option key={e.id} value={hkSchool(e)} />)}</datalist>
+      <select className="cm-input" value={pick} onChange={(e) => setPick(e.target.value)} disabled={busy}>
+        <option value="">학교 시험지 — 나중에</option>
+        {schools.map((e) => <option key={e.id} value={e.id}>{hkSchool(e)} · {e.questions.length}문항</option>)}
+      </select>
+      <button className="cm-btn cm-btn-primary" disabled={busy || !hkNm(name)} onClick={add}>추가</button>
+    </div>
+    <div className="cm-hint" style={{margin: "6px 0 12px"}}>
+      학교를 적으면 그 학교 시험지가 저절로 골라져요. 시험지가 없는 학교는 «나중에» 로 두고 관리자에게 알려 주세요.
+      학생은 이름과 처음 PIN <b>1234</b> 로 들어가고, 들어가면 새 PIN 을 정해요. 같은 이름이 이미 있으면 막혀요 — 이름 뒤에 A · B 를 붙여요.
+    </div>
+    {msg && <div className="mx-note" style={{marginBottom: 10}}>{msg}</div>}
+    {!rows.length ? <div className="cm-empty">아직 학생이 없어요</div> : (
+      <div className="mx-tw"><table className="mx-table">
+        <thead><tr><th style={{textAlign: "left"}}>이름</th><th style={{textAlign: "left"}}>학교 시험지</th><th>더 넣기</th></tr></thead>
+        <tbody>{rows.map((st) => {
+          const m = mine(st.id);
+          return (
+            <tr key={st.id}>
+              <td style={{textAlign: "left", whiteSpace: "nowrap"}}>{st.name}</td>
+              <td style={{textAlign: "left"}}>{m.length ? <div className="mx-asg">{m.map((e) => (
+                <span key={e.id}>{hkSchool(e)} <button className="cm-link" disabled={busy} onClick={() => toggle(st, e.id, false)} title="빼기">✕</button></span>
+              ))}</div> : <span className="mx-voidtag">없음</span>}</td>
+              <td>
+                <select className="cm-input" style={{margin: 0, minWidth: 110}} value="" disabled={busy} onChange={(e) => toggle(st, e.target.value, true)}>
+                  <option value="">+ 학교</option>
+                  {schools.filter((e) => !m.includes(e)).map((e) => <option key={e.id} value={e.id}>{hkSchool(e)}</option>)}
+                </select>
+              </td>
+            </tr>
+          );
+        })}</tbody>
+      </table></div>
+    )}
+  </>);
+}
+function HkRegisterCard({ cls, onChanged }) {
+  if (!cls || !cls.openRoster) return null;
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">학교결정 모의고사 응시생 <span className="cm-h-hint">(학생 추가 · 학교 시험지 고르기)</span></h3>
+      <HkRegister cls={cls} onChanged={onChanged} />
+    </div>
+  );
+}
+
 function MockExamBoard({ cls }) {
   const [logs, setLogs] = useState(null);
   const [bulk, setBulk] = useState("");
@@ -3624,6 +3762,7 @@ function MockExamBoard({ cls }) {
   const g0 = groups.find((g) => g.k === bulk) || groups[0];
   const fileBase = g0 ? g0.date + "_" + cls.name + "_" + g0.title : "";
   return (<>
+    <HkRegisterCard cls={cls} onChanged={() => setAgain((x) => x + 1)} />
     <MockExamLive cls={cls} />
     <MockExamAssigned cls={cls} logs={logs} onOpen={setView} />
     {g0 && (
@@ -9033,6 +9172,7 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
           <h3 className="cm-h3">수업 영상 재생목록 <span className="cm-h-hint">(보고서 자동 채우기)</span></h3>
           <PlaylistSetting cls={cls} canEdit={canEdit} />
         </div>
+        {canEdit && <HkRegisterCard cls={cls} onChanged={() => bumpVer((v) => v + 1)} />}
         <div className="cm-card">
           <h3 className="cm-h3">학생 명단</h3>
           <RosterManager key={"rm" + cfgVer} cls={cls} canEdit={canEdit}

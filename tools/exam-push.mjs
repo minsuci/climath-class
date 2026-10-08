@@ -133,6 +133,21 @@ function summary(e) {
     const gap = ns.filter((n, i) => i && n !== ns[i - 1] + 1);
     if (gap.length) console.log("    ⚠ 번호가 건너뜁니다: " + gap.join(", ") + " 앞");
   }
+  // ⚠ 앱에서 덧붙인 학생을 파일로 덮어 지우지 않게 (10/8~ 학결모 반은 선생님이 앱에서 학교 시험지를 건다)
+  const { exams: cur } = await call({ action: "examKeys" });
+  const lost = [];
+  for (const e of exams) {
+    const k = cur.find((x) => x.id === e.id);
+    if (!k) continue;
+    const n = (k.names || []).filter((x) => !(e.names || []).includes(x));
+    const c = (k.cids || []).filter((x) => !(e.cids || []).includes(x));
+    if (n.length || c.length) lost.push(`  ${e.id}  학생 ${n.join(", ") || "-"}  반 ${c.join(", ") || "-"}`);
+  }
+  if (lost.length && !has("--replace")) {
+    console.log("\n✗ 앱에 걸려 있는데 파일에 없는 학생·반이 있어요 — 올리면 빠집니다:\n" + lost.join("\n") +
+      "\n  파일에 넣고 다시 올리거나, 빼는 게 맞으면 --replace 를 붙이세요.");
+    process.exit(1);
+  }
   if (has("--dry")) { console.log("\n(--dry — 올리지 않았습니다)"); return; }
   for (const e of exams) {
     const r = await call({ action: "examPut", exam: e });
