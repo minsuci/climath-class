@@ -98,6 +98,14 @@ function summary(e) {
     console.log("\n" + logs.length + "건 → " + out);
     return;
   }
+  // 학생 지정(names)을 지금 명단으로 다시 맞춘다 — 자리 ID 를 «반ID/자리ID» 로 바꾼 뒤 (10/8) · 몇 번 돌려도 같다
+  //   node tools/exam-push.mjs --resids [--dry]
+  if (has("--resids")) {
+    const r = await call({ action: "examResids", dry: has("--dry") });
+    r.done.forEach((x) => console.log(`  ${x.id}  ` + (x.error ? "✗ " + x.error : x.same ? "그대로" : x.from.join(",") + "  →  " + x.to.join(","))));
+    console.log((r.dry ? "(--dry — 안 고침) " : "맞춤 ") + r.done.filter((x) => !x.same && !x.error).length + "건");
+    return;
+  }
   if (has("--classes")) {
     const q = arg("--classes") && !arg("--classes").startsWith("--") ? arg("--classes") : "";
     const { classes } = await call({ action: "classes" });

@@ -114,6 +114,30 @@ function checkExam(e) {
 }
 
 // 학생이 보는 목록 — **정답(ans)만 뺀다.** 나머지는 그대로
+// names(학생 이름) → sids. names 가 있으면 그 학생들만 본다. 목록(appConfig/examList)은 로그인한
+// 누구나 읽으니 이름은 싣지 않고 자리 ID 로 바꿔 둔다. 명단에 없는 이름은 여기서 막는다.
+// ⚠ 자리 ID 는 **반마다 따로** 매긴다(s1, s2…). 반 둘에 연 시험지에 «s2» 만 적으면 다른 반의 s2 도
+//    보게 된다(10/8 — 고1S·고1TOP 에 연 중동고 1회). 그래서 «반ID/자리ID» 로 적는다
+async function resolveSids(cids, names) {
+  if (!names.length) return { sids: [] };
+  if (!cids.length) return { error: "names 를 쓰려면 cids(반)도 적어야 해요" };
+  const rows = [];
+  for (const c of cids) {
+    const cl = await getDoc("classes/" + c).catch(() => null);
+    if (!cl) return { error: "반이 없어요: " + c };
+    (cl.roster || []).forEach((r) => r && r.id && rows.push({ ...r, cid: c }));
+  }
+  const sids = [];
+  for (const nm of names) {
+    const hit = rows.filter((r) => String(r.name || "").trim() === nm);
+    // 한 학생이 반 둘에 있으면(정규반 + 개진반) 이름이 두 번 잡힌다 — 같은 사람(pid)이면 두 자리 다 연다
+    const people = new Set(hit.map((r) => r.pid || r.cid + "/" + r.id));
+    if (!hit.length || people.size !== 1) return { error: (hit.length ? "명단에 둘 이상: " : "명단에 없는 이름: ") + nm };
+    hit.forEach((r) => sids.push(r.cid + "/" + r.id));
+  }
+  return { sids };
+}
+
 async function rebuildList() {
   const all = await listDocs("examKeys").catch(() => []);
   const exams = all.map((e) => ({
@@ -302,25 +326,10 @@ export default async function handler(req, res) {
         if (err) { res.status(400).json({ error: err }); return; }
         // names 가 있으면 그 학생들만 본다. 이름을 반 명단의 ID 로 바꿔 둔다 —
         // 목록은 로그인한 누구나 읽으니 이름은 싣지 않고, 명단에 없는 이름은 여기서 막는다
-        let sids = [];
         const names = Array.isArray(e.names) ? e.names.map((x) => String(x).trim()).filter(Boolean) : [];
-        if (names.length) {
-          const cids = Array.isArray(e.cids) ? e.cids.map(String) : [];
-          if (!cids.length) { res.status(400).json({ error: "names 를 쓰려면 cids(반)도 적어야 해요" }); return; }
-          const rows = [];
-          for (const c of cids) {
-            const cl = await getDoc("classes/" + c).catch(() => null);
-            if (!cl) { res.status(400).json({ error: "반이 없어요: " + c }); return; }
-            (cl.roster || []).forEach((r) => r && r.id && rows.push(r));
-          }
-          for (const nm of names) {
-            const hit = rows.filter((r) => String(r.name || "").trim() === nm);
-            // 한 학생이 반 둘에 있으면(정규반 + 개진반) 이름이 두 번 잡힌다 — 같은 사람(pid)이면 두 자리 다 연다
-            const people = new Set(hit.map((r) => r.pid || r.id));
-            if (!hit.length || people.size !== 1) { res.status(400).json({ error: (hit.length ? "명단에 둘 이상: " : "명단에 없는 이름: ") + nm }); return; }
-            hit.forEach((r) => sids.push(r.id));
-          }
-        }
+        const got = await resolveSids(Array.isArray(e.cids) ? e.cids.map(String) : [], names);
+        if (got.error) { res.status(400).json({ error: got.error }); return; }
+        const sids = got.sids;
         // patchDoc 은 보낸 칸만 고친다. 전에 있던 cids·test 가 남지 않게 **전부 적는다**
         await patchDoc("examKeys/" + e.id, {
           title: String(e.title).trim(), minutes: Number(e.minutes),
@@ -332,6 +341,22 @@ export default async function handler(req, res) {
         });
         const n = await rebuildList();
         res.status(200).json({ ok: true, id: e.id, listed: n }); return;
+      }
+      // 올라가 있는 시험지의 sids 를 지금 명단으로 다시 맞춘다 (10/8 «반ID/자리ID» 로 바꾼 뒤 한 번 · 몇 번 돌려도 같다)
+      if (body.action === "examResids") {
+        const all = await listDocs("examKeys").catch(() => []);
+        const done = [];
+        for (const k of all) {
+          const names = (k.names || []).map((x) => String(x).trim()).filter(Boolean);
+          if (!names.length) continue;
+          const got = await resolveSids((k.cids || []).map(String), names);
+          if (got.error) { done.push({ id: k.id, error: got.error }); continue; }
+          const same = JSON.stringify(got.sids) === JSON.stringify(k.sids || []);
+          if (!same && !body.dry) await patchDoc("examKeys/" + k.id, { sids: got.sids });
+          done.push({ id: k.id, from: k.sids || [], to: got.sids, same });
+        }
+        if (!body.dry) await rebuildList();
+        res.status(200).json({ ok: true, dry: !!body.dry, done }); return;
       }
       if (body.action === "examDel") {
         await deleteDoc("examKeys/" + String(body.id || ""));
