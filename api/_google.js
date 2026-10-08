@@ -237,6 +237,28 @@ export async function listDocs(path) {
   return out;
 }
 
+// 컬렉션에서 **id 가 prefix 로 시작하는 문서의 id 만** 읽는다 (최상위 컬렉션만).
+// ⚠ listDocs 는 컬렉션 전체를 읽는다 — 읽기 1건 = 문서 1개라, examImgs(그림 1,300장+)를 시험지 하나
+//    확인하려고 통째로 읽다가 하루 읽기 한도(무료 5만)를 다 써서 앱이 멈췄다(2026-10-08).
+//    여기선 이름 범위로 걸러 그 시험지 것만 읽고, 칸은 안 가져온다(그림 base64 를 받지 않는다).
+export async function listIdsWithPrefix(collection, prefix) {
+  const base = docBase();
+  const root = base.replace("https://firestore.googleapis.com/v1/", "");
+  const ref = (id) => ({ referenceValue: root + "/" + collection + "/" + id });
+  const j = await call(base + ":runQuery", {
+    method: "POST",
+    body: JSON.stringify({ structuredQuery: {
+      from: [{ collectionId: collection }],
+      select: { fields: [{ fieldPath: "__name__" }] },
+      where: { compositeFilter: { op: "AND", filters: [
+        { fieldFilter: { field: { fieldPath: "__name__" }, op: "GREATER_THAN_OR_EQUAL", value: ref(prefix) } },
+        { fieldFilter: { field: { fieldPath: "__name__" }, op: "LESS_THAN", value: ref(prefix + "") } },
+      ] } },
+    } }),
+  });
+  return (j || []).filter((x) => x.document).map((x) => x.document.name.split("/").pop());
+}
+
 // 문서 하나 지우기. 없어도 성공으로 친다 — 지우는 일은 «없는 상태로 만들기»가 목적이라
 // 이미 없으면 이미 목적이 이뤄진 것이다.
 export async function deleteDoc(path) {

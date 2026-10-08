@@ -12,7 +12,7 @@
 // 기록(examLogs)의 이름이 로그인한 이름과 같아야 한다.
 //
 // 넣기는 PC 도구로 (tools/exam-img.py, 도구 열쇠 team/tools.lessonKey)
-import { verifyIdToken, getDoc, patchDoc, listDocs, deleteDoc } from "./_google.js";
+import { verifyIdToken, getDoc, patchDoc, deleteDoc, listIdsWithPrefix } from "./_google.js";
 
 const ID_RE = /^[0-9A-Za-z가-힣_.\-]{2,80}$/;
 const imgPath = (examId, n, kind) => "examImgs/" + examId + "__" + n + (kind === "sol" ? "s" : "");
@@ -40,16 +40,15 @@ export default async function handler(req, res) {
         res.status(200).json({ ok: true }); return;
       }
       if (body.action === "imgList") {
-        const all = await listDocs("examImgs").catch(() => []);
-        const ids = all.filter((d) => d.id.startsWith(examId + "__")).map((d) => d.id.split("__")[1]);
+        // ⚠ 컬렉션 통째(listDocs)로 읽지 않는다 — 그림 1,300장+ 를 매번 읽어 하루 읽기 한도를 다 썼다(10/8)
+        const ids = (await listIdsWithPrefix("examImgs", examId + "__")).map((id) => id.split("__")[1]);
         const ns = ids.filter((x) => /^\d+$/.test(x)).map(Number).sort((a, b) => a - b);
         const sols = ids.filter((x) => /^\d+s$/.test(x)).map((x) => parseInt(x, 10)).sort((a, b) => a - b);
         res.status(200).json({ ok: true, ns, sols }); return;
       }
       if (body.action === "imgDel") {
-        const all = await listDocs("examImgs").catch(() => []);
-        const mine = all.filter((d) => d.id.startsWith(examId + "__"));
-        for (const d of mine) await deleteDoc("examImgs/" + d.id);
+        const mine = await listIdsWithPrefix("examImgs", examId + "__");
+        for (const id of mine) await deleteDoc("examImgs/" + id);
         res.status(200).json({ ok: true, deleted: mine.length }); return;
       }
       // 학생이 막힐 때 확인용 — 서버가 그 기록을 어떻게 읽는지 그대로 보여 준다
