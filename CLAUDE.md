@@ -46,7 +46,7 @@ repo/
 
 학교결정 모의고사(학결모)를 서초 · 평촌에서도 받는다. 그쪽 선생님은 팀체크를 안 쓰므로
 **반 문서에 `openRoster: true` 가 있는 반만** 반 설정 · 실전 시험 탭에 «학교결정 모의고사 응시생» 카드가 뜬다
-(`HkRegisterCard`). 학생을 만들고(`hkAddStudent` — `rosterGuard` 를 안 거친다) 바로 학교 시험지를 건다(서버 `hkExam`).
+(`HkRegisterCard`), 그리고 왼쪽 «학생 명단» 맨 위(`HkDirectoryCard`, 담당 반이 둘 이상이면 탭). 학생을 만들고(`hkAddStudent` — `rosterGuard` 를 안 거친다) 바로 학교 시험지를 건다(서버 `hkExam`).
 
 - 지금 켜진 반: 학교결정 모의고사 (서초) · (평촌). 대치 반은 끄고 둔다(팀체크에서 넣는다)
 - **닫을 때는 반 문서의 `openRoster` 만 지운다.** 코드는 그대로 두어도 된다

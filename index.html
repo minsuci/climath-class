@@ -3762,6 +3762,30 @@ function HkRegisterCard({ cls, onChanged }) {
   );
 }
 
+// 왼쪽 «학생 명단» 맨 위에도 — 반에 들어가 실전 시험 탭까지 가지 않아도 찾게 (10/8).
+// 담당 반 중 openRoster 인 것만. 둘 이상(관리자: 서초 · 평촌)이면 탭으로 고른다
+function HkDirectoryCard({ onChanged }) {
+  const mine = CLASSES.filter((c) => c.openRoster && inScope(c) && !isClassEnded(c));
+  const [cid, setCid] = useState(mine.length ? mine[0].id : "");
+  if (!mine.length) return null;
+  const cls = mine.find((c) => c.id === cid) || mine[0];
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">학교결정 모의고사 응시생 <span className="cm-h-hint">(학생 추가 · 학교 시험지 · 지우기)</span></h3>
+      {mine.length > 1 && (
+        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
+          {mine.map((c) => (
+            <button key={c.id} className={"cm-ab-tab" + (c.id === cls.id ? " on" : "")} onClick={() => setCid(c.id)}>
+              {c.name.replace(/^학교결정 모의고사\s*/, "") || c.name} {(c.roster || []).filter((r) => r && !r.teacher).length}
+            </button>
+          ))}
+        </div>
+      )}
+      <HkRegister key={cls.id} cls={cls} onChanged={onChanged} />
+    </div>
+  );
+}
+
 function MockExamBoard({ cls }) {
   const [logs, setLogs] = useState(null);
   const [bulk, setBulk] = useState("");
@@ -4569,6 +4593,7 @@ function StudentDirectory({ me, onBack, initialCls }) {
 
   return (
     <div ref={backRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
+      <HkDirectoryCard onChanged={() => bumpVer((v) => v + 1)} />
       <div className="cm-card">
         <div className="cm-admin-top" style={{marginBottom: 10}}>
           <h2 className="cm-h2" style={{margin: 0}}>학생 명단</h2>
