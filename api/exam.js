@@ -416,7 +416,7 @@ export default async function handler(req, res) {
           questions: e.questions.map((q) => ({ n: q.n, type: q.type, ...(q.ans != null ? { ans: q.ans } : {}),
                                                ...(q.label ? { label: String(q.label).trim() } : {}),
                                                ...(q.pt != null ? { pt: q.pt } : {}) })),
-          cids: Array.isArray(e.cids) ? e.cids.map(String) : [], sids, names, test: !!e.test, lock: !!e.lock,
+          cids: Array.isArray(e.cids) ? e.cids.map(String) : [], sids, names, test: !!e.test, lock: !!e.lock, hkEmpty: !!e.hkEmpty,   // hkEmpty = 학결모 «걸어 둘 학생 없이 숨겨 둔» 시험지 (학생을 걸면 열린다)
           order: Number(e.order) || 0, updated: Date.now(),
         });
         const n = await rebuildList();
