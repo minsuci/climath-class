@@ -326,6 +326,7 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-cell.done.clickable:hover{border-color:var(--clay); color:var(--clay);}
 .cm-cell.q{color:#d6453f; font-weight:700;}
 .cm-cell.x{box-shadow:inset 0 0 0 2px #d6453f;}
+.cm-hw-lock{font-size:11.5px; font-weight:700; color:var(--navy); background:#e9eef6; border-radius:999px; padding:2px 8px; margin-left:6px; vertical-align:middle;}
 .mx-chip.prev{background:#f3f0e8; color:var(--muted);} .mx-chip.prev i{color:#2f7d4f; font-weight:700;}
 .hw-unit{grid-column:1 / -1; font-size:12px; font-weight:800; color:var(--navy); margin:8px 0 0; padding-bottom:3px; border-bottom:1px solid var(--line);}   /* 과제 채점에서 처음에 틀린 번호 */
 
@@ -2109,7 +2110,9 @@ function HwGrid({ total, set, qset, xset, bookName, onCellDown, onCellClick }) {
   return <div className="cm-grid">{cells}</div>;
 }
 
-function BookHwCard({ book, initial, qNumbers, xNumbers, onClearQuestion, onChange }) {
+// locked = 정답이 올라간 교재(과제 채점과 이은 것). 손으로 못 칠한다 — 답을 내면 칠해진다(10/10 마왕님).
+//          칸을 누르면 그 번호부터 풀기 시작(onStart(n))
+function BookHwCard({ book, initial, qNumbers, xNumbers, onClearQuestion, onChange, locked, onStart, startHint }) {
   const xset = xNumbers && xNumbers.size ? xNumbers : null;
   const setRef = useRef(new Set(initial));
   const [, setTick] = useState(0);
@@ -2119,7 +2122,7 @@ function BookHwCard({ book, initial, qNumbers, xNumbers, onClearQuestion, onChan
   const [painting, setPainting] = useState(false);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const set = setRef.current;
+  const set = locked ? new Set(initial) : setRef.current;
   const qset = new Set(qNumbers || []);
   const commit = () => onChange(Array.from(setRef.current).sort((a, b) => a - b));
 
@@ -2177,6 +2180,24 @@ function BookHwCard({ book, initial, qNumbers, xNumbers, onClearQuestion, onChan
     setFrom(""); setTo(""); rerender(); commit();
   }
 
+  if (locked) return (
+    <div className="cm-card">
+      <div className="cm-book-head">
+        <h3 className="cm-h3" style={{ margin: 0 }}>{book.name} <span className="cm-hw-lock">✎ 답 내기</span></h3>
+        <span className="cm-book-count">{set.size} / {book.total}<span className="cm-book-pct"> ({book.total > 0 ? Math.round(set.size / book.total * 100) : 0}%)</span></span>
+      </div>
+      <button className="cm-btn cm-btn-primary" style={{ marginTop: 4, marginBottom: 8 }} onClick={() => onStart()}>풀기 시작{startHint ? " — " + startHint : ""}</button>
+      {qNumbers && qNumbers.length > 0 && onClearQuestion && (
+        <div className="cm-qchips">
+          <span className="cm-qchips-label">질문한 번호</span>
+          {qNumbers.slice().sort((a, b) => a - b).map((n) => (
+            <button key={n} className="cm-qchip" onClick={() => onClearQuestion(n)}>{n} ✕</button>
+          ))}
+        </div>
+      )}
+      <HwGrid total={book.total} set={set} qset={qset} xset={xset} bookName={book.name} onCellDown={() => {}} onCellClick={(n) => onStart(n)} />
+    </div>
+  );
   return (
     <div className="cm-card">
       <div className="cm-book-head">
@@ -3934,9 +3955,10 @@ function StudentHome({ cls, me, onLogout }) {
   // 내신 접수는 선생님이 회차를 연 동안에만 학생에게 보인다
   const [examTerms, setExamTerms] = useState([]);
   useEffect(() => listenExamTerms(setExamTerms), []);
-  const hwBooks = useHwBooks(cls, me);   // 과제 채점 — 이 반에 교재가 걸렸을 때만 탭을 띄운다
+  const hwBooks = useHwBooks(cls, me);   // 과제 채점 교재 — «과제» 탭 안에서 «답 내기» 교재가 된다
   // 실전 시험은 출석과 묶지 않는다 — 시간 재는 시험을 «출석부터» 에서 막으면 시작부터 어긋난다
-  const noGateTabs = ["prog", "notes", "ai", "flyer", "exam", "mock", "hwb"]; // 출석 없이도 볼 수 있는 탭
+  const hwOpen = !!(hwBooks && hwBooks.length);   // 과제 채점 교재가 걸린 반은 «과제» 를 출석 없이 연다 — 집에서 푼다
+  const noGateTabs = ["prog", "notes", "ai", "flyer", "exam", "mock", ...(hwOpen ? ["hw"] : [])]; // 출석 없이도 볼 수 있는 탭
   const activeTab = me.teacher ? tab : (att || noGateTabs.includes(tab) ? tab : "att");
   const showDmBanner = !!(dmNotice && dmNotice.active && dmNotice.text && !dmDismissed);
   const showClassBanner = !!(notice && notice.active && notice.text && !noticeDismissed) && !showDmBanner;
@@ -3950,12 +3972,11 @@ function StudentHome({ cls, me, onLogout }) {
       items={[
         ...(!me.teacher ? [{ key: "att", ico: "✓", label: "출석" }] : []),
         { key: "q", ico: "?", label: "질문", disabled: !me.teacher && !att },
-        { key: "hw", ico: "▤", label: "과제", disabled: !me.teacher && !att },
+        { key: "hw", ico: "▤", label: "과제", disabled: !me.teacher && !att && !hwOpen },
         { key: "score", ico: "◈", label: "점수", disabled: !me.teacher && !att },
         { sep: true },
         { key: "prog", ico: "▦", label: "진도계획표" },
         { key: "mock", ico: "⏱", label: "실전 시험" },
-        ...(hwBooks && hwBooks.length ? [{ key: "hwb", ico: "✎", label: "과제 채점" }] : []),
         ...(hasFlyer ? [{ key: "flyer", ico: "▤", label: "안내문" }] : []),
         ...(examTerms.length ? [{ key: "exam", ico: "▣", label: "내신" }] : []),
         { key: "notes", ico: "✎", label: "강의노트" },
@@ -4017,7 +4038,6 @@ function StudentHome({ cls, me, onLogout }) {
       </>)}
       {activeTab === "prog" && <StudentProgressView cls={cls} me={me} />}
       {activeTab === "mock" && <MockExamTab cls={cls} me={me} />}
-      {activeTab === "hwb" && <HwTab cls={cls} me={me} />}
       {activeTab === "flyer" && <FlyerView cls={cls} />}
       {activeTab === "exam" && <ExamForm cls={cls} me={me} />}
       {activeTab === "notes" && (
@@ -4122,33 +4142,52 @@ function QuestionForm({ cls, me }) {
   );
 }
 
+// 과제 = 번호표 + 과제 채점(10/10 합침). 반 교재 중 정답이 올라간 것(과제 채점 교재의 link 가 같은 이름)은
+// 잠근 카드 — 손으로 못 칠하고 «풀기 시작» 으로 답을 낸다. 나머지는 예전처럼 칠한다
 function StudentHomework({ cls, me }) {
+  const hwBooks = useHwBooks(cls, me);
+  const [ver, setVer] = useState(0);   // 제출하고 돌아오면 번호표 · 빨간 테두리를 다시 읽는다
   const [done, setDone] = useState(null);
   const [qbooks, setQbooks] = useState({});
-  useEffect(() => { getMyHw(cls.id, me.id).then((d) => setDone(d)); }, [cls.id, me.id]);
+  useEffect(() => { getMyHw(cls.id, me.id).then((d) => setDone(d)); }, [cls.id, me.id, ver]);
   useEffect(() => {
     const unsub = listenQuestioned(cls.id, me.id, (books) => setQbooks(books));
     return () => unsub();
   }, [cls.id, me.id]);
 
-  const xs = useHwWrongByBook(cls.id, me.id);
+  const xs = useHwWrongByBook(cls.id, me.id, ver);
   function persistBook(bookName, arr) {
     setDone((prev) => ({ ...(prev || {}), [bookName]: arr }));
     saveHwBook(cls.id, me, bookName, arr);
   }
-  if (!done) return <div className="cm-card cm-empty">불러오는 중…</div>;
-  return (
-    <>
-      <div className="cm-card cm-hint">
-        완료한 번호를 <b>누르거나, 마우스로 드래그</b>해서 칠하세요. 터치 화면에서는 칸을 <b>꾹 눌러 칠하기 모드</b>로 들어간 뒤 손가락을 끌면 됩니다. 표시한 번호는 <b>날마다 지워지지 않고 계속 누적</b>돼요. <b style={{ color: "#d6453f" }}>질문한 번호는 빨간 글씨</b>로 누적 표시되고, 빨간 번호 칩을 눌러 지울 수 있어요. <b>✎ 과제 채점</b>에 답을 낸 번호는 저절로 칠해지고, 처음에 틀린 번호는 <b style={{ color: "#d6453f" }}>빨간 테두리</b>예요.
-      </div>
-      {getStudentBooks(cls, me).map((b) => (
-        <BookHwCard key={b.name} book={b} initial={done[b.name] || []}
+  if (!done || hwBooks === null) return <div className="cm-card cm-empty">불러오는 중…</div>;
+  const myBooks = getStudentBooks(cls, me);
+  const byLink = {}; hwBooks.forEach((h) => { if (h.link && !byLink[h.link]) byLink[h.link] = h; });
+  const anyLocked = myBooks.some((b) => byLink[b.name]);
+  const anyFree = myBooks.some((b) => !byLink[b.name]);
+  const cards = (ctl) => (<>
+    <div className="cm-card cm-hint">
+      {anyLocked && <><b>✎ 답 내기</b> 교재는 <b>풀기 시작</b>을 눌러 푼 문제의 답을 적어요(번호 칸을 누르면 그 번호부터). 낸 번호가 칠해지고, 처음에 틀린 번호는 <b style={{ color: "#d6453f" }}>빨간 테두리</b>예요. 손으로는 못 칠해요.{anyFree ? <br /> : null}</>}
+      {anyFree && <>완료한 번호를 <b>누르거나, 마우스로 드래그</b>해서 칠하세요. 터치 화면에서는 칸을 <b>꾹 눌러 칠하기 모드</b>로 들어간 뒤 손가락을 끌면 됩니다. 표시한 번호는 <b>날마다 지워지지 않고 계속 누적</b>돼요.</>}
+      {" "}<b style={{ color: "#d6453f" }}>질문한 번호는 빨간 글씨</b>로 누적 표시되고, 빨간 번호 칩을 눌러 지울 수 있어요.
+    </div>
+    {myBooks.map((b) => {
+      const h = byLink[b.name];
+      if (h && ctl) {
+        // 번호표 기록(homework) + 낸 기록에서 답을 적은 번호 — 선생님 모드는 서버가 번호표에 안 칠해서 기록 쪽으로 채운다
+        const all = [...new Set((done[b.name] || []).concat(ctl.answered(h.id)))].filter((n) => n <= b.total);
+        const nx = ctl.next(h);
+        return <BookHwCard key={b.name} book={b} initial={all} locked startHint={nx ? nx + "번부터" : ""}
           qNumbers={qbooks[b.name]} xNumbers={xs[b.name]} onClearQuestion={(n) => removeQuestioned(cls.id, me.id, b.name, n)}
-          onChange={(arr) => persistBook(b.name, arr)} />
-      ))}
-    </>
-  );
+          onStart={(n) => ctl.start(h, n)} />;
+      }
+      return <BookHwCard key={b.name} book={b} initial={done[b.name] || []}
+        qNumbers={qbooks[b.name]} xNumbers={xs[b.name]} onClearQuestion={(n) => removeQuestioned(cls.id, me.id, b.name, n)}
+        onChange={(arr) => persistBook(b.name, arr)} />;
+    })}
+  </>);
+  if (!anyLocked) return cards(null);
+  return <HwTab cls={cls} me={me} home={cards} onChanged={() => setVer((v) => v + 1)} />;
 }
 
 // ===== 과제 채점 (2026-10-10 · 고1 기말대비 «초개인화») =====
@@ -4178,7 +4217,7 @@ function useHwBooks(cls, me) {
 }
 // 반 «과제» 번호표에 띄울 «과제 채점에서 처음에 틀린 번호» — {반 교재 이름: Set(번호)}. 교재의 link 로 잇는다.
 // 다시 풀어 맞혔어도 처음에 틀렸으면 남긴다(그게 «실수 0» 의 대상이다)
-function useHwWrongByBook(cid, sid) {
+function useHwWrongByBook(cid, sid, ver) {
   const [xs, setXs] = useState({});
   useEffect(() => {
     let live = true;
@@ -4192,7 +4231,7 @@ function useHwWrongByBook(cid, sid) {
       setXs(out);
     });
     return () => { live = false; };
-  }, [cid, sid]);
+  }, [cid, sid, ver]);
   return xs;
 }
 async function hwLogs(cid, sid, maxDays) {
@@ -4591,7 +4630,9 @@ function HwResult({ log: log0, book, onBack, onRetry, canSelf }) {
 }
 
 // 학생 — 교재 고르고, 푼 번호 적고, 시작
-function HwTab({ cls, me }) {
+// home(ctl) 을 주면(과제 탭 안 — StudentHomework) 교재 고르기 카드 대신 그걸 그린다.
+// ctl.start(교재, 번호?) · ctl.answered(교재id) = 답을 적어 낸 번호 · ctl.next(교재) = 이어서 풀 번호
+function HwTab({ cls, me, home, onChanged }) {
   const K = hwKey(cls.id, me.id);
   const books = useHwBooks(cls, me);
   const [running, setRunning] = useState(() => !!mxLoad(K));
@@ -4620,14 +4661,23 @@ function HwTab({ cls, me }) {
   }
   // 교재 전체가 뜬다(10/10 마왕님 — 번호를 적게 하지 않는다). 푼 번호를 눌러 답을 적고, 낼 땐 답을 적은 것만 간다.
   // 전에 낸 번호는 연하게(✓) 보이고, 처음 번호는 아직 안 낸 첫 번호
-  function start() {
-    if (!book) return;
-    try { localStorage.setItem("climath_hw_book", book.id); } catch (e) {}
-    const first = (book.questions.find((q) => !doneN.has(q.n)) || book.questions[0]).n;
-    begin({ rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), bookId: book.id, title: book.title,
-            units: book.units || [], all: true, cur: first, ev: [{ t: 0, k: "go", q: first }],
-            questions: book.questions.map((q) => ({ n: q.n, type: q.type, ...(q.u != null ? { u: q.u } : {}) })) });
+  const doneOf = (id) => new Set((past || []).filter((l) => l.bookId === id).flatMap((l) => l.nums || []));
+  const nextOf = (b) => { const d = doneOf(b.id), last = d.size ? Math.max(...d) : 0; const q = b.questions.find((x) => x.n > last); return q ? q.n : null; };
+  function start(bk0, at) {
+    const bk = bk0 || book;
+    if (!bk) return;
+    try { localStorage.setItem("climath_hw_book", bk.id); } catch (e) {}
+    const d = doneOf(bk.id);
+    const first = (at && bk.questions.find((q) => q.n === at)) ? at : (bk.questions.find((q) => !d.has(q.n)) || bk.questions[0]).n;
+    begin({ rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), bookId: bk.id, title: bk.title,
+            units: bk.units || [], all: true, cur: first, ev: [{ t: 0, k: "go", q: first }],
+            questions: bk.questions.map((q) => ({ n: q.n, type: q.type, ...(q.u != null ? { u: q.u } : {}) })) });
   }
+  const ctl = {
+    start: (bk, n) => start(bk, n),
+    answered: (id) => [...new Set((past || []).filter((l) => l.bookId === id).flatMap((l) => (l.questions || []).filter((q) => q.answer != null).map((q) => q.n)))],
+    next: (bk) => nextOf(bk),
+  };
   function retry(log, wrong) {
     const bk = (books || []).find((b) => b.id === log.bookId);
     begin({ rid: log.rid, bookId: log.bookId, title: log.title, units: (bk && bk.units) || [], retry: { date: log.date, rid: log.rid },
@@ -4636,12 +4686,12 @@ function HwTab({ cls, me }) {
 
   const runBook = running ? (mxLoad(K) || {}).bookId : null;
   const runPrev = runBook ? [...new Set((past || []).filter((l) => l.bookId === runBook).flatMap((l) => l.nums || []))] : [];
-  if (running) return <HwRun cls={cls} me={me} prevNums={runPrev} onDone={(log) => { setRunning(false); setView(log); setAgain((x) => x + 1); }} onAbandon={() => setRunning(false)} />;
-  if (view) return <HwResult log={view} book={(books || []).find((b) => b.id === view.bookId)} onRetry={retry} canSelf onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
+  if (running) return <HwRun cls={cls} me={me} prevNums={runPrev} onDone={(log) => { setRunning(false); setView(log); setAgain((x) => x + 1); onChanged && onChanged(); }} onAbandon={() => setRunning(false)} />;
+  if (view) return <HwResult log={view} book={(books || []).find((b) => b.id === view.bookId)} onRetry={retry} canSelf onBack={() => { setView(null); setAgain((x) => x + 1); onChanged && onChanged(); }} />;
 
   const sums = (books || []).map((b) => ({ b, s: hwSum((past || []).filter((l) => l.bookId === b.id)) })).filter((x) => x.s.n);
   return (<>
-    <div className="cm-card">
+    {home ? home(ctl) : <div className="cm-card">
       <h3 className="cm-h3">과제 채점 <span className="cm-h-hint">(푼 문제 답 적기 · 시간 재기)</span></h3>
       {books === null ? <div className="cm-empty">불러오는 중…</div>
         : !books.length ? <div className="cm-empty">아직 올라온 교재가 없어요</div>
@@ -4658,9 +4708,9 @@ function HwTab({ cls, me }) {
           )}
           <div className="mx-note">교재에 풀고, <b>지금 푸는 문제 번호를 눌러 둔 채</b> 풀어요. 답을 적으면 다음 문제로 넘어가요.<br />
             시간 제한은 없어요. 자리를 뜰 땐 <b>쉬기</b> — 쉰 시간은 빼고 세요. 낼 땐 <b>답을 적은 문제만</b> 가요.</div>
-          <button className="cm-btn cm-btn-primary" disabled={!book} onClick={start}>시작</button>
+          <button className="cm-btn cm-btn-primary" disabled={!book} onClick={() => start()}>시작</button>
         </>)}
-    </div>
+    </div>}
     {sums.length > 0 && (
       <div className="cm-card">
         <h3 className="cm-h3">내 기록 <span className="cm-h-hint">(교재별 · 처음 시도 기준)</span></h3>
