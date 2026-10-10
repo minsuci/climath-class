@@ -502,6 +502,28 @@ async function hwRetry(res, claims, b) {
   res.status(200).json({ ok: true, log: { ...log, ...patch } });
 }
 
+// 앱 번호판으로 못 적는 답(√ · 순서쌍 · 부등식 · 증명)은 교재에서 type:"essay" 로 둔다. 학생이 «다 풀었음» 을 누르고,
+// 낸 뒤 책의 빠른정답을 보고 스스로 O/X 한다 — 그게 그 문항의 첫 시도다(self:true). 한 번 정하면 못 바꾼다
+async function hwSelf(res, claims, b) {
+  const cid = String(b.cid || ""), date = String(b.date || ""), rid = String(b.rid || "");
+  if (!cid || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^[A-Za-z0-9_-]{6,40}$/.test(rid)) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  const path = "classes/" + cid + "/days/" + date + "/hwLogs/" + rid;
+  const log = await getDoc(path).catch(() => null);
+  if (!log) { res.status(404).json({ error: "그 기록이 없어요" }); return; }
+  const who = await hwWho(res, claims, cid, log.sid); if (!who) return;
+  const marks = b.marks && typeof b.marks === "object" ? b.marks : {};
+  let changed = 0;
+  const questions = (log.questions || []).map((row) => {
+    if (!(String(row.n) in marks) || row.auto !== null || row.answer == null) return row;
+    changed++;
+    return { ...row, auto: marks[row.n] === true, self: true };
+  });
+  if (!changed) { res.status(400).json({ error: "정할 문항이 없어요" }); return; }
+  const patch = { questions, correct: questions.filter((q) => q.auto === true).length, pending: questions.filter((q) => q.auto === null).length };
+  await patchDoc(path, patch);
+  res.status(200).json({ ok: true, log: { ...log, ...patch } });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
   try {
@@ -633,6 +655,7 @@ export default async function handler(req, res) {
     if (body.action === "hkExam") return await hkExam(res, claims, body);
     if (body.action === "hwSubmit") return await hwSubmit(res, claims, body);
     if (body.action === "hwRetry") return await hwRetry(res, claims, body);
+    if (body.action === "hwSelf") return await hwSelf(res, claims, body);
     if (body.action === "hkRemove") return await hkRemove(res, claims, body);
     res.status(400).json({ error: "그런 동작이 없어요" });
   } catch (e) {

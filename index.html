@@ -4195,7 +4195,7 @@ function hwSecsOf(ev, endT) {
 const hwAns = (q, v) => (v == null || v === "" ? "–" : q.type === "mc" ? MX_CIRC[v] || v : q.type === "essay" ? "✓" : String(v));
 // 첫 시도: O · X · –(안 적음) · ?(서술형)
 const hwFirst = (q) => (q.answer == null ? "–" : q.auto === null ? "?" : q.auto ? "O" : "X");
-const hwWrong = (q) => q.auto === false && q.fin !== true;          // 아직 못 맞힌 것 (안 적은 것 포함)
+const hwWrong = (q) => q.auto === false && q.fin !== true && !q.self;   // 아직 못 맞힌 것 (안 적은 것 포함). 스스로 채점한 것은 다시 풀기에서 뺀다
 // 여러 기록을 합친 숫자 — 학생 «내 기록» 과 선생님 판이 같이 쓴다
 function hwSum(logs) {
   let n = 0, tried = 0, ok = 0, blank = 0, fixed = 0, sec = 0, secN = 0;
@@ -4366,7 +4366,7 @@ function HwRun({ cls, me, onDone, onAbandon }) {
     body = (
       <div className="mx-essay">
         <button className="mx-btn primary big" onClick={() => setAnswer(q.n, "✓")}>{mxAnswered(S, q.n) ? "다 풀었음 ✓" : "다 풀었음"}</button>
-        <div className="cm-hint" style={{marginTop: 10}}>서술형은 채점하지 않아요. 다 풀었으면 눌러요.</div>
+        <div className="cm-hint" style={{marginTop: 10, lineHeight: 1.6}}>이 문제는 답이 √ · 순서쌍 같은 꼴이라 앱에 못 적어요.<br />다 풀었으면 누르고, <b>제출한 뒤 책 빠른정답을 보고 스스로 O/X</b> 해요.</div>
       </div>
     );
   }
@@ -4381,7 +4381,7 @@ function HwRun({ cls, me, onDone, onAbandon }) {
       </div>
       <div className="mx-body">
         <div className="mx-q">
-          <div className="mx-num">{q.n}번<small>{MX_TYPE[q.type]}{unit ? " · " + unit : ""}</small></div>
+          <div className="mx-num">{q.n}번<small>{q.type === "essay" ? "스스로 채점" : MX_TYPE[q.type]}{unit ? " · " + unit : ""}</small></div>
           {S.retry && <div className="mx-note" style={{marginTop: 8}}>처음에 틀린 문제예요. 다시 풀어서 답을 적어요 — 처음 답은 그대로 남아요.</div>}
           {body}
           <div className="mx-foot">
@@ -4456,8 +4456,26 @@ function HwRun({ cls, me, onDone, onAbandon }) {
 }
 
 // 한 번 낸 것의 결과. 학생은 여기서 틀린 것을 다시 푼다(onRetry). 정답은 보여 주지 않는다 — 다시 풀어야 하니까
-function HwResult({ log, book, onBack, onRetry }) {
+function HwResult({ log: log0, book, onBack, onRetry, canSelf }) {
+  const [log, setLog] = useState(log0);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setLog(log0); }, [log0]);
   const rows = log.questions || [];
+  const selfTodo = rows.filter((q) => q.auto === null && q.answer != null);
+  // 앱에 못 적는 답 — 책 빠른정답을 보고 학생이 정한다. 한 번 정하면 못 바꾼다(서버 hwSelf)
+  async function mark(n, ok) {
+    if (busy || !confirm(n + "번을 " + (ok ? "맞음(O)" : "틀림(X)") + "으로 할까요? 정하면 못 바꿔요.")) return;
+    setBusy(true);
+    try {
+      const u = firebase.auth().currentUser; if (!u) throw new Error("로그인이 풀렸어요");
+      const r = await fetch("/api/exam", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken: await u.getIdToken(), action: "hwSelf", cid: log.cid, date: log.date, rid: log.rid, marks: { [n]: ok } }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "저장하지 못했어요");
+      setLog(j.log);
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  }
   const wrong = rows.filter(hwWrong);
   const ans = rows.filter((q) => q.answer != null);
   const secs = ans.map((q) => q.sec || 0).filter((x) => x > 0);
@@ -4478,6 +4496,7 @@ function HwResult({ log, book, onBack, onRetry }) {
       {onRetry && wrong.length > 0 && (
         <button className="cm-btn cm-btn-primary" style={{marginBottom: 12}} onClick={() => onRetry(log, wrong)}>틀린 {wrong.length}문제 다시 풀기</button>
       )}
+      {canSelf && selfTodo.length > 0 && <div className="mx-note" style={{marginBottom: 10}}>앱에 못 적는 답 <b>{selfTodo.length}문제</b> — 책 빠른정답을 보고 아래 표에서 O / X 를 눌러요.</div>}
       {slow.length > 0 && <div className="cm-hint" style={{marginBottom: 8}}>오래 걸린 문제: {slow.join(", ")}번</div>}
       <div className="mx-tw"><table className="mx-table">
         <thead><tr><th>번호</th>{book && (book.units || []).length ? <th style={{textAlign: "left"}}>단원</th> : null}<th>내 답</th><th>처음</th><th>다시</th><th>시간</th></tr></thead>
@@ -4488,7 +4507,11 @@ function HwResult({ log, book, onBack, onRetry }) {
               <td><b>{q.n}</b></td>
               {book && (book.units || []).length ? <td style={{textAlign: "left", fontSize: 12.5}}>{hwUnit(book, q)}</td> : null}
               <td>{hwAns(q, q.answer)}</td>
-              <td style={{fontWeight: 800, color: f === "O" ? "var(--green)" : f === "X" ? "#d6453f" : "var(--muted)"}}>{f}</td>
+              <td style={{fontWeight: 800, color: f === "O" ? "var(--green)" : f === "X" ? "#d6453f" : "var(--muted)", whiteSpace: "nowrap"}}>
+                {f === "?" && canSelf ? (<>
+                  <button className="mx-btn" style={{padding: "3px 10px", marginRight: 4}} disabled={busy} onClick={() => mark(q.n, true)}>O</button>
+                  <button className="mx-btn" style={{padding: "3px 10px"}} disabled={busy} onClick={() => mark(q.n, false)}>X</button>
+                </>) : f}{q.self ? <small style={{fontWeight: 600, color: "var(--muted)", marginLeft: 3}}>스스로</small> : null}</td>
               <td>{(q.tries || []).map((t, i) => <span key={i} style={{fontWeight: 800, marginRight: 4, color: t.ok ? "var(--green)" : "#d6453f"}}>{t.ok ? "O" : "X"}</span>)}</td>
               <td style={{color: slow.includes(q.n) ? "#b3261e" : undefined, fontWeight: slow.includes(q.n) ? 700 : undefined}}>{q.sec ? mxClock(q.sec) : ""}</td>
             </tr>
@@ -4543,7 +4566,7 @@ function HwTab({ cls, me }) {
   }
 
   if (running) return <HwRun cls={cls} me={me} onDone={(log) => { setRunning(false); setView(log); setAgain((x) => x + 1); }} onAbandon={() => setRunning(false)} />;
-  if (view) return <HwResult log={view} book={(books || []).find((b) => b.id === view.bookId)} onRetry={retry} onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
+  if (view) return <HwResult log={view} book={(books || []).find((b) => b.id === view.bookId)} onRetry={retry} canSelf onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
 
   const sums = (books || []).map((b) => ({ b, s: hwSum((past || []).filter((l) => l.bookId === b.id)) })).filter((x) => x.s.n);
   return (<>
