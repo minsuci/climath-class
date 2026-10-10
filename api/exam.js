@@ -425,8 +425,12 @@ async function hwWho(res, claims, cid, sid) {
   if (!cls) { res.status(404).json({ error: "반이 없어요" }); return null; }
   const row = (cls.roster || []).find((r) => r && r.id === sid);
   if (claims.role === "teacher" || claims.role === "owner") return { name: (row && row.name) || "", teacher: true, cls };
-  if (!(claims.cids || []).includes(cid)) { res.status(403).json({ error: "그 반 학생이 아니에요" }); return null; }
-  if (!row || row.name !== claims.sname) { res.status(403).json({ error: "명단과 이름이 맞지 않아요" }); return null; }
+  // 토큰의 반 목록(cids)은 **로그인한 때** 것이다 — 그 뒤에 반에 들어갔으면 빠져 있다(10/10 한민수: 오래된 로그인으로 «그 반 학생이 아니에요»).
+  // 지금 명단의 그 자리 이름이 토큰의 이름과 같으면 받는다
+  const nn = (s) => String(s || "").replace(/\s+/g, "");
+  if (!row || !claims.sname || nn(row.name) !== nn(claims.sname)) {
+    res.status(403).json({ error: (claims.cids || []).includes(cid) ? "명단과 이름이 맞지 않아요" : "그 반 학생이 아니에요" }); return null;
+  }
   return { name: row.name, teacher: !!row.teacher, cls };
 }
 // 원래 있던 «과제» 번호표(classes/{cid}/homework/{sid}.books[교재])와 잇는다 — 과제 채점에 답을 적은 번호를 «한 것» 으로 칠한다.

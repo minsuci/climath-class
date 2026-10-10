@@ -4511,7 +4511,9 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
           {S.sending ? <div className="cm-hint">잠깐만요. 창을 닫지 마세요.</div> : (<>
             <div style={{fontSize: 14, lineHeight: 1.6}}>{err || "인터넷 연결을 확인해 주세요."}</div>
             <div className="mx-note">답은 <b>지워지지 않았어요.</b> 이 기기에 그대로 있어요.</div>
-            <div style={{display: "flex", justifyContent: "flex-end", marginTop: 18}}>
+            <div style={{display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 18}}>
+              {/* 막혀서 못 나가던 것(10/10) — 풀던 화면으로 돌아가면 «이번 풀이 버리기» 로 나갈 수도 있다 */}
+              <button className="mx-btn" onClick={() => { setErr(""); put({ ...sRef.current, endT: null, sending: false }); }}>풀던 화면으로</button>
               <button className="mx-btn primary" onClick={() => submit()}>제출 다시 하기</button>
             </div>
           </>)}
