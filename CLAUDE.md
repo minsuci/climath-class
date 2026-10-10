@@ -654,6 +654,8 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - 교재 JSON 은 `변형교재\_과제채점\build_books.py` 가 빠른정답 PDF 글자 층에서 만든다(수평교 표지 날개 · 퀀텀점프 본문 끝 쪽)
 - 틀린 것만 다시 풀기 → `hwRetry`. 첫 시도(`auto`·`answer`)는 그대로, 다시 푼 것은 `tries[]`, 마지막이 맞았으면 `fin:true`
 - 선생님 «과제 채점»(반 메뉴) = 수업 전 판: 학생별(안 냄 빨강) · 많이 틀린 문제(처음 시도) · 오래 걸린 문제(가운데 값) · 단원별 · 엑셀
+- **원래 «과제» 번호표와 잇기**(10/10): 교재의 `link` = 반 교재 이름. 그 이름의 반 교재가 있으면 `hwSubmit` 이 **답을 적은 번호**를 `homework/{sid}.books[link]` 에 더한다(빼지 않음, books 를 읽어 통째로 다시 씀).
+  번호표(학생 과제 탭 · 선생님 학생 상세)는 과제 채점에서 **처음에 틀린 번호를 빨간 테두리**로(`useHwWrongByBook`). 반 교재 더하기·문항 수 고치기는 도구 `classBook`
 - PC 로 꺼내기: `node tools/exam-push.mjs --hwlogs [반ID] [--book id] [--since 날짜]` → 극복 문제 만들 때
 - 폰에서 `.mx-body` 가 10px 넘치던 것(동그라미 다섯 개의 최소 폭) — `minmax(0,1fr)` 와 480px 이하 줄임으로 고침. 실전 시험에도 같이 적용된다
 

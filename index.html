@@ -303,6 +303,7 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-cell.done{background:#dcefe3; color:var(--green); font-weight:700; border-color:#9fcfb4;}
 .cm-cell.done.clickable:hover{border-color:var(--clay); color:var(--clay);}
 .cm-cell.q{color:#d6453f; font-weight:700;}
+.cm-cell.x{box-shadow:inset 0 0 0 2px #d6453f;}   /* 과제 채점에서 처음에 틀린 번호 */
 
 .cm-daylist{display:flex; flex-direction:column; gap:8px;}
 .cm-day{display:flex; align-items:center; justify-content:space-between; width:100%; text-align:left; cursor:pointer; font-family:inherit; background:#fff; border:1px solid var(--line); border-radius:12px; padding:15px 16px; transition:border-color .15s, transform .08s;}
@@ -2068,12 +2069,12 @@ async function deleteClass(cid) {
 }
 
 // ===== 공용: 과제 번호표 =====
-function HwGrid({ total, set, qset, bookName, onCellDown, onCellClick }) {
+function HwGrid({ total, set, qset, xset, bookName, onCellDown, onCellClick }) {
   const interactive = !!onCellClick;
   const cells = [];
   for (let n = 1; n <= total; n++) {
     const isDone = set.has(n);
-    const cls = "cm-cell" + (isDone ? " done" : "") + (interactive ? " clickable" : "") + (qset && qset.has(n) ? " q" : "");
+    const cls = "cm-cell" + (isDone ? " done" : "") + (interactive ? " clickable" : "") + (qset && qset.has(n) ? " q" : "") + (xset && xset.has(n) ? " x" : "");
     cells.push(
       interactive ? (
         <button key={n} className={cls} data-n={n} data-book={bookName}
@@ -2084,7 +2085,8 @@ function HwGrid({ total, set, qset, bookName, onCellDown, onCellClick }) {
   return <div className="cm-grid">{cells}</div>;
 }
 
-function BookHwCard({ book, initial, qNumbers, onClearQuestion, onChange }) {
+function BookHwCard({ book, initial, qNumbers, xNumbers, onClearQuestion, onChange }) {
+  const xset = xNumbers && xNumbers.size ? xNumbers : null;
   const setRef = useRef(new Set(initial));
   const [, setTick] = useState(0);
   const rerender = () => setTick((t) => t + 1);
@@ -2171,7 +2173,7 @@ function BookHwCard({ book, initial, qNumbers, onClearQuestion, onChange }) {
           ))}
         </div>
       )}
-      <HwGrid total={book.total} set={set} qset={qset} bookName={book.name} onCellDown={onCellDown} onCellClick={onCellClick} />
+      <HwGrid total={book.total} set={set} qset={qset} xset={xset} bookName={book.name} onCellDown={onCellDown} onCellClick={onCellClick} />
     </div>
   );
 }
@@ -4105,6 +4107,7 @@ function StudentHomework({ cls, me }) {
     return () => unsub();
   }, [cls.id, me.id]);
 
+  const xs = useHwWrongByBook(cls.id, me.id);
   function persistBook(bookName, arr) {
     setDone((prev) => ({ ...(prev || {}), [bookName]: arr }));
     saveHwBook(cls.id, me, bookName, arr);
@@ -4113,11 +4116,11 @@ function StudentHomework({ cls, me }) {
   return (
     <>
       <div className="cm-card cm-hint">
-        완료한 번호를 <b>누르거나, 마우스로 드래그</b>해서 칠하세요. 터치 화면에서는 칸을 <b>꾹 눌러 칠하기 모드</b>로 들어간 뒤 손가락을 끌면 됩니다. 표시한 번호는 <b>날마다 지워지지 않고 계속 누적</b>돼요. <b style={{ color: "#d6453f" }}>질문한 번호는 빨간 글씨</b>로 누적 표시되고, 빨간 번호 칩을 눌러 지울 수 있어요.
+        완료한 번호를 <b>누르거나, 마우스로 드래그</b>해서 칠하세요. 터치 화면에서는 칸을 <b>꾹 눌러 칠하기 모드</b>로 들어간 뒤 손가락을 끌면 됩니다. 표시한 번호는 <b>날마다 지워지지 않고 계속 누적</b>돼요. <b style={{ color: "#d6453f" }}>질문한 번호는 빨간 글씨</b>로 누적 표시되고, 빨간 번호 칩을 눌러 지울 수 있어요. <b>✎ 과제 채점</b>에 답을 낸 번호는 저절로 칠해지고, 처음에 틀린 번호는 <b style={{ color: "#d6453f" }}>빨간 테두리</b>예요.
       </div>
       {getStudentBooks(cls, me).map((b) => (
         <BookHwCard key={b.name} book={b} initial={done[b.name] || []}
-          qNumbers={qbooks[b.name]} onClearQuestion={(n) => removeQuestioned(cls.id, me.id, b.name, n)}
+          qNumbers={qbooks[b.name]} xNumbers={xs[b.name]} onClearQuestion={(n) => removeQuestioned(cls.id, me.id, b.name, n)}
           onChange={(arr) => persistBook(b.name, arr)} />
       ))}
     </>
@@ -4148,6 +4151,25 @@ function useHwBooks(cls, me) {
     }, () => setBooks([]));
   }, [cid, tch]);
   return books;
+}
+// 반 «과제» 번호표에 띄울 «과제 채점에서 처음에 틀린 번호» — {반 교재 이름: Set(번호)}. 교재의 link 로 잇는다.
+// 다시 풀어 맞혔어도 처음에 틀렸으면 남긴다(그게 «실수 0» 의 대상이다)
+function useHwWrongByBook(cid, sid) {
+  const [xs, setXs] = useState({});
+  useEffect(() => {
+    let live = true;
+    Promise.all([examListDoc().get().catch(() => null), hwLogs(cid, sid, 120).catch(() => [])]).then(([d, logs]) => {
+      if (!live) return;
+      const link = {};
+      ((d && d.exists && d.data().exams) || []).forEach((e) => { if (isHwBook(e) && e.link) link[e.id] = e.link; });
+      const out = {};
+      logs.forEach((l) => { const nm = link[l.bookId]; if (!nm) return;
+        (l.questions || []).forEach((q) => { if (q.auto === false && q.answer != null) (out[nm] || (out[nm] = new Set())).add(q.n); }); });
+      setXs(out);
+    });
+    return () => { live = false; };
+  }, [cid, sid]);
+  return xs;
 }
 async function hwLogs(cid, sid, maxDays) {
   const days = (await listDays(cid)).slice(0, maxDays || 90), out = [];
@@ -11366,6 +11388,7 @@ function StudentDetail({ cls, student, hwDone, questioned, canEdit, date, meName
   const detailDivRef = useSwipeBack(onBack);
   const [editHw, setEditHw] = useState(false);
   const targetCid = student._cid || cls.id;
+  const xs = useHwWrongByBook(targetCid, student.id);
   return (
     <div ref={detailDivRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
       <div className="cm-daybar">
@@ -11380,7 +11403,7 @@ function StudentDetail({ cls, student, hwDone, questioned, canEdit, date, meName
         const qnums = qmine[b.name] || [];
         if (editHw) {
           return (
-            <BookHwCard key={"e" + b.name} book={b} initial={mine[b.name] || []} qNumbers={qnums}
+            <BookHwCard key={"e" + b.name} book={b} initial={mine[b.name] || []} qNumbers={qnums} xNumbers={xs[b.name]}
               onClearQuestion={(n) => removeQuestioned(targetCid, student.id, b.name, n)}
               onChange={(arr) => saveHwBookFor(targetCid, student.id, student.name, b.name, arr)} />
           );
@@ -11399,7 +11422,8 @@ function StudentDetail({ cls, student, hwDone, questioned, canEdit, date, meName
                 ))}
               </div>
             )}
-            <HwGrid total={b.total} set={new Set(mine[b.name] || [])} qset={new Set(qnums)} />
+            {xs[b.name] && xs[b.name].size > 0 && <div className="cm-hint" style={{margin: "4px 0 6px"}}>빨간 테두리 = 과제 채점에서 처음에 틀린 번호 ({[...xs[b.name]].sort((x, y) => x - y).join(", ")})</div>}
+            <HwGrid total={b.total} set={new Set(mine[b.name] || [])} qset={new Set(qnums)} xset={xs[b.name]} />
           </div>
         );
       })}

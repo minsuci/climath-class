@@ -98,6 +98,7 @@ function checkExam(e) {
   if (!hw && !(Number(e.minutes) > 0)) return "제한 시간이 없어요";
   if (!Array.isArray(e.questions) || !e.questions.length) return "문항이 없어요";
   if (e.questions.length > (hw ? 4000 : 200)) return "문항이 너무 많아요";
+  if (hw && e.link != null && !(typeof e.link === "string" && e.link.trim() && e.link.length <= 40)) return "link 는 반 교재 이름(40자 안)";
   if (hw && e.units != null && !(Array.isArray(e.units) && e.units.every((u) => typeof u === "string" && u.trim() && u.length <= 30))) return "units 는 단원 이름(30자 안) 목록";
   const seen = {};
   for (const q of e.questions) {
@@ -149,7 +150,7 @@ async function rebuildList() {
   const exams = all.map((e) => ({
     id: e.id, title: e.title, minutes: e.minutes,
     cids: e.cids || [], sids: e.sids || [], test: !!e.test, lock: !!e.lock, order: e.order || 0,
-    ...(e.kind === "hw" ? { kind: "hw", units: e.units || [] } : {}),
+    ...(e.kind === "hw" ? { kind: "hw", units: e.units || [], link: e.link || "" } : {}),
     questions: (e.questions || []).map((q) => ({ n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}),
                                                  ...(q.label ? { label: q.label } : {}), ...(q.u != null ? { u: q.u } : {}) })),
   })).sort((a, b) => (a.order - b.order) || String(a.title).localeCompare(String(b.title), "ko"));
@@ -423,10 +424,29 @@ async function hwWho(res, claims, cid, sid) {
   const cls = await getDoc("classes/" + cid).catch(() => null);
   if (!cls) { res.status(404).json({ error: "반이 없어요" }); return null; }
   const row = (cls.roster || []).find((r) => r && r.id === sid);
-  if (claims.role === "teacher" || claims.role === "owner") return { name: (row && row.name) || "", teacher: true };
+  if (claims.role === "teacher" || claims.role === "owner") return { name: (row && row.name) || "", teacher: true, cls };
   if (!(claims.cids || []).includes(cid)) { res.status(403).json({ error: "그 반 학생이 아니에요" }); return null; }
   if (!row || row.name !== claims.sname) { res.status(403).json({ error: "명단과 이름이 맞지 않아요" }); return null; }
-  return { name: row.name, teacher: !!row.teacher };
+  return { name: row.name, teacher: !!row.teacher, cls };
+}
+// 원래 있던 «과제» 번호표(classes/{cid}/homework/{sid}.books[교재])와 잇는다 — 과제 채점에 답을 적은 번호를 «한 것» 으로 칠한다.
+// 교재의 link 와 **이름이 같은 반 교재**가 있을 때만. 개진반은 학생마다 교재가 따로라 그 학생 줄의 books 를 본다.
+// 학생이 번호표에서 직접 칠한 것은 그대로 두고 더하기만 한다(빼지 않는다)
+async function hwMarkDone(cls, sid, name, link, nums) {
+  if (!cls || !link || !nums.length) return null;
+  const row = (cls.roster || []).find((r) => r && r.id === sid);
+  const books = cls.type === "individual" ? ((row && row.books) || []) : (cls.books || []);
+  const bk = books.find((b) => b && b.name === link);
+  if (!bk) return null;
+  const path = "classes/" + cls.id + "/homework/" + sid;
+  const cur = await getDoc(path).catch(() => null);
+  const had = ((cur && cur.books && cur.books[link]) || []).map(Number);
+  const all = [...new Set(had.concat(nums.filter((n) => !bk.total || n <= bk.total)))].sort((a, b) => a - b);
+  if (all.length === had.length) return link;
+  // books 를 통째로 다시 쓴다(읽은 것 + 이 교재). 한 칸만 고치는 경로(books.`이름`)는 한글 이름 따옴표가 틀리면
+  // 다른 교재 칸까지 날아갈 수 있어서 쓰지 않는다
+  await patchDoc(path, { name, books: { ...((cur && cur.books) || {}), [link]: all } }, ["name", "books"]);
+  return link;
 }
 const hwEv = (ev) => (Array.isArray(ev) ? ev.slice(0, MAX_EV).map((e) => ({
   t: Math.max(0, Number(e.t) || 0), k: e.k === "ans" ? "ans" : "go", q: Number(e.q) || 0,
@@ -468,8 +488,13 @@ async function hwSubmit(res, claims, b) {
   };
   const base = "classes/" + cid + "/days/" + date;
   await patchDoc(base, { updated: now });   // 날짜 문서가 없으면 날짜 목록에 안 잡힌다 (submit 과 같은 까닭)
-  await patchDoc(base + "/hwLogs/" + rid, log);
-  res.status(200).json({ ok: true, log });
+  // 번호표에 칠하기 — 실패해도 제출은 된 것이다(기록은 이미 남았다)
+  let marked = null;
+  if (!who.teacher) {
+    marked = await hwMarkDone({ ...who.cls, id: cid }, sid, who.name, key.link, questions.filter((q) => q.answer != null).map((q) => q.n)).catch(() => null);
+    if (marked) await patchDoc(base + "/hwLogs/" + rid, { marked });
+  }
+  res.status(200).json({ ok: true, log: { ...log, ...(marked ? { marked } : {}) } });
 }
 
 // 틀린 문항만 다시 푼 것. 첫 시도(auto · answer)는 손대지 않는다
@@ -545,6 +570,7 @@ export default async function handler(req, res) {
         await patchDoc("examKeys/" + e.id, {
           title: String(e.title).trim(), minutes: Number(e.minutes) || 0,
           kind: e.kind === "hw" ? "hw" : null, units: e.kind === "hw" ? (e.units || []).map((u) => String(u).trim()) : null,
+          link: e.kind === "hw" && e.link ? String(e.link).trim() : null,   // 반 «과제» 번호표의 교재 이름 — 낸 번호를 거기 칠한다
           questions: e.questions.map((q) => ({ n: q.n, type: q.type, ...(q.ans != null ? { ans: q.ans } : {}),
                                                ...(q.label ? { label: String(q.label).trim() } : {}),
                                                ...(q.pt != null ? { pt: q.pt } : {}),
@@ -602,6 +628,19 @@ export default async function handler(req, res) {
         res.status(200).json({ ok: true, logs }); return;
       }
       if (body.action === "examMove") return await moveLog(res, body);
+      // 반 «과제» 교재 목록에 하나 더하거나 문항 수를 고친다 (과제 채점과 잇느라 · 10/10). 지우는 길은 없다 — 앱 반 설정에서
+      if (body.action === "classBook") {
+        const cid = String(body.cid || ""), name = String(body.name || "").trim(), total = Number(body.total);
+        if (!cid || !name || !(Number.isInteger(total) && total > 0)) { res.status(400).json({ error: "cid · name · total 이 필요해요" }); return; }
+        const cl = await getDoc("classes/" + cid).catch(() => null);
+        if (!cl) { res.status(404).json({ error: "반이 없어요" }); return; }
+        const books = (cl.books || []).map((b) => ({ ...b }));
+        const hit = books.find((b) => b.name === name);
+        const before = hit ? hit.total : null;
+        if (hit) hit.total = total; else books.push({ name, total });
+        if (!body.dry) await patchDoc("classes/" + cid, { books });
+        res.status(200).json({ ok: true, dry: !!body.dry, cid, name, before, total, books }); return;
+      }
       // 과제 채점 기록 — 극복 문제(쌓인 오답 → 내신대비 자료)를 만들 때 PC 로 받는다. cid 를 안 주면 과제 교재가 걸린 반 전부
       if (body.action === "hwLogs") {
         const since = String(body.since || "0000-00-00");
