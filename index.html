@@ -2242,23 +2242,6 @@ function StudentGate({ onClsChange }) {
   const [busy, setBusy] = useState(false);
   const norm = (s) => (s || "").replace(/\s+/g, "");
   useEffect(() => { onClsChange && onClsChange(cls); }, [cls]);
-  // 선생님 탭에서 넘어왔으면(선생님 토큰이 살아 있으면) 학생 로그인 없이 «선생님 모드» 로 본다.
-  // 학생으로 로그인하면 선생님 로그인이 풀려서, 탭을 오갈 때마다 PIN 을 다시 쳐야 했다
-  const [asT, setAsT] = useState(null);   // { name, list: [{cls, member}] }
-  useEffect(() => { (async () => {
-    // 새로 연 쪽에선 로그인 상태가 조금 뒤에 돌아온다 — 한 번 기다린다
-    await new Promise((ok) => { let un = null; un = firebase.auth().onAuthStateChanged(() => { un && un(); ok(); }); });
-    const c = await authClaims();
-    if (!c || (c.role !== "teacher" && c.role !== "owner")) return;
-    if (!CLASSES.length) await loadClasses();
-    const d = await teachersCol().doc(c.tid).get();
-    if (!d.exists) return;
-    const tt = d.data();
-    const list = CLASSES.filter((x) => !isClassEnded(x) && (c.role === "owner" || (tt.classIds || []).includes(x.id)))
-      .map((x) => ({ cls: x, member: { ...((x.roster || []).find((r) => r && r.teacher && norm(r.name) === norm(tt.name)) || { id: "t_" + c.tid, name: tt.name }), teacher: true, asTeacher: true } }));
-    setAsT({ name: tt.name, list });
-  })().catch(() => {}); }, []);
-  function enterAsTeacher() { if (!asT || !asT.list.length) return; setName(asT.name); setMatches(asT.list); if (asT.list.length === 1) setCls(asT.list[0].cls); }
 
   async function login() {
     if (busy) return;
@@ -2295,14 +2278,7 @@ function StudentGate({ onClsChange }) {
 
   // ---- 로그인 전 ----
   if (!matches) {
-    return (<>
-      {asT && asT.list.length > 0 && (
-        <div className="cm-card" style={{background: "#e9eef6", borderColor: "#c9d5ea"}}>
-          <div style={{fontSize: 14, lineHeight: 1.6, marginBottom: 10}}><b>{asT.name}</b> 선생님으로 로그인돼 있어요. 학생 화면을 선생님 모드로 볼 수 있어요(제출해도 점수 · 통계에 안 들어가요).</div>
-          <button className="cm-btn cm-btn-primary" style={{marginTop: 0}} onClick={enterAsTeacher}>선생님 모드로 보기 ({asT.list.length}개 반)</button>
-          <div className="cm-hint" style={{marginTop: 8}}>학생 이름으로 로그인하면 선생님 로그인은 풀려요.</div>
-        </div>
-      )}
+    return (
       <div className="cm-card">
         <h2 className="cm-h2">로그인</h2>
         <label className="cm-label">이름</label>
@@ -2314,7 +2290,7 @@ function StudentGate({ onClsChange }) {
         {err && <div className="cm-err">{err}</div>}
         <button className="cm-btn cm-btn-primary" disabled={busy} onClick={login}>{busy ? "확인 중..." : "입장"}</button>
       </div>
-    </>);
+    );
   }
 
   // ---- 아직 반이 없는 학생 ----
@@ -4001,7 +3977,7 @@ function StudentHome({ cls, me, onLogout }) {
           <div className="cm-welcome-sub">{me.teacher ? "선생님 모드" : att ? "출석 완료 · " + hhmm(att.time) : "아직 출석 전이에요"}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-          {!me.asTeacher && <button className="cm-link" onClick={() => setShowPin((v) => !v)}>비밀번호 변경</button>}
+          <button className="cm-link" onClick={() => setShowPin((v) => !v)}>비밀번호 변경</button>
           <button className="cm-link" onClick={onLogout}>나가기</button>
         </div>
       </div>
