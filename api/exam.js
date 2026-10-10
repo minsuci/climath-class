@@ -629,6 +629,29 @@ export default async function handler(req, res) {
       }
       if (body.action === "examMove") return await moveLog(res, body);
       // 반 «과제» 교재 목록에 하나 더하거나 문항 수를 고친다 (과제 채점과 잇느라 · 10/10). 지우는 길은 없다 — 앱 반 설정에서
+      // 반 «과제» 교재 목록을 통째로 바꾼다 (10/10 — 기말부터 수평교 (기말) · 퀀텀점프 둘만). dry 면 바꿀 모양만
+      if (body.action === "classBooksSet") {
+        const cid = String(body.cid || "");
+        const books = Array.isArray(body.books) ? body.books.map((b) => ({ name: String(b.name || "").trim(), total: Number(b.total) })) : null;
+        if (!cid || !books || !books.length || books.some((b) => !b.name || !(Number.isInteger(b.total) && b.total > 0))) { res.status(400).json({ error: "cid · books[{name,total}] 가 필요해요" }); return; }
+        const cl = await getDoc("classes/" + cid).catch(() => null);
+        if (!cl) { res.status(404).json({ error: "반이 없어요" }); return; }
+        if (!body.dry) await patchDoc("classes/" + cid, { books });
+        res.status(200).json({ ok: true, dry: !!body.dry, cid, before: cl.books || [], books }); return;
+      }
+      // 반의 «과제» 체크 기록(homework)과 «질문한 번호»(questioned)를 비운다 — 새로 시작할 때.
+      // 지우기 전 문서를 그대로 돌려준다(도구가 파일로 남긴다). dry 면 돌려주기만 하고 안 지운다
+      if (body.action === "hwReset") {
+        const cid = String(body.cid || "");
+        if (!cid || !(await getDoc("classes/" + cid).catch(() => null))) { res.status(404).json({ error: "반이 없어요" }); return; }
+        const hw = await listDocs("classes/" + cid + "/homework").catch(() => []);
+        const qd = await listDocs("classes/" + cid + "/questioned").catch(() => []);
+        if (!body.dry) {
+          for (const d of hw) await deleteDoc("classes/" + cid + "/homework/" + d.id);
+          for (const d of qd) await deleteDoc("classes/" + cid + "/questioned/" + d.id);
+        }
+        res.status(200).json({ ok: true, dry: !!body.dry, cid, homework: hw, questioned: qd }); return;
+      }
       if (body.action === "classBook") {
         const cid = String(body.cid || ""), name = String(body.name || "").trim(), total = Number(body.total);
         if (!cid || !name || !(Number.isInteger(total) && total > 0)) { res.status(400).json({ error: "cid · name · total 이 필요해요" }); return; }

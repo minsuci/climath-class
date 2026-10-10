@@ -645,7 +645,7 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 ### 과제 채점 (`HwTab` · `HwRun` · `HwBoard`, 2026-10-10)
 고1 기말대비 «초개인화» — 학생이 **집에서** 교재(수평교 · 퀀텀점프 · 기출백서)를 풀고 **푼 번호의 답만** 앱에 적는다.
 - 교재는 `examKeys` 에 `kind:"hw"` 로 **통째로** 올린다(`tools/exam-push.mjs --file`, 문항 4000개까지, `units`·`q.u` 로 단원).
-  과제 범위는 매번 달라서 학생이 번호를 적는다(«101-130, 135»). 실전 시험 목록(`MockExamTab`·`MockExamAssigned`)은 `isHwBook` 으로 뺀다
+  학생이 교재를 고르면 **1번부터 끝까지 다 뜬다**(10/10 — 번호 적기 없앰). 단원마다 줄을 끊고, 전에 낸 번호는 연하게(✓), 시작은 아직 안 낸 첫 번호. 낼 땐 **답을 적은 것만** 간다. 실전 시험 목록(`MockExamTab`·`MockExamAssigned`)은 `isHwBook` 으로 뺀다
 - 탭·메뉴는 그 반에 교재가 걸렸을 때만 뜬다(`useHwBooks`). 출석과 안 묶는다(`noGateTabs` 에 `hwb`)
 - 시간은 **위로 센다**(제한 없음). «쉬기»는 시계를 멈추고(`pausedMs`), 화면을 5분 넘게 안 봤으면 돌아왔을 때 «풀고 있었나» 물어서 뺀다(`hiddenAt`).
   ev 의 t 가 이미 «쉰 시간을 뺀» 시계라 문항별 시간은 실전 시험과 같은 식으로 나온다
@@ -655,7 +655,7 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - 틀린 것만 다시 풀기 → `hwRetry`. 첫 시도(`auto`·`answer`)는 그대로, 다시 푼 것은 `tries[]`, 마지막이 맞았으면 `fin:true`
 - 선생님 «과제 채점»(반 메뉴) = 수업 전 판: 학생별(안 냄 빨강) · 많이 틀린 문제(처음 시도) · 오래 걸린 문제(가운데 값) · 단원별 · 엑셀
 - **원래 «과제» 번호표와 잇기**(10/10): 교재의 `link` = 반 교재 이름. 그 이름의 반 교재가 있으면 `hwSubmit` 이 **답을 적은 번호**를 `homework/{sid}.books[link]` 에 더한다(빼지 않음, books 를 읽어 통째로 다시 씀).
-  번호표(학생 과제 탭 · 선생님 학생 상세)는 과제 채점에서 **처음에 틀린 번호를 빨간 테두리**로(`useHwWrongByBook`). 반 교재 더하기·문항 수 고치기는 도구 `classBook`
+  번호표(학생 과제 탭 · 선생님 학생 상세)는 과제 채점에서 **처음에 틀린 번호를 빨간 테두리**로(`useHwWrongByBook`). 반 교재 더하기·문항 수 고치기는 도구 `classBook`, 통째로 바꾸기는 `classBooksSet`, 과제 체크 기록 비우기는 `hwReset`(지우기 전 문서를 돌려준다 — 파일로 남길 것)
 - PC 로 꺼내기: `node tools/exam-push.mjs --hwlogs [반ID] [--book id] [--since 날짜]` → 극복 문제 만들 때
 - 폰에서 `.mx-body` 가 10px 넘치던 것(동그라미 다섯 개의 최소 폭) — `minmax(0,1fr)` 와 480px 이하 줄임으로 고침. 실전 시험에도 같이 적용된다
 

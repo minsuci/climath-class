@@ -303,7 +303,9 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-cell.done{background:#dcefe3; color:var(--green); font-weight:700; border-color:#9fcfb4;}
 .cm-cell.done.clickable:hover{border-color:var(--clay); color:var(--clay);}
 .cm-cell.q{color:#d6453f; font-weight:700;}
-.cm-cell.x{box-shadow:inset 0 0 0 2px #d6453f;}   /* 과제 채점에서 처음에 틀린 번호 */
+.cm-cell.x{box-shadow:inset 0 0 0 2px #d6453f;}
+.mx-chip.prev{background:#f3f0e8; color:var(--muted);} .mx-chip.prev i{color:#2f7d4f; font-weight:700;}
+.hw-unit{grid-column:1 / -1; font-size:12px; font-weight:800; color:var(--navy); margin:8px 0 0; padding-bottom:3px; border-bottom:1px solid var(--line);}   /* 과제 채점에서 처음에 틀린 번호 */
 
 .cm-daylist{display:flex; flex-direction:column; gap:8px;}
 .cm-day{display:flex; align-items:center; justify-content:space-between; width:100%; text-align:left; cursor:pointer; font-family:inherit; background:#fff; border:1px solid var(--line); border-radius:12px; padding:15px 16px; transition:border-color .15s, transform .08s;}
@@ -4264,6 +4266,13 @@ function HwRun({ cls, me, onDone, onAbandon }) {
     put({ ...x, cur: n, ev: [...x.ev, { t: nowT(x), k: "go", q: n }] });
     setBuf(q.type === "short" && mxAnswered(x, n) ? String(x.answers[n]) : "");
   }
+  // 교재 전체(all)일 땐 앞으로만 — 다음 «아직 안 낸» 번호로. 끝에서 1번으로 돌아가지 않는다
+  const nextOf = (x, n) => {
+    if (!x.all) return mxNextOpen(x, n);
+    const prev = new Set(x.prev || []), ns = x.questions.map((q) => q.n);
+    for (let i = ns.indexOf(n) + 1; i < ns.length; i++) if (!mxAnswered(x, ns[i]) && !prev.has(ns[i])) return ns[i];
+    return null;
+  };
   function setAnswer(n, v) {
     if (busy.current) return;
     let x = sRef.current; if (stop(x)) return;
@@ -4271,7 +4280,7 @@ function HwRun({ cls, me, onDone, onAbandon }) {
       x = { ...x, answers: { ...x.answers, [n]: v }, ev: [...x.ev, { t: nowT(x), k: "ans", q: n, v }] };
       put(x);
     }
-    const nx = mxNextOpen(x, n);
+    const nx = nextOf(x, n);
     if (nx == null) return;
     busy.current = true;
     setTimeout(() => {
@@ -4302,7 +4311,8 @@ function HwRun({ cls, me, onDone, onAbandon }) {
       const idToken = await u.getIdToken();
       const body = f.retry
         ? { idToken, action: "hwRetry", cid: cls.id, date: f.retry.date, rid: f.retry.rid, answers: f.answers, secs: hwSecsOf(f.ev, endT) }
-        : { idToken, action: "hwSubmit", cid: cls.id, sid: me.id, bookId: f.bookId, rid: f.rid, nums: f.questions.map((q) => q.n),
+        : { idToken, action: "hwSubmit", cid: cls.id, sid: me.id, bookId: f.bookId, rid: f.rid,
+            nums: f.questions.filter((q) => !f.all || mxAnswered(f, q.n)).map((q) => q.n),   // 전체 모드는 답을 적은 것만 낸다
             answers: f.answers, ev: f.ev, endT, startedAt: f.startedAt, pausedSec: Math.round((f.pausedMs || 0) / 1000) };
       const r = await fetch("/api/exam", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       let j = null; try { j = await r.json(); } catch (e) {}
@@ -4360,6 +4370,8 @@ function HwRun({ cls, me, onDone, onAbandon }) {
   const q = S.questions.find((x) => x.n === S.cur) || S.questions[0], mine = S.answers[q.n];
   const idx = S.questions.indexOf(q), prev = S.questions[idx - 1], next = S.questions[idx + 1];
   const blanks = S.questions.filter((x) => !mxAnswered(S, x.n)).map((x) => x.n);
+  const answered = S.questions.filter((x) => mxAnswered(S, x.n)).map((x) => x.n);
+  const prevSet = new Set(S.all ? S.prev || [] : []);
   const none = S.questions.every((x) => !mxAnswered(S, x.n));
   const unit = S.units && q.u != null ? S.units[q.u] : "";
   const padKey = (k) => { if (busy.current) return; setBuf((b) => (k === "⌫" ? b.slice(0, -1) : k === "C" ? "" : b.length < 12 ? b + k : b)); };
@@ -4399,7 +4411,7 @@ function HwRun({ cls, me, onDone, onAbandon }) {
         <div><div className="mx-who">{me.name}</div><div className="mx-ttl">{S.title}{S.retry ? " · 틀린 문제 다시" : ""}</div></div>
         <div className="mx-clock" title="쉰 시간은 빼고 센다">{mxClock(nowT(S))}</div>
         <button className="mx-sub" style={{background: "transparent", color: "#fff", border: "1.5px solid rgba(255,255,255,.6)"}} disabled={frozen} onClick={pause}>쉬기</button>
-        <button className="mx-sub" disabled={frozen} onClick={() => setAsk(true)}>제출</button>
+        <button className="mx-sub" disabled={frozen || (S.all && !answered.length)} onClick={() => setAsk(true)}>제출</button>
       </div>
       <div className="mx-body">
         <div className="mx-q">
@@ -4414,12 +4426,17 @@ function HwRun({ cls, me, onDone, onAbandon }) {
           </div>
         </div>
         <div className="mx-side">
+          {S.all && <div className="cm-hint" style={{marginBottom: 8}}>오늘 푼 것 <b>{answered.length}문제</b>{prevSet.size ? " · 연한 칸(✓)은 전에 낸 번호" : ""}</div>}
           <div className="mx-grid">
-            {S.questions.map((x) => {
+            {S.questions.map((x, i) => {
               const v = S.answers[x.n];
+              const u = S.all && S.units && x.u != null && (i === 0 || S.questions[i - 1].u !== x.u) ? S.units[x.u] : null;
               return (
-                <button key={x.n} className={"mx-chip" + (mxAnswered(S, x.n) ? " done" : "") + (x.n === S.cur ? " cur" : "")}
-                  onClick={() => go(x.n)}><b>{x.n}</b><i>{v == null || v === "" ? "" : hwAns(x, v)}</i></button>
+                <React.Fragment key={x.n}>
+                  {u && <div className="hw-unit">{u}</div>}
+                  <button className={"mx-chip" + (mxAnswered(S, x.n) ? " done" : prevSet.has(x.n) ? " prev" : "") + (x.n === S.cur ? " cur" : "")}
+                    onClick={() => go(x.n)}><b>{x.n}</b><i>{v == null || v === "" ? (prevSet.has(x.n) ? "✓" : "") : hwAns(x, v)}</i></button>
+                </React.Fragment>
               );
             })}
           </div>
@@ -4454,7 +4471,8 @@ function HwRun({ cls, me, onDone, onAbandon }) {
         <div className="mx-modal"><div className="box">
           <h4>제출할까요?</h4>
           <div style={{fontSize: 14, lineHeight: 1.6}}>제출하면 바로 채점돼요.{S.retry ? "" : " 틀린 문제는 결과 화면에서 다시 풀 수 있어요."}</div>
-          <div className="mx-note">{blanks.length ? <>답을 안 적은 문제 <b>{blanks.length}개</b> — {hwRanges(blanks)}번{S.retry ? " (그대로 둬요)" : " («안 풂» 으로 들어가요)"}</> : "모든 문제에 답했어요."}</div>
+          <div className="mx-note">{S.all ? <>답을 적은 <b>{answered.length}문제</b> — {hwRanges(answered)}번을 내요. 안 적은 번호는 안 낸 걸로 쳐요(다음에 이어서 풀면 돼요).</>
+            : blanks.length ? <>답을 안 적은 문제 <b>{blanks.length}개</b> — {hwRanges(blanks)}번{S.retry ? " (그대로 둬요)" : " («안 풂» 으로 들어가요)"}</> : "모든 문제에 답했어요."}</div>
           <div style={{display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 18}}>
             <button className="mx-btn" onClick={() => setAsk(false)}>계속 풀기</button>
             <button className="mx-btn primary" onClick={() => submit()}>제출</button>
@@ -4551,7 +4569,6 @@ function HwTab({ cls, me }) {
   const [running, setRunning] = useState(() => !!mxLoad(K));
   const [view, setView] = useState(null);
   const [bookId, setBookId] = useState(() => { try { return localStorage.getItem("climath_hw_book") || ""; } catch (e) { return ""; } });
-  const [text, setText] = useState("");
   const [past, setPast] = useState(null);
   const [again, setAgain] = useState(0);
   useEffect(() => {
@@ -4561,25 +4578,25 @@ function HwTab({ cls, me }) {
   }, [cls.id, me.id, again]);
   useEffect(() => { if (books && books.length && !books.find((b) => b.id === bookId)) setBookId(books[0].id); }, [books]);
   const book = (books || []).find((b) => b.id === bookId);
-  const parsed = book ? hwParse(text, book) : { nums: [], bad: [] };
   const mineB = (past || []).filter((l) => l.bookId === bookId);
   const doneN = new Set(mineB.flatMap((l) => l.nums || []));
   const lastN = doneN.size ? Math.max(...doneN) : 0;
   const nextN = book && book.questions.find((q) => q.n > lastN);
-  const again2 = parsed.nums.filter((n) => doneN.has(n));
 
   function begin(state) {
     mxSave(K, { ev: [{ t: 0, k: "go", q: state.questions[0].n }], answers: {}, cur: state.questions[0].n,
                 startedAt: Date.now(), pausedMs: 0, ...state });
     setRunning(true); setView(null);
   }
+  // 교재 전체가 뜬다(10/10 마왕님 — 번호를 적게 하지 않는다). 푼 번호를 눌러 답을 적고, 낼 땐 답을 적은 것만 간다.
+  // 전에 낸 번호는 연하게(✓) 보이고, 처음 번호는 아직 안 낸 첫 번호
   function start() {
-    if (!book || !parsed.nums.length || parsed.nums.length > HW_ONCE) return;
+    if (!book) return;
     try { localStorage.setItem("climath_hw_book", book.id); } catch (e) {}
-    const byN = {}; book.questions.forEach((q) => { byN[q.n] = q; });
+    const first = (book.questions.find((q) => !doneN.has(q.n)) || book.questions[0]).n;
     begin({ rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), bookId: book.id, title: book.title,
-            units: book.units || [], questions: parsed.nums.map((n) => ({ n, type: byN[n].type, ...(byN[n].u != null ? { u: byN[n].u } : {}) })) });
-    setText("");
+            units: book.units || [], all: true, prev: [...doneN], cur: first, ev: [{ t: 0, k: "go", q: first }],
+            questions: book.questions.map((q) => ({ n: q.n, type: q.type, ...(q.u != null ? { u: q.u } : {}) })) });
   }
   function retry(log, wrong) {
     const bk = (books || []).find((b) => b.id === log.bookId);
@@ -4601,23 +4618,15 @@ function HwTab({ cls, me }) {
           <select className="cm-input" style={{margin: 0}} value={bookId} onChange={(e) => setBookId(e.target.value)}>
             {books.map((b) => <option key={b.id} value={b.id}>{b.title} · {b.questions.length}문항{b.test ? " (시험용)" : ""}</option>)}
           </select>
-          <label className="cm-label">오늘 풀 번호</label>
-          <input className="cm-input" style={{margin: 0}} placeholder="예: 101-130, 135" value={text} onChange={(e) => setText(e.target.value)} />
           {book && (
-            <div className="cm-hint" style={{marginTop: 6, lineHeight: 1.6}}>
-              {parsed.nums.length ? <><b>{parsed.nums.length}문항</b> — {hwRanges(parsed.nums)}번{(() => {
-                const us = [...new Set(parsed.nums.map((n) => hwUnit(book, book.questions.find((q) => q.n === n))).filter(Boolean))];
-                return us.length ? " · " + us.slice(0, 3).join(", ") + (us.length > 3 ? " 외 " + (us.length - 3) : "") : "";
-              })()}</> : "번호를 적어요. 이어진 번호는 101-130 처럼."}
-              {parsed.bad.length > 0 && <div style={{color: "#d6453f"}}>교재에 없는 번호: {parsed.bad.join(", ")}</div>}
-              {parsed.nums.length > HW_ONCE && <div style={{color: "#d6453f"}}>한 번에 {HW_ONCE}문항까지예요. 나눠서 내요.</div>}
-              {again2.length > 0 && <div style={{color: "#8a5a00"}}>이미 낸 번호가 섞였어요: {hwRanges(again2)} — 다시 풀어도 돼요(따로 남아요).</div>}
-              {doneN.size > 0 && <div>지금까지 낸 번호: {hwRanges([...doneN])}{nextN && !text ? <> · <button className="cm-link" style={{fontSize: 12.5}} onClick={() => setText(nextN.n + "-")}>{nextN.n}번부터 이어서</button></> : null}</div>}
+            <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.6}}>
+              {doneN.size ? <>지금까지 낸 번호 <b>{doneN.size}</b> / {book.questions.length} — {hwRanges([...doneN])}{nextN ? <> · 이어서 <b>{nextN.n}번</b>부터</> : null}</>
+                : <>1번부터 {book.questions.length}번까지 다 떠요. 오늘 푼 문제만 답을 적어요.</>}
             </div>
           )}
           <div className="mx-note">교재에 풀고, <b>지금 푸는 문제 번호를 눌러 둔 채</b> 풀어요. 답을 적으면 다음 문제로 넘어가요.<br />
-            시간 제한은 없어요. 자리를 뜰 땐 <b>쉬기</b> — 쉰 시간은 빼고 세요.</div>
-          <button className="cm-btn cm-btn-primary" disabled={!parsed.nums.length || parsed.nums.length > HW_ONCE} onClick={start}>시작</button>
+            시간 제한은 없어요. 자리를 뜰 땐 <b>쉬기</b> — 쉰 시간은 빼고 세요. 낼 땐 <b>답을 적은 문제만</b> 가요.</div>
+          <button className="cm-btn cm-btn-primary" disabled={!book} onClick={start}>시작</button>
         </>)}
     </div>
     {sums.length > 0 && (
