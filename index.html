@@ -4578,7 +4578,8 @@ function HwTab({ cls, me }) {
   }, [cls.id, me.id, again]);
   useEffect(() => { if (books && books.length && !books.find((b) => b.id === bookId)) setBookId(books[0].id); }, [books]);
   const book = (books || []).find((b) => b.id === bookId);
-  const mineB = (past || []).filter((l) => l.bookId === bookId);
+  // 선생님 모드로 시험 삼아 낸 것은 «전에 낸 번호(✓)» 로 치지 않는다 (10/10 — 한민수 계정에서 1–100 이 ✓ 로 떠 헷갈림)
+  const mineB = (past || []).filter((l) => l.bookId === bookId && !l.teacher);
   const doneN = new Set(mineB.flatMap((l) => l.nums || []));
   const lastN = doneN.size ? Math.max(...doneN) : 0;
   const nextN = book && book.questions.find((q) => q.n > lastN);
