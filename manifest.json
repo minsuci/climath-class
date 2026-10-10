@@ -1,7 +1,8 @@
 {
+  "id": "/",
   "name": "클래스앱",
   "short_name": "클래스앱",
-  "description": "대치 클라이매쓰 수업 앱 — 학생 · 선생님",
+  "description": "대치 클라이매쓰 수업 앱 — 학생용",
   "lang": "ko",
   "start_url": "/",
   "scope": "/",

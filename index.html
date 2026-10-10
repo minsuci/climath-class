@@ -4,11 +4,16 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>CLIMATH 수업</title>
-<!-- 바탕화면 · 홈 화면에 앱으로 설치 (2026-10-10, 팀체크와 같은 꼴). sw.js 는 캐시를 안 한다 -->
-<link rel="manifest" href="/manifest.json">
+<!-- 바탕화면 · 홈 화면에 앱으로 설치 (2026-10-10, 팀체크와 같은 꼴). sw.js 는 캐시를 안 한다.
+     학생 앱(/ · C 아이콘)과 선생님 앱(/?admin=1 · T 아이콘)을 **따로** 깐다 — 주소를 보고 manifest 를 고른다.
+     앱 안에서 둘을 오가는 탭은 두지 않는다(학생이 선생님 쪽으로 들어오는 길이 생겨서, 10/10 마왕님) -->
 <meta name="theme-color" content="#15233f">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
+  (function () {
+    var T = /[?&]admin=1(&|$)/.test(location.search);
+    var m = document.createElement("link"); m.rel = "manifest"; m.href = T ? "/manifest-admin.json" : "/manifest.json"; document.head.appendChild(m);
+    var a = document.createElement("link"); a.rel = "apple-touch-icon"; a.href = T ? "/apple-touch-icon-t.png" : "/apple-touch-icon.png"; document.head.appendChild(a);
+  })();
   // 크롬의 «설치할까요» 물음은 앱(React)이 뜨기 전에 올 수 있다 — 여기서 잡아 두고 머리글 «앱 설치» 단추가 쓴다
   window.__installEvt = null;
   window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); window.__installEvt = e; window.dispatchEvent(new Event("cm-installable")); });
@@ -43,7 +48,7 @@ html,body{margin:0; padding:0;}
 .cm-toggle button{border:0; background:transparent; color:#c4cde0; font-size:13px; font-weight:500; padding:7px 16px; border-radius:999px; cursor:pointer; font-family:inherit;}
 .cm-toggle button.on{background:#fff; color:var(--navy);}
 .cm-install{border:1px solid rgba(255,255,255,.35); background:transparent; color:#fff; font-size:12.5px; font-weight:700; padding:7px 12px; border-radius:999px; cursor:pointer; font-family:inherit; margin-left:8px; white-space:nowrap;}
-@media(max-width:480px){.cm-toggle button{padding:6px 11px;} .cm-install{padding:6px 9px;}}
+@media(max-width:480px){.cm-install{padding:6px 9px;}}
 
 .cm-main{max-width:560px; margin:0 auto; padding:22px 16px 40px;}
 
@@ -11639,24 +11644,12 @@ function ClassAdmin({ me, onBack, onOpen, onChanged }) {
 }
 
 // ===== 앱 루트 =====
-// 머리글 «학생 | 선생님» 탭 (10/10) — 주소(?admin=1)를 바꿔 다시 연다.
-// 선생님 쪽을 한 번이라도 연 기기에서만 보인다(학생 기기엔 안 뜬다). 앱(바탕화면)으로 열면 지난번에 보던 쪽으로 연다
 const IS_APP = (() => { try { return window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; } catch (e) { return false; } })();
-function cmMode(admin) { try { localStorage.setItem("climath_mode", admin ? "admin" : "student"); if (admin) localStorage.setItem("climath_admin_seen", "1"); } catch (e) {} }
-function cmSwitch(admin) { cmMode(admin); window.location.href = window.location.pathname + (admin ? "?admin=1" : ""); }
-(function launchToLastMode() {
-  try {
-    const p = new URLSearchParams(window.location.search);
-    if (!IS_APP || p.get("admin") || p.get("class") || sessionStorage.getItem("climath_launched")) return;
-    sessionStorage.setItem("climath_launched", "1");
-    if (localStorage.getItem("climath_mode") === "admin") window.location.replace(window.location.pathname + "?admin=1");
-  } catch (e) {}
-})();
 function InstallButton() {
   const [can, setCan] = useState(!!window.__installEvt);
   useEffect(() => { const f = () => setCan(!!window.__installEvt); window.addEventListener("cm-installable", f); return () => window.removeEventListener("cm-installable", f); }, []);
   if (!can || IS_APP) return null;
-  return <button className="cm-install" title="바탕화면 · 홈 화면에 앱으로 설치" onClick={async () => {
+  return <button className="cm-install" title={(new URLSearchParams(window.location.search).get("admin") === "1" ? "선생님용" : "학생용") + " 앱으로 바탕화면 · 홈 화면에 설치"} onClick={async () => {
     const e = window.__installEvt; if (!e) return;
     try { e.prompt(); await e.userChoice; } catch (er) {}
     window.__installEvt = null; setCan(false);
@@ -11666,8 +11659,7 @@ function InstallButton() {
 function App() {
   const params = new URLSearchParams(window.location.search);
   const isAdmin = params.get("admin") === "1";
-  useEffect(() => { if (!params.get("class")) cmMode(isAdmin); }, []);
-  const showSwitch = isAdmin || (() => { try { return localStorage.getItem("climath_admin_seen") === "1"; } catch (e) { return false; } })();
+
   const urlClass = findClass(params.get("class"));
   const [gateCls, setGateCls] = useState(null);
   const [sideOpen, setSideOpen] = useState(false);
@@ -11684,12 +11676,6 @@ function App() {
       <header className="cm-header">
         {hasSide > 0 && <button className="cm-hamb" onClick={() => setSideOpen(true)}>☰</button>}
         <div className="cm-brand" style={{flex: 1, minWidth: 0}}><span className="cm-logo">CLIMATH</span><span className="cm-sub">{sub}</span></div>
-        {showSwitch && (
-          <div className="cm-toggle">
-            <button className={isAdmin ? "" : "on"} onClick={() => isAdmin && cmSwitch(false)}>학생</button>
-            <button className={isAdmin ? "on" : ""} onClick={() => !isAdmin && cmSwitch(true)}>선생님</button>
-          </div>
-        )}
         <InstallButton />
       </header>
       <div className="cm-shell"><main className="cm-main">{main}</main></div>
