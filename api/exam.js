@@ -93,8 +93,12 @@ function checkExam(e) {
   if (!e || typeof e !== "object") return "시험지가 비었어요";
   if (!/^[0-9A-Za-z가-힣_.\-]{2,80}$/.test(String(e.id || ""))) return "id 가 이상해요: " + e.id;
   if (!String(e.title || "").trim()) return "제목이 없어요";
-  if (!(Number(e.minutes) > 0)) return "제한 시간이 없어요";
+  const hw = e.kind === "hw";   // 과제 교재 — 시간 제한 없이 위로 센다. 문항이 수백 개
+  if (e.kind != null && !hw) return "kind 는 hw 만";
+  if (!hw && !(Number(e.minutes) > 0)) return "제한 시간이 없어요";
   if (!Array.isArray(e.questions) || !e.questions.length) return "문항이 없어요";
+  if (e.questions.length > (hw ? 4000 : 200)) return "문항이 너무 많아요";
+  if (hw && e.units != null && !(Array.isArray(e.units) && e.units.every((u) => typeof u === "string" && u.trim() && u.length <= 30))) return "units 는 단원 이름(30자 안) 목록";
   const seen = {};
   for (const q of e.questions) {
     if (!Number.isInteger(q.n) || q.n <= 0) return "문항 번호가 이상해요: " + JSON.stringify(q);
@@ -108,6 +112,8 @@ function checkExam(e) {
     }
     if (q.pt != null && !(typeof q.pt === "number" && q.pt > 0)) return q.n + "번 배점이 이상해요";
     if (q.label != null && !(typeof q.label === "string" && q.label.trim() && q.label.length <= 16)) return q.n + "번 이름(label)이 이상해요";
+    if (q.u != null && !(hw && Number.isInteger(q.u) && q.u >= 0 && q.u < (e.units || []).length)) return q.n + "번 단원(u)이 이상해요";
+    if (q.p != null && !(hw && Number.isInteger(q.p) && q.p > 0)) return q.n + "번 쪽(p)이 이상해요";
   }
   if (e.lock != null && typeof e.lock !== "boolean") return "lock 은 true/false";
   return null;
@@ -143,8 +149,9 @@ async function rebuildList() {
   const exams = all.map((e) => ({
     id: e.id, title: e.title, minutes: e.minutes,
     cids: e.cids || [], sids: e.sids || [], test: !!e.test, lock: !!e.lock, order: e.order || 0,
+    ...(e.kind === "hw" ? { kind: "hw", units: e.units || [] } : {}),
     questions: (e.questions || []).map((q) => ({ n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}),
-                                                 ...(q.label ? { label: q.label } : {}) })),
+                                                 ...(q.label ? { label: q.label } : {}), ...(q.u != null ? { u: q.u } : {}) })),
   })).sort((a, b) => (a.order - b.order) || String(a.title).localeCompare(String(b.title), "ko"));
   await patchDoc(LIST_PATH, { exams, updated: Date.now() });
   return exams.length;
@@ -393,6 +400,108 @@ async function hkRemove(res, claims, b) {
 }
 
 // ───────────── 핸들러 ─────────────
+// ───────────── 과제 채점 (2026-10-10 · 고1 기말대비 «초개인화») ─────────────
+// 학생이 집에서 교재(수평교 · 퀀텀점프 · 기출백서)를 풀고 **푼 번호의 답만** 앱에 적는다. 시간은 위로 센다.
+// 교재는 examKeys 에 kind:"hw" 로 통째로 올려 둔다(문항 수백 개) — 과제마다 범위는 학생이 고른다.
+//   classes/{cid}/days/{날짜}/hwLogs/{rid}   한 번 낸 것. 실전 시험(examLogs)과 섞이지 않게 따로 둔다
+//   ⚠ 점수 칸(scores)에는 **쓰지 않는다** — 과제 정답률이 테스트 점수 추이 · 위험신호에 섞이면 안 된다
+//   ⚠ 정답(key)은 기록에 **남기지 않는다** — 틀린 것을 다시 푸는데(hwRetry) 기록에서 답이 보이면 안 된다
+// 첫 시도(auto)는 그대로 두고, 다시 푼 것은 tries[] 에 쌓는다. fin = 마지막 시도가 맞았나
+const HW_MAX_Q = 400;          // 한 번에 낼 수 있는 문항 수
+const HW_MAX_SEC = 12 * 3600;  // 쉰 시간을 뺀 «푼 시간» 이 이보다 길면 잘못된 것
+// 문항마다 머문 시간(초). ev 의 t 는 «쉰 시간을 뺀» 시계라 그대로 더하면 된다
+function hwSecs(ev, endT) {
+  const gos = (ev || []).filter((e) => e.k === "go"), sec = {};
+  gos.forEach((e, i) => {
+    const to = i + 1 < gos.length ? gos[i + 1].t : endT;
+    if (to > e.t) sec[e.q] = (sec[e.q] || 0) + (to - e.t);
+  });
+  return sec;
+}
+// 학생이 자기 자리로 내는지 (submit 과 같은 방식). 선생님(또는 명단의 선생님 표시 학생)은 teacher:true
+async function hwWho(res, claims, cid, sid) {
+  const cls = await getDoc("classes/" + cid).catch(() => null);
+  if (!cls) { res.status(404).json({ error: "반이 없어요" }); return null; }
+  const row = (cls.roster || []).find((r) => r && r.id === sid);
+  if (claims.role === "teacher" || claims.role === "owner") return { name: (row && row.name) || "", teacher: true };
+  if (!(claims.cids || []).includes(cid)) { res.status(403).json({ error: "그 반 학생이 아니에요" }); return null; }
+  if (!row || row.name !== claims.sname) { res.status(403).json({ error: "명단과 이름이 맞지 않아요" }); return null; }
+  return { name: row.name, teacher: !!row.teacher };
+}
+const hwEv = (ev) => (Array.isArray(ev) ? ev.slice(0, MAX_EV).map((e) => ({
+  t: Math.max(0, Number(e.t) || 0), k: e.k === "ans" ? "ans" : "go", q: Number(e.q) || 0,
+  ...(e.k === "ans" ? { v: e.v == null ? null : String(e.v).slice(0, 20) } : {}),
+})) : []);
+const hwNorm = (q, raw) => (raw == null || raw === "" ? null : (q.type === "mc" ? Number(raw) : String(raw).slice(0, 20)));
+const r1 = (x) => Math.round(x * 10) / 10;
+
+async function hwSubmit(res, claims, b) {
+  const cid = String(b.cid || ""), sid = String(b.sid || ""), bookId = String(b.bookId || ""), rid = String(b.rid || "");
+  if (!cid || !sid || !bookId) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  if (!/^[A-Za-z0-9_-]{6,40}$/.test(rid)) { res.status(400).json({ error: "기록 번호가 이상해요" }); return; }
+  const who = await hwWho(res, claims, cid, sid); if (!who) return;
+  const key = await getDoc("examKeys/" + bookId).catch(() => null);
+  if (!key || key.kind !== "hw") { res.status(404).json({ error: "그 교재가 없어요" }); return; }
+  if ((key.cids || []).length && !key.cids.includes(cid) && !who.teacher) { res.status(403).json({ error: "이 반 교재가 아니에요" }); return; }
+  const byN = {}; (key.questions || []).forEach((q) => { byN[q.n] = q; });
+  const nums = [...new Set((Array.isArray(b.nums) ? b.nums : []).map(Number))].filter((n) => byN[n]).sort((x, y) => x - y);
+  if (!nums.length) { res.status(400).json({ error: "푼 번호가 없어요" }); return; }
+  if (nums.length > HW_MAX_Q) { res.status(400).json({ error: "한 번에 " + HW_MAX_Q + "문항까지만 낼 수 있어요" }); return; }
+  const answers = b.answers && typeof b.answers === "object" ? b.answers : {};
+  const ev = hwEv(b.ev);
+  const endT = Math.max(0, Math.min(HW_MAX_SEC, Number(b.endT) || 0));
+  const startedAt = Number(b.startedAt) || Date.now();
+  const sec = hwSecs(ev, endT);
+  const questions = nums.map((n) => {
+    const q = byN[n], mine = hwNorm(q, answers[n]);
+    return { n, type: q.type, ...(q.label ? { label: q.label } : {}), ...(q.u != null ? { u: q.u } : {}),
+             answer: mine, auto: mine == null ? false : autoCorrect(q, mine), sec: r1(sec[n] || 0) };
+  });
+  const date = kstDate(startedAt), now = Date.now();
+  const log = {
+    rid, cid, sid, name: who.name, bookId, title: key.title, date, startedAt, endT: r1(endT),
+    pausedSec: Math.max(0, Math.round(Number(b.pausedSec) || 0)),
+    nums, questions, ev,
+    n: questions.length, correct: questions.filter((q) => q.auto === true).length,
+    blank: questions.filter((q) => q.answer == null).length, pending: questions.filter((q) => q.auto === null).length,
+    teacher: who.teacher, time: now,
+  };
+  const base = "classes/" + cid + "/days/" + date;
+  await patchDoc(base, { updated: now });   // 날짜 문서가 없으면 날짜 목록에 안 잡힌다 (submit 과 같은 까닭)
+  await patchDoc(base + "/hwLogs/" + rid, log);
+  res.status(200).json({ ok: true, log });
+}
+
+// 틀린 문항만 다시 푼 것. 첫 시도(auto · answer)는 손대지 않는다
+async function hwRetry(res, claims, b) {
+  const cid = String(b.cid || ""), date = String(b.date || ""), rid = String(b.rid || "");
+  if (!cid || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^[A-Za-z0-9_-]{6,40}$/.test(rid)) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  const path = "classes/" + cid + "/days/" + date + "/hwLogs/" + rid;
+  const log = await getDoc(path).catch(() => null);
+  if (!log) { res.status(404).json({ error: "그 기록이 없어요" }); return; }
+  const who = await hwWho(res, claims, cid, log.sid); if (!who) return;
+  const key = await getDoc("examKeys/" + log.bookId).catch(() => null);
+  if (!key) { res.status(404).json({ error: "교재가 없어요" }); return; }
+  const byN = {}; (key.questions || []).forEach((q) => { byN[q.n] = q; });
+  const answers = b.answers && typeof b.answers === "object" ? b.answers : {};
+  const secs = b.secs && typeof b.secs === "object" ? b.secs : {};
+  const now = Date.now();
+  let changed = 0;
+  const questions = (log.questions || []).map((row) => {
+    if (!(row.n in answers) || row.auto !== false || row.fin === true) return row;
+    const q = byN[row.n]; if (!q) return row;
+    const mine = hwNorm(q, answers[row.n]);
+    if (mine == null) return row;
+    const ok = autoCorrect(q, mine);
+    changed++;
+    return { ...row, tries: [...(row.tries || []), { a: mine, ok, sec: r1(Math.max(0, Math.min(HW_MAX_SEC, Number(secs[row.n]) || 0))), at: now }].slice(-10), fin: ok };
+  });
+  if (!changed) { res.status(400).json({ error: "다시 낸 답이 없어요" }); return; }
+  const patch = { questions, retried: now, fixed: questions.filter((q) => q.auto === false && q.fin === true).length };
+  await patchDoc(path, patch);
+  res.status(200).json({ ok: true, log: { ...log, ...patch } });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
   try {
@@ -412,10 +521,12 @@ export default async function handler(req, res) {
         const sids = got.sids;
         // patchDoc 은 보낸 칸만 고친다. 전에 있던 cids·test 가 남지 않게 **전부 적는다**
         await patchDoc("examKeys/" + e.id, {
-          title: String(e.title).trim(), minutes: Number(e.minutes),
+          title: String(e.title).trim(), minutes: Number(e.minutes) || 0,
+          kind: e.kind === "hw" ? "hw" : null, units: e.kind === "hw" ? (e.units || []).map((u) => String(u).trim()) : null,
           questions: e.questions.map((q) => ({ n: q.n, type: q.type, ...(q.ans != null ? { ans: q.ans } : {}),
                                                ...(q.label ? { label: String(q.label).trim() } : {}),
-                                               ...(q.pt != null ? { pt: q.pt } : {}) })),
+                                               ...(q.pt != null ? { pt: q.pt } : {}),
+                                               ...(q.u != null ? { u: q.u } : {}), ...(q.p != null ? { p: q.p } : {}) })),
           cids: Array.isArray(e.cids) ? e.cids.map(String) : [], sids, names, test: !!e.test, lock: !!e.lock, hkEmpty: !!e.hkEmpty,   // hkEmpty = 학결모 «걸어 둘 학생 없이 숨겨 둔» 시험지 (학생을 걸면 열린다)
           order: Number(e.order) || 0, updated: Date.now(),
         });
@@ -469,6 +580,25 @@ export default async function handler(req, res) {
         res.status(200).json({ ok: true, logs }); return;
       }
       if (body.action === "examMove") return await moveLog(res, body);
+      // 과제 채점 기록 — 극복 문제(쌓인 오답 → 내신대비 자료)를 만들 때 PC 로 받는다. cid 를 안 주면 과제 교재가 걸린 반 전부
+      if (body.action === "hwLogs") {
+        const since = String(body.since || "0000-00-00");
+        let cids = body.cid ? [String(body.cid)] : [];
+        if (!cids.length) {
+          const ks = (await listDocs("examKeys").catch(() => [])).filter((k) => k.kind === "hw");
+          cids = [...new Set(ks.flatMap((k) => k.cids || []))];
+        }
+        const logs = [];
+        for (const cid of cids) {
+          const days = (await listDocs("classes/" + cid + "/days").catch(() => [])).map((d) => d.id).filter((d) => d >= since);
+          for (const d of days) {
+            const ls = await listDocs("classes/" + cid + "/days/" + d + "/hwLogs").catch(() => []);
+            ls.forEach((l) => { if ((!body.sid || l.sid === body.sid) && (!body.bookId || l.bookId === body.bookId)) logs.push(l); });
+          }
+        }
+        logs.sort((a, b) => (a.time || 0) - (b.time || 0));
+        res.status(200).json({ ok: true, logs }); return;
+      }
       // 시간을 넘겨 낸 기록을 «낸 답 그대로» 점수로 다시 매긴다(10/2 전에 낸 것). 몇 번 돌려도 같다
       if (body.action === "examRescore") {
         const since = String(body.since || "0000-00-00");
@@ -501,6 +631,8 @@ export default async function handler(req, res) {
     if (body.action === "submit") return await submit(res, claims, body);
     if (body.action === "fix") return await fixAnswer(res, claims, body);
     if (body.action === "hkExam") return await hkExam(res, claims, body);
+    if (body.action === "hwSubmit") return await hwSubmit(res, claims, body);
+    if (body.action === "hwRetry") return await hwRetry(res, claims, body);
     if (body.action === "hkRemove") return await hkRemove(res, claims, body);
     res.status(400).json({ error: "그런 동작이 없어요" });
   } catch (e) {

@@ -16,6 +16,11 @@
 //     lock?: true      (답 고정 — 제출한 뒤에는 학생이 결과를 못 고친다. 선생님이 O/X·«답 고치기» 로 고친다)
 //     order?: 숫자     (목록 순서) }
 //
+// 과제 교재(2026-10-10 · 과제 채점): { id, title, kind: "hw", units?: [단원 이름…], cids: [반ID…],
+//     questions: [{ n, type, ans, u?: 단원 번호(units 의 자리), p?: 쪽 }] }   minutes 는 안 쓴다. 문항 4000개까지.
+//   학생이 «과제 채점» 탭에서 푼 번호를 골라 답만 적는다(시간은 위로 셈). 기록 꺼내기:
+//   node tools/exam-push.mjs --hwlogs [<반ID>] [--book <교재id>] [--since 2026-10-15] [--out 파일.json]
+//
 // 열쇠는 tools/lesson-key.json (강의노트 도구와 같은 것). 저장소에 안 들어간다.
 import fs from "fs";
 import vm from "vm";
@@ -58,6 +63,8 @@ function summary(e) {
   const qs = e.questions || [];
   const kind = (t) => qs.filter((q) => q.type === t).length;
   const pt = qs.every((q) => typeof q.pt === "number") ? qs.reduce((a, q) => a + q.pt, 0) : null;
+  if (e.kind === "hw") return `${e.id}  「${e.title}」 과제 교재 · ${qs.length}문항 (객관식 ${kind("mc")} · 단답 ${kind("short")} · 서술 ${kind("essay")})`
+    + ` · 단원 ${(e.units || []).length}개` + (e.test ? "  [시험용 — 선생님만]" : "") + ((e.cids || []).length ? `  [반 ${e.cids.length}곳만]` : "  [모든 반]");
   return `${e.id}  「${e.title}」 ${e.minutes}분 · ${qs.length}문항 (객관식 ${kind("mc")} · 단답 ${kind("short")} · 서술 ${kind("essay")})`
     + (pt != null ? ` · 배점합 ${Math.round(pt * 10) / 10}` : " · 배점 없음(개수로 셈)")
     + (e.test ? "  [시험용 — 선생님만]" : "") + (e.lock ? "  [답 고정 — 선생님만 고침]" : "") + ((e.cids || []).length ? `  [반 ${e.cids.length}곳만]` : "")
@@ -85,6 +92,17 @@ function summary(e) {
     const r = await call({ action: "examRescore", cid: arg("--cid") || undefined, since: arg("--since") || undefined, dry: has("--dry") });
     r.done.forEach((x) => console.log(`  ${x.date}  ${x.name}  ${x.examId}  ${x.from} → ${x.to}점` + (x.voided ? "  (취소됨)" : "") + (x.teacher ? "  (선생님 모드)" : "")));
     console.log((r.dry ? "(--dry — 안 고침) " : "다시 매김 ") + r.done.length + "건");
+    return;
+  }
+  // 과제 채점 기록 — 극복 문제(쌓인 오답 → 내신대비 자료)를 만들 때. 반을 안 적으면 과제 교재가 걸린 반 전부
+  if (has("--hwlogs")) {
+    const cid = arg("--hwlogs") && !arg("--hwlogs").startsWith("--") ? arg("--hwlogs") : undefined;
+    const { logs } = await call({ action: "hwLogs", cid, bookId: arg("--book") || undefined, since: arg("--since") || undefined });
+    const out = arg("--out") || ("hwlogs_" + (cid || "전체") + ".json");
+    fs.writeFileSync(out, JSON.stringify(logs, null, 1));
+    logs.forEach((l) => console.log(`${l.date}  ${l.name}  「${l.title}」 ${l.correct}/${l.n}` + (l.fixed ? ` · 다시 맞힘 ${l.fixed}` : "")
+      + ` · ${Math.round((l.endT || 0) / 60)}분${l.teacher ? "  (선생님)" : ""}`));
+    console.log("\n" + logs.length + "건 → " + out);
     return;
   }
   // 코칭용 결과 꺼내기 — 파일로 떨군다. 시험지 스캔과 같이 넣어 문항별 코칭을 쓴다
