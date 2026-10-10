@@ -1,0 +1,16 @@
+{
+  "name": "클래스앱",
+  "short_name": "클래스앱",
+  "description": "대치 클라이매쓰 수업 앱 — 학생 · 선생님",
+  "lang": "ko",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4efe6",
+  "theme_color": "#15233f",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-mask.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

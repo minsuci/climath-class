@@ -659,6 +659,14 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - PC 로 꺼내기: `node tools/exam-push.mjs --hwlogs [반ID] [--book id] [--since 날짜]` → 극복 문제 만들 때
 - 폰에서 `.mx-body` 가 10px 넘치던 것(동그라미 다섯 개의 최소 폭) — `minmax(0,1fr)` 와 480px 이하 줄임으로 고침. 실전 시험에도 같이 적용된다
 
+### 앱 설치(PWA) · 머리글 «학생 | 선생님» 탭 (2026-10-10)
+- 팀체크와 같은 꼴: `manifest.json` + 루트 `sw.js`(캐시 **안 함** — 설치 조건만 채우는 빈 fetch 처리기. 캐시를 넣으면 배포 직후 옛 판이 뜬다) + `icon-192/512.png` · `icon-mask.png`(maskable) · `apple-touch-icon.png`
+- `<head>` 의 작은 `<script>` 가 `beforeinstallprompt` 를 일찍 잡아 `window.__installEvt` 에 둔다 → 머리글 «앱 설치» 단추(`InstallButton`, 설치돼 있거나 물음이 안 오면 안 보임). 주소창의 설치 아이콘으로 깔아도 같다
+- 탭은 주소만 바꿔 다시 연다(`/` ↔ `/?admin=1`, `cmSwitch`). **선생님 쪽을 한 번이라도 연 기기에서만** 보인다(`localStorage.climath_admin_seen`) — 학생 폰엔 안 뜬다
+- 앱(standalone)으로 열면 지난번 쪽(`climath_mode`)으로 연다(`launchToLastMode`, 창마다 한 번)
+- 학생 쪽 로그인 화면: 선생님 토큰이 살아 있으면 «선생님 모드로 보기» — PIN 없이 담당 반(owner 는 전부)을 명단의 선생님 줄(없으면 `t_<tid>` 임시 줄)로 연다. `me.asTeacher` 면 비밀번호 변경을 숨긴다. 학생 이름으로 로그인하면 선생님 로그인은 풀린다(토큰이 하나)
+- 프리뷰 가짜 firebase 는 토큰을 sessionStorage 에 둬서 새로고침해도 로그인이 남는다(탭 전환 확인용)
+
 ### 참여표 (`ExamBoard`)
 
 **한꺼번에 채우는 것은 이 앱에 없다** — 대시보드에서 한다(2026-09-04).

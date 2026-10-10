@@ -121,6 +121,8 @@ const STUB = `
      규칙 검증은 프리뷰가 아니라 실제 배포본에서 해야 한다. */
   var _user = null, _watch = [];
   function fire(){ _watch.forEach(function(f){ try { f(_user); } catch(e){} }); }
+  /* 새로고침해도 로그인이 남게(실제 firebase 처럼) — 탭 전환(?admin=1 ↔ /) 확인용 */
+  setTimeout(function(){ try { var tk = sessionStorage.getItem("__pvTok"); if (tk && !_user) window.firebase.auth().signInWithCustomToken(tk); } catch(e){} }, 0);
   window.firebase = {
     firestore: Object.assign(function(){ return window.db; }, {
       FieldValue: {
@@ -131,6 +133,7 @@ const STUB = `
     auth: function(){ return {
       get currentUser(){ return _user; },
       signInWithCustomToken: function(tok){
+        try { sessionStorage.setItem("__pvTok", tok); } catch(e){}
         var c = JSON.parse(atob(String(tok).split(".")[1]));
         _user = { uid: c.uid, isAnonymous: false,
                   getIdToken: function(){ return Promise.resolve(tok); },
@@ -138,7 +141,7 @@ const STUB = `
         fire(); return Promise.resolve({ user: _user });
       },
       signInAnonymously: function(){ return Promise.reject(new Error("preview: 익명 로그인 없음")); },
-      signOut: function(){ _user = null; fire(); return Promise.resolve(); },
+      signOut: function(){ _user = null; try { sessionStorage.removeItem("__pvTok"); } catch(e){} fire(); return Promise.resolve(); },
       onAuthStateChanged: function(cb){ _watch.push(cb); setTimeout(function(){ cb(_user); }, 0); return function(){}; }
     }; }
   };
