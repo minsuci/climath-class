@@ -488,6 +488,8 @@ async function hwSubmit(res, claims, b) {
   };
   const base = "classes/" + cid + "/days/" + date;
   await patchDoc(base, { updated: now });   // 날짜 문서가 없으면 날짜 목록에 안 잡힌다 (submit 과 같은 까닭)
+  // ⚠ 기록 쓰기 — 10/10 e114ae0 에서 이 줄이 빠져 채점만 되고 아무것도 안 남았다(다시 들어가면 처음부터). 지우지 말 것
+  await patchDoc(base + "/hwLogs/" + rid, log);
   // 번호표에 칠하기 — 실패해도 제출은 된 것이다(기록은 이미 남았다)
   let marked = null;
   if (!who.teacher) {

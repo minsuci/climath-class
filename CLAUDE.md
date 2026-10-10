@@ -710,6 +710,7 @@ Vercel 환경변수 **`GEMINI_API_KEY`**. 답을 주지 않고 힌트만 주도�
 | 출석 체크 눌러도 무반응 | 전역 함수와 state 세터 이름 충돌(`setAttendance`) |
 | 화면 전환 시 모바일 햄버거 사라짐 | 새 Sidebar 마운트 → 옛 Sidebar cleanup 순서. `hasSide`를 **카운터**로 변경 |
 | 날짜 선택 후 사이드바 사라짐 | 조건부 return이 사이드바 렌더보다 앞에 있었음 |
+| 과제 채점 «내고 다시 들어가면 처음부터»(10/10) | `hwSubmit` 의 기록 쓰기(`patchDoc(…/hwLogs/rid, log)`)가 번호표 잇기(e114ae0) 때 빠짐 — 채점 결과는 화면에 떴지만 아무것도 안 남았다. 가짜 서버 시험이 «응답 200 · marked» 만 보고 기록 문서는 안 봤다. 서버를 고치면 **기록 문서가 생겼는지까지** 볼 것. 같이: 선생님 모드 기록을 ✓ 에서 빼던 것(bda955e)도 되돌림 |
 | 스와이프 뒤로가기 안 먹음 | `useEffect([])`는 리마운트 시 재등록 안 됨 → **ref callback**(`useSwipeBack`). `touch-action:pan-y` 필수, CSS 애니메이션이 인라인 transform을 덮으므로 `el.style.animation="none"` 필요 |
 | 표 안에서 스와이프하면 뒤로가기 | 가로 스크롤 영역에 `data-no-swipe` 부여 |
 | 출석 카드 글자가 세로로 쪼개짐 | 2열 그리드 폭 부족 → `min-height` 고정 + `white-space:nowrap` + 상태를 둘째 줄로 |

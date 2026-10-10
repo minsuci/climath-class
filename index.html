@@ -4604,8 +4604,9 @@ function HwTab({ cls, me }) {
   }, [cls.id, me.id, again]);
   useEffect(() => { if (books && books.length && !books.find((b) => b.id === bookId)) setBookId(books[0].id); }, [books]);
   const book = (books || []).find((b) => b.id === bookId);
-  // 선생님 모드로 시험 삼아 낸 것은 «전에 낸 번호(✓)» 로 치지 않는다 (10/10 — 한민수 계정에서 1–100 이 ✓ 로 떠 헷갈림)
-  const mineB = (past || []).filter((l) => l.bookId === bookId && !l.teacher);
+  // 내 자리(me.id)로 낸 것은 선생님 모드여도 «전에 낸 번호(✓)» 로 친다. 한때 뺐는데(bda955e) 그건 풀던 화면에 남은 옛 ✓ 탓이었고
+  // (75bc446 에서 고침), 빼 두니 선생님 모드에선 내고 다시 들어가면 늘 처음 상태라 «저장이 안 된다» 로 보였다(10/10)
+  const mineB = (past || []).filter((l) => l.bookId === bookId);
   const doneN = new Set(mineB.flatMap((l) => l.nums || []));
   const lastN = doneN.size ? Math.max(...doneN) : 0;
   const nextN = book && book.questions.find((q) => q.n > lastN);
@@ -4632,7 +4633,7 @@ function HwTab({ cls, me }) {
   }
 
   const runBook = running ? (mxLoad(K) || {}).bookId : null;
-  const runPrev = runBook ? [...new Set((past || []).filter((l) => l.bookId === runBook && !l.teacher).flatMap((l) => l.nums || []))] : [];
+  const runPrev = runBook ? [...new Set((past || []).filter((l) => l.bookId === runBook).flatMap((l) => l.nums || []))] : [];
   if (running) return <HwRun cls={cls} me={me} prevNums={runPrev} onDone={(log) => { setRunning(false); setView(log); setAgain((x) => x + 1); }} onAbandon={() => setRunning(false)} />;
   if (view) return <HwResult log={view} book={(books || []).find((b) => b.id === view.bookId)} onRetry={retry} canSelf onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
 
