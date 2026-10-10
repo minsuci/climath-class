@@ -1,6 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["icn1"],
+  "rewrites": [
+    { "source": "/t", "destination": "/index.html" },
+    { "source": "/t/", "destination": "/index.html" }
+  ],
   "crons": [
     {
       "path": "/api/cron/lessons",

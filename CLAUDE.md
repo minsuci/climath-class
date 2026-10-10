@@ -661,7 +661,8 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 
 ### 앱 설치(PWA) — 학생 앱 · 선생님 앱 따로 (2026-10-10)
 - 팀체크와 같은 꼴: 루트 `sw.js`(캐시 **안 함** — 설치 조건만 채우는 빈 fetch 처리기. 캐시를 넣으면 배포 직후 옛 판이 뜬다)
-- **앱이 두 개다.** 학생 앱 `manifest.json`(id `/`, C 아이콘 `icon-192/512/mask` · `apple-touch-icon.png`) / 선생님 앱 `manifest-admin.json`(id `/?admin=1`, start_url `/?admin=1`, T 아이콘 `icon-t-*` · `apple-touch-icon-t.png`). `<head>` 의 작은 스크립트가 주소의 `admin=1` 을 보고 manifest 를 골라 붙인다 — 그래서 manifest 링크가 HTML 에 직접 안 적혀 있다
+- **앱이 두 개다.** 학생 앱 `manifest.json`(id `/`, C 아이콘 `icon-192/512/mask` · `apple-touch-icon.png`) / 선생님 앱 `manifest-admin.json`(id·start_url·scope 모두 `/t/`, T 아이콘 `icon-t-*` · `apple-touch-icon-t.png`). `/t/` 는 `vercel.json` rewrite 로 같은 index.html 이고 `IS_T_PATH` 면 관리자 화면(옛 `?admin=1` 도 그대로 된다). `<head>` 의 작은 스크립트가 주소를 보고 manifest 를 골라 붙인다 — 그래서 manifest 링크가 HTML 에 직접 안 적혀 있다
+- ⚠ 선생님 앱을 `/?admin=1` 로 두면 안 된다: 학생 앱 범위(`/`) 안이라 학생 앱을 먼저 깐 크롬은 «앱에서 열기(C)» 만 띄우고 설치를 안 내준다(10/10 실제로 겪음). 경로가 따로여야 한다
 - 앱 안에서 학생↔선생님을 오가는 탭은 **두지 않는다**(한 번 넣었다가 뺐다 — 학생이 선생님 쪽으로 들어오는 길이 생겨서, 10/10 마왕님)
 - `beforeinstallprompt` 를 일찍 잡아 머리글 «앱 설치» 단추(`InstallButton`)가 쓴다. 학생 주소에서 누르면 학생 앱, `?admin=1` 에서 누르면 선생님 앱이 깔린다. 주소창 설치 아이콘도 같다
 - 학생 쪽 로그인 화면: 선생님 토큰이 살아 있으면(같은 PC 에서 선생님 앱에 로그인돼 있으면) «선생님 모드로 보기» — PIN 없이 담당 반(owner 는 전부)을 명단의 선생님 줄(없으면 `t_<tid>` 임시 줄)로 연다. `me.asTeacher` 면 비밀번호 변경을 숨긴다. 학생 이름으로 로그인하면 선생님 로그인은 풀린다(토큰이 하나)

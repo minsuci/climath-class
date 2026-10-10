@@ -5,12 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>CLIMATH 수업</title>
 <!-- 바탕화면 · 홈 화면에 앱으로 설치 (2026-10-10, 팀체크와 같은 꼴). sw.js 는 캐시를 안 한다.
-     학생 앱(/ · C 아이콘)과 선생님 앱(/?admin=1 · T 아이콘)을 **따로** 깐다 — 주소를 보고 manifest 를 고른다.
+     학생 앱(/ · C 아이콘)과 선생님 앱(/t/ · T 아이콘)을 **따로** 깐다 — 주소를 보고 manifest 를 고른다.
+     선생님 앱은 경로가 따로(/t/, vercel.json rewrite)여야 한다 — /?admin=1 은 학생 앱 범위(/) 안이라
+     학생 앱을 먼저 깐 크롬이 «앱에서 열기(C)» 만 띄우고 설치를 안 내줬다(10/10).
      앱 안에서 둘을 오가는 탭은 두지 않는다(학생이 선생님 쪽으로 들어오는 길이 생겨서, 10/10 마왕님) -->
 <meta name="theme-color" content="#15233f">
 <script>
   (function () {
-    var T = /[?&]admin=1(&|$)/.test(location.search);
+    var T = /^\/t(\/|$)/.test(location.pathname) || /[?&]admin=1(&|$)/.test(location.search);
     var m = document.createElement("link"); m.rel = "manifest"; m.href = T ? "/manifest-admin.json" : "/manifest.json"; document.head.appendChild(m);
     var a = document.createElement("link"); a.rel = "apple-touch-icon"; a.href = T ? "/apple-touch-icon-t.png" : "/apple-touch-icon.png"; document.head.appendChild(a);
   })();
@@ -11644,12 +11646,14 @@ function ClassAdmin({ me, onBack, onOpen, onChanged }) {
 }
 
 // ===== 앱 루트 =====
+// 선생님 앱 주소 /t/ (= 옛 ?admin=1, 그것도 그대로 된다)
+const IS_T_PATH = /^\/t(\/|$)/.test(window.location.pathname);
 const IS_APP = (() => { try { return window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; } catch (e) { return false; } })();
 function InstallButton() {
   const [can, setCan] = useState(!!window.__installEvt);
   useEffect(() => { const f = () => setCan(!!window.__installEvt); window.addEventListener("cm-installable", f); return () => window.removeEventListener("cm-installable", f); }, []);
   if (!can || IS_APP) return null;
-  return <button className="cm-install" title={(new URLSearchParams(window.location.search).get("admin") === "1" ? "선생님용" : "학생용") + " 앱으로 바탕화면 · 홈 화면에 설치"} onClick={async () => {
+  return <button className="cm-install" title={(IS_T_PATH || new URLSearchParams(window.location.search).get("admin") === "1" ? "선생님용" : "학생용") + " 앱으로 바탕화면 · 홈 화면에 설치"} onClick={async () => {
     const e = window.__installEvt; if (!e) return;
     try { e.prompt(); await e.userChoice; } catch (er) {}
     window.__installEvt = null; setCan(false);
@@ -11658,7 +11662,7 @@ function InstallButton() {
 
 function App() {
   const params = new URLSearchParams(window.location.search);
-  const isAdmin = params.get("admin") === "1";
+  const isAdmin = IS_T_PATH || params.get("admin") === "1";
 
   const urlClass = findClass(params.get("class"));
   const [gateCls, setGateCls] = useState(null);
