@@ -579,7 +579,7 @@ export default async function handler(req, res) {
       // 반 ID 와 명단 이름 — 시험지에 cids·names 를 적으려고
       if (body.action === "classes") {
         const cs = await listDocs("classes").catch(() => []);
-        res.status(200).json({ ok: true, classes: cs.map((c) => ({ id: c.id, name: c.name || "",
+        res.status(200).json({ ok: true, classes: cs.map((c) => ({ id: c.id, name: c.name || "", books: c.books || [],
           names: (c.roster || []).filter((r) => r && r.name).map((r) => r.name) })) }); return;
       }
       if (body.action === "examKeys") {
