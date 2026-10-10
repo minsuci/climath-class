@@ -4802,7 +4802,7 @@ function HwBoard({ cls }) {
 
   return (<>
     <div className="cm-card">
-      <h3 className="cm-h3">과제 채점 <span className="cm-h-hint">(수업 전에 보기)</span></h3>
+      <h3 className="cm-h3">과제 <span className="cm-h-hint">(수업 전에 보기)</span></h3>
       {books && !books.length && <div className="cm-empty">이 반에 걸린 교재가 없어요 — 교재는 PC 도구로 올린다(tools/exam-push.mjs, kind:"hw")</div>}
       <div style={{display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center"}}>
         <select className="cm-input" style={{margin: 0, width: "auto"}} value={days} onChange={(e) => setDays(Number(e.target.value))}>
@@ -8245,7 +8245,7 @@ function AdminView() {
           { key: "c:book", ico: "▦", label: "월간 출석부" },
           { key: "c:scores", ico: "◐", label: "점수 추이" },
           { key: "c:mock", ico: "⏱", label: "실전 시험" },
-          ...(hwBooksT && hwBooksT.length ? [{ key: "c:hwb", ico: "✎", label: "과제 채점" }] : []),
+          ...(hwBooksT && hwBooksT.length ? [{ key: "c:hwb", ico: "✎", label: "과제" }] : []),
           { key: "c:notice", ico: "◑", label: "공지" },
           { key: "c:flyer", ico: "▤", label: "안내문" },
           ...(isIndividual(cls) || hasProgFile ? [{ key: "c:progress", ico: "◈", label: "진도표" }] : []),
@@ -11513,7 +11513,7 @@ function StudentDetail({ cls, student, hwDone, questioned, canEdit, date, meName
                 ))}
               </div>
             )}
-            {xs[b.name] && xs[b.name].size > 0 && <div className="cm-hint" style={{margin: "4px 0 6px"}}>빨간 테두리 = 과제 채점에서 처음에 틀린 번호 ({[...xs[b.name]].sort((x, y) => x - y).join(", ")})</div>}
+            {xs[b.name] && xs[b.name].size > 0 && <div className="cm-hint" style={{margin: "4px 0 6px"}}>빨간 테두리 = 답을 낼 때 처음에 틀린 번호 ({[...xs[b.name]].sort((x, y) => x - y).join(", ")})</div>}
             <HwGrid total={b.total} set={new Set(mine[b.name] || [])} qset={new Set(qnums)} xset={xs[b.name]} />
           </div>
         );
