@@ -641,6 +641,16 @@ export default async function handler(req, res) {
       }
       // 반의 «과제» 체크 기록(homework)과 «질문한 번호»(questioned)를 비운다 — 새로 시작할 때.
       // 지우기 전 문서를 그대로 돌려준다(도구가 파일로 남긴다). dry 면 돌려주기만 하고 안 지운다
+      // 과제 채점 기록 하나 지우기 — 선생님 모드로 시험 삼아 낸 것 등. 지운 문서를 돌려준다(도구가 파일로 남긴다)
+      if (body.action === "hwLogDel") {
+        const cid = String(body.cid || ""), date = String(body.date || ""), rid = String(body.rid || "");
+        if (!cid || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !rid) { res.status(400).json({ error: "cid · date · rid 가 필요해요" }); return; }
+        const path = "classes/" + cid + "/days/" + date + "/hwLogs/" + rid;
+        const log = await getDoc(path).catch(() => null);
+        if (!log) { res.status(404).json({ error: "그 기록이 없어요" }); return; }
+        if (!body.dry) await deleteDoc(path);
+        res.status(200).json({ ok: true, dry: !!body.dry, log }); return;
+      }
       if (body.action === "hwReset") {
         const cid = String(body.cid || "");
         if (!cid || !(await getDoc("classes/" + cid).catch(() => null))) { res.status(404).json({ error: "반이 없어요" }); return; }
