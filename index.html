@@ -4234,7 +4234,10 @@ function hwSum(logs) {
            rate: tried ? Math.round((ok / tried) * 100) : null };
 }
 
-function HwRun({ cls, me, onDone, onAbandon }) {
+// prevNums = 전에 낸 번호. **풀던 화면에 저장하지 않고** 늘 서버 기록에서 받는다 — 저장해 두면 기록을 지워도
+//        그 기기에서 이어 열 때 옛 ✓ 가 그대로 남는다(10/10 한민수 선생님 모드)
+function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
+  const prevRef = useRef(prevNums || []); prevRef.current = prevNums || [];
   const K = hwKey(cls.id, me.id);
   const [S, setS] = useState(() => {
     const s0 = mxLoad(K);
@@ -4269,7 +4272,7 @@ function HwRun({ cls, me, onDone, onAbandon }) {
   // 교재 전체(all)일 땐 앞으로만 — 다음 «아직 안 낸» 번호로. 끝에서 1번으로 돌아가지 않는다
   const nextOf = (x, n) => {
     if (!x.all) return mxNextOpen(x, n);
-    const prev = new Set(x.prev || []), ns = x.questions.map((q) => q.n);
+    const prev = new Set(prevRef.current), ns = x.questions.map((q) => q.n);
     for (let i = ns.indexOf(n) + 1; i < ns.length; i++) if (!mxAnswered(x, ns[i]) && !prev.has(ns[i])) return ns[i];
     return null;
   };
@@ -4371,7 +4374,7 @@ function HwRun({ cls, me, onDone, onAbandon }) {
   const idx = S.questions.indexOf(q), prev = S.questions[idx - 1], next = S.questions[idx + 1];
   const blanks = S.questions.filter((x) => !mxAnswered(S, x.n)).map((x) => x.n);
   const answered = S.questions.filter((x) => mxAnswered(S, x.n)).map((x) => x.n);
-  const prevSet = new Set(S.all ? S.prev || [] : []);
+  const prevSet = new Set(S.all ? prevNums || [] : []);
   const none = S.questions.every((x) => !mxAnswered(S, x.n));
   const unit = S.units && q.u != null ? S.units[q.u] : "";
   const padKey = (k) => { if (busy.current) return; setBuf((b) => (k === "⌫" ? b.slice(0, -1) : k === "C" ? "" : b.length < 12 ? b + k : b)); };
@@ -4441,10 +4444,11 @@ function HwRun({ cls, me, onDone, onAbandon }) {
             })}
           </div>
           <div className="cm-hint" style={{marginTop: 10}}>지금 푸는 문제 번호를 눌러 두고 풀어요 — 문제마다 걸린 시간이 남아요. 자리를 뜰 땐 <b>쉬기</b>.</div>
-          {none && !frozen && (
+          {!frozen && (
             <button className="cm-link" style={{marginTop: 12, fontSize: 12}}
-              onClick={() => { if (confirm("그만두고 처음으로 돌아갈까요?\n(아직 아무것도 제출되지 않았어요)")) { mxSave(K, null); sRef.current = null; onAbandon(); } }}>
-              번호를 잘못 골랐어요 (그만두기)
+              onClick={() => { if (confirm(none ? "그만두고 처음으로 돌아갈까요?\n(아직 아무것도 제출되지 않았어요)"
+                : "이번 풀이를 버리고 처음으로 돌아갈까요?\n적어 둔 답 " + answered.length + "개가 지워져요. 제출되지 않아요.")) { mxSave(K, null); sRef.current = null; onAbandon(); } }}>
+              {none ? "그만두기" : "이번 풀이 버리기"}
             </button>
           )}
         </div>
@@ -4596,7 +4600,7 @@ function HwTab({ cls, me }) {
     try { localStorage.setItem("climath_hw_book", book.id); } catch (e) {}
     const first = (book.questions.find((q) => !doneN.has(q.n)) || book.questions[0]).n;
     begin({ rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), bookId: book.id, title: book.title,
-            units: book.units || [], all: true, prev: [...doneN], cur: first, ev: [{ t: 0, k: "go", q: first }],
+            units: book.units || [], all: true, cur: first, ev: [{ t: 0, k: "go", q: first }],
             questions: book.questions.map((q) => ({ n: q.n, type: q.type, ...(q.u != null ? { u: q.u } : {}) })) });
   }
   function retry(log, wrong) {
@@ -4605,7 +4609,9 @@ function HwTab({ cls, me }) {
             questions: wrong.map((q) => ({ n: q.n, type: q.type, ...(q.u != null ? { u: q.u } : {}) })) });
   }
 
-  if (running) return <HwRun cls={cls} me={me} onDone={(log) => { setRunning(false); setView(log); setAgain((x) => x + 1); }} onAbandon={() => setRunning(false)} />;
+  const runBook = running ? (mxLoad(K) || {}).bookId : null;
+  const runPrev = runBook ? [...new Set((past || []).filter((l) => l.bookId === runBook && !l.teacher).flatMap((l) => l.nums || []))] : [];
+  if (running) return <HwRun cls={cls} me={me} prevNums={runPrev} onDone={(log) => { setRunning(false); setView(log); setAgain((x) => x + 1); }} onAbandon={() => setRunning(false)} />;
   if (view) return <HwResult log={view} book={(books || []).find((b) => b.id === view.bookId)} onRetry={retry} canSelf onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
 
   const sums = (books || []).map((b) => ({ b, s: hwSum((past || []).filter((l) => l.bookId === b.id)) })).filter((x) => x.s.n);
