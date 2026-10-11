@@ -221,6 +221,26 @@ export async function getDoc(path) {
   return { id: path.split("/").pop(), ...fromFields(j.fields || {}) };
 }
 
+// 문서 + 수정 시각(v). 조건부 쓰기(patchDocIf)와 짝 — 두 요청이 같은 문서를 읽고 고쳐 쓸 때 겹침을 막는다
+export async function getDocV(path) {
+  const j = await call(docBase() + "/" + path, { method: "GET" });
+  if (!j) return { doc: null, v: null };
+  return { doc: { id: path.split("/").pop(), ...fromFields(j.fields || {}) }, v: j.updateTime || null };
+}
+// v 가 있으면 «그 뒤로 아무도 안 고쳤을 때만», 없으면 «아직 문서가 없을 때만» 쓴다. 남이 먼저 썼으면 false (다시 읽고 다시 할 것)
+export async function patchDocIf(path, data, maskPaths, v) {
+  const mask = (maskPaths || Object.keys(data))
+    .map((k) => "updateMask.fieldPaths=" + encodeURIComponent(k)).join("&");
+  const pre = v ? "&currentDocument.updateTime=" + encodeURIComponent(v) : "&currentDocument.exists=false";
+  try {
+    const r = await call(docBase() + "/" + path + "?" + mask + pre, { method: "PATCH", body: JSON.stringify({ fields: toFields(data) }) });
+    return r !== null;
+  } catch (e) {
+    if (/FAILED_PRECONDITION|ALREADY_EXISTS|precondition|already exists/i.test(String(e.message))) return false;
+    throw e;
+  }
+}
+
 // 컬렉션 전체 읽기. path 예: "teachers"
 export async function listDocs(path) {
   const out = [];
