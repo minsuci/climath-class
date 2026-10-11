@@ -660,16 +660,6 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - PC 로 꺼내기: `node tools/exam-push.mjs --hwlogs [반ID] [--book id] [--since 날짜]` → 극복 문제 만들 때
 - 폰에서 `.mx-body` 가 10px 넘치던 것(동그라미 다섯 개의 최소 폭) — `minmax(0,1fr)` 와 480px 이하 줄임으로 고침. 실전 시험에도 같이 적용된다
 
-### 조각 — 과제 집중 보상 (2026-10-11)
-설계·까닭은 볼트 `20 작업/조각 보상 — 과제 집중 설계.md`. 대상 = 과제 채점 교재가 걸린 반(고1S·자사고·TOP).
-- **계산은 전부 서버**(`api/exam.js` 의 `PC` 상수 · `hwFocus` · `pcAdd` · `pcOpen`). 앱의 `PCC` · `hwFocusLive` 는 풀기 화면 «🔥 콤보» 표시용 — **숫자를 바꾸면 두 곳 다**
-- 조각은 **푼 문제 × 집중 배율**(시간이 아니다 — 켜 두기만·느리게 풀기 막기). 0.1조각/문제, 이탈 없이 10분 ×1.2 · 20분 ×1.5 · 40분 ×2, 8초 미만 찍기 0, 다시 풀어 맞힘 0.1, 하루 4조각. 단위는 정수(조각 0.1개 = 1)
-- 이탈 = 풀기 화면이 숨겨짐(visibilitychange). `HwRun` 이 ev 에 `{k:"away", t 떠난 때, r 돌아온 때(둘 다 푼 시간 시계), s 실제 초}` · 쉬기는 `{k:"pz", t, s}` 를 남긴다. 2초 미만은 안 남김. 30초 이하 2번까지 봐줌, 그 밖엔 배율 0부터(번 조각은 안 뺏음), 5분 넘으면 그 회차 «집중 실패»(×1)
-- 장부 `classes/{cid}/pieces/{sid}` {bal, earned, opened, day, dayPts, prizes[], log[]} — 쓰기는 서버만, **조건부 쓰기**(`_google.js` `getDocV` · `patchDocIf`, updateTime 이 그대로일 때만)로 두 번 눌러 두 번 빠지는 것 막음. 학생 앱은 장부를 직접 안 읽고 `pcMe` 로 받는다(규칙 손 안 댐)
-- 상품표 `appConfig/pieces.items[{id,name,w 가중치,stock|null}]` — 세 반 공통, 선생님 «과제» 판 맨 아래에서 고친다. 학생에겐 확률(%)만, 재고 0이면 «다 나감»
-- 서버 동작: 학생 `pcMe` · `pcOpen` / 선생님 `pcItemsGet` · `pcItemsSet` · `pcBoard` · `pcGive`(지급, undo) · `pcAdjust`(±, 까닭)
-- 선생님 모드 제출은 조각 없음. 제출 기록(hwLogs)에 `focus{hides, awaySec, shortUsed, breaks, failed, maxCombo, pts, mults}` · `pieces` · `capped`
-
 ### 앱 설치(PWA) — 학생 앱 · 선생님 앱 따로 (2026-10-10)
 - 팀체크와 같은 꼴: 루트 `sw.js`(캐시 **안 함** — 설치 조건만 채우는 빈 fetch 처리기. 캐시를 넣으면 배포 직후 옛 판이 뜬다)
 - **앱이 두 개다.** 학생 앱 `manifest.json`(id `/`, C 아이콘 `icon-192/512/mask` · `apple-touch-icon.png`) / 선생님 앱 `manifest-admin.json`(id·start_url·scope 모두 `/t/`, T 아이콘 `icon-t-*` · `apple-touch-icon-t.png`). `/t/` 는 `vercel.json` rewrite 로 같은 index.html 이고 `IS_T_PATH` 면 관리자 화면(옛 `?admin=1` 도 그대로 된다). `<head>` 의 작은 스크립트가 주소를 보고 manifest 를 골라 붙인다 — 그래서 manifest 링크가 HTML 에 직접 안 적혀 있다

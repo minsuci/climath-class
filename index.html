@@ -326,20 +326,6 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-cell.done.clickable:hover{border-color:var(--clay); color:var(--clay);}
 .cm-cell.q{color:#d6453f; font-weight:700;}
 .cm-cell.x{box-shadow:inset 0 0 0 2px #d6453f;}
-.mx-combo{color:#fff; font-size:13px; font-weight:700; padding:5px 10px; border-radius:999px; background:rgba(255,255,255,.12); white-space:nowrap; margin-right:6px;}
-.mx-combo.hot{background:#c06a3a;} .mx-combo.fail{background:rgba(214,69,63,.85);} .mx-combo small{opacity:.75; font-weight:600;}
-.pc-toast{margin:10px 12px 0; padding:9px 14px; border-radius:10px; background:#fff4e5; color:#7a4a12; font-size:13.5px; font-weight:600;}
-.pc-card .pc-head{display:flex; align-items:center; gap:12px; justify-content:space-between; flex-wrap:wrap;}
-.pc-big{font-size:18px;} .pc-big b{font-size:24px; color:var(--navy);}
-.pc-open{margin-top:0; display:flex; flex-direction:column; align-items:center; line-height:1.2;} .pc-open small{font-size:11px; font-weight:600; opacity:.85;}
-.pc-bar{height:8px; background:#ece6da; border-radius:999px; overflow:hidden; margin:10px 0 2px;} .pc-bar i{display:block; height:100%; background:linear-gradient(90deg,#c06a3a,#e0a14a); border-radius:999px;}
-.pc-wait{margin-top:8px; font-size:13.5px;}
-.pc-chip{display:inline-block; background:#fff4e5; color:#7a4a12; border:1px solid #f0d3a8; border-radius:999px; padding:2px 9px; margin:2px 4px 2px 0; font-size:12.5px; font-weight:700; font-family:inherit;}
-.pc-chip.go{cursor:pointer;}
-.pc-line{background:#f6f1e7; border-radius:10px; padding:9px 12px; margin:-4px 0 12px; font-size:14px;} .pc-line span{color:var(--muted); font-size:13px;}
-.pc-roll{font-size:64px; line-height:1.2; animation:pcShake .5s ease-in-out infinite;} .pc-roll.done{animation:pcPop .4s ease-out;}
-@keyframes pcShake{0%,100%{transform:rotate(0)}25%{transform:rotate(-12deg)}75%{transform:rotate(12deg)}}
-@keyframes pcPop{0%{transform:scale(.4)}80%{transform:scale(1.15)}100%{transform:scale(1)}}
 .cm-hw-lock{font-size:11.5px; font-weight:700; color:var(--navy); background:#e9eef6; border-radius:999px; padding:2px 8px; margin-left:6px; vertical-align:middle;}
 .mx-chip.prev{background:#f3f0e8; color:var(--muted);} .mx-chip.prev i{color:#2f7d4f; font-weight:700;}
 .hw-unit{grid-column:1 / -1; font-size:12px; font-weight:800; color:var(--navy); margin:8px 0 0; padding-bottom:3px; border-bottom:1px solid var(--line);}   /* 과제 채점에서 처음에 틀린 번호 */
@@ -4180,7 +4166,6 @@ function StudentHomework({ cls, me }) {
   const anyLocked = myBooks.some((b) => byLink[b.name]);
   const anyFree = myBooks.some((b) => !byLink[b.name]);
   const cards = (ctl) => (<>
-    {ctl && <PieceCard cls={cls} me={me} ver={ver} />}
     <div className="cm-card cm-hint">
       {anyLocked && <><b>✎ 답 내기</b> 교재는 <b>풀기 시작</b>을 눌러 푼 문제의 답을 적어요(번호 칸을 누르면 그 번호부터). 낸 번호가 칠해지고, 처음에 틀린 번호는 <b style={{ color: "#d6453f" }}>빨간 테두리</b>예요. 손으로는 못 칠해요.{anyFree ? <br /> : null}</>}
       {anyFree && <>완료한 번호를 <b>누르거나, 마우스로 드래그</b>해서 칠하세요. 터치 화면에서는 칸을 <b>꾹 눌러 칠하기 모드</b>로 들어간 뒤 손가락을 끌면 됩니다. 표시한 번호는 <b>날마다 지워지지 않고 계속 누적</b>돼요.</>}
@@ -4310,93 +4295,6 @@ function hwSum(logs) {
            rate: tried ? Math.round((ok / tried) * 100) : null };
 }
 
-// ===== 조각 — 과제 집중 보상 (2026-10-11) =====
-// 볼트 «20 작업/조각 보상 — 과제 집중 설계.md». 조각 · 상자는 **전부 서버**(api/exam.js PC · hwFocus · pcAdd · pcOpen).
-// 여기 숫자는 풀기 화면의 «콤보» 표시용 — 서버 PC 와 같게 둔다(다르면 화면과 실제 조각이 어긋난다)
-const PCC = { shortSec: 30, shortFree: 2, failSec: 300, pzKeep: 300, idle: 300, tiers: [[2400, 20], [1200, 15], [600, 12]] };
-function hwFocusLive(ev, now) {
-  let combo = 0, lastT = 0, lastAct = 0, shortUsed = 0, hides = 0, failed = false;
-  const adv = (t) => { if (t > lastT) { combo += Math.max(0, Math.min(t, lastAct + PCC.idle) - lastT); lastT = t; } };
-  for (const e of ev || []) {
-    adv(e.t);
-    if (e.k === "go" || e.k === "ans") lastAct = Math.max(lastAct, e.t);
-    else if (e.k === "away") {
-      hides++; if (e.s > PCC.failSec) failed = true;
-      if (e.s <= PCC.shortSec && shortUsed < PCC.shortFree) shortUsed++; else combo = 0;
-      lastT = Math.max(lastT, e.r || e.t); lastAct = lastT;
-    } else if (e.k === "pz") { if (e.s > PCC.pzKeep) combo = 0; lastAct = Math.max(lastAct, e.t); }
-  }
-  if (now != null) adv(now);
-  const mult = failed ? 10 : (PCC.tiers.find(([s]) => combo >= s) || [0, 10])[1];
-  const nx = PCC.tiers.slice().reverse().find(([s]) => combo < s);
-  return { combo, mult, failed, hides, shortLeft: Math.max(0, PCC.shortFree - shortUsed), idle: now != null && now - lastAct > PCC.idle,
-           next: !failed && nx ? { left: nx[0] - combo, mult: nx[1] } : null };
-}
-const pcFmt = (x) => String(Math.round(Number(x) || 0) / 10);
-async function pcApi(body) {
-  const u = firebase.auth().currentUser;
-  if (!u) throw new Error("로그인이 풀렸어요. 다시 들어와 주세요.");
-  const r = await fetch("/api/exam", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken: await u.getIdToken(), ...body }) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || "요청 실패 (" + r.status + ")");
-  return j;
-}
-// 학생 «과제» 탭 맨 위 — 모은 조각 · 상자 열기 · 받을 상품 · 확률
-function PieceCard({ cls, me, ver }) {
-  const [d, setD] = useState(null);
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [got, setGot] = useState(null);    // 방금 뽑은 것 — {prize} 또는 {rolling:true}
-  const [odds, setOdds] = useState(false);
-  const load = () => pcApi({ action: "pcMe", cid: cls.id, sid: me.id }).then((j) => { setD(j); setErr(""); }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); }, [cls.id, me.id, ver]);
-  async function open() {
-    if (busy) return;
-    setBusy(true); setGot({ rolling: true });
-    try {
-      const [j] = await Promise.all([pcApi({ action: "pcOpen", cid: cls.id, sid: me.id }), new Promise((ok) => setTimeout(ok, 1100))]);
-      setGot({ prize: j.prize }); load();
-    } catch (e) { setGot(null); alert(e.message); }
-    setBusy(false);
-  }
-  if (err) return <div className="cm-card cm-hint">조각을 불러오지 못했어요 — {err}</div>;
-  if (!d) return null;
-  const R = d.rules, cost = R.cost, wait = (d.prizes || []).filter((p) => !p.given);
-  const pct = Math.min(100, Math.round(d.bal / cost * 100));
-  return (
-    <div className="cm-card pc-card">
-      <div className="pc-head">
-        <div><div className="pc-big">🧩 조각 <b>{pcFmt(d.bal)}</b>개</div>
-          <div className="cm-hint">오늘 {pcFmt(d.today)} / {pcFmt(R.dayCap)}개 · 지금까지 연 상자 {d.opened}개</div></div>
-        <button className="cm-btn cm-btn-primary pc-open" disabled={busy || d.bal < cost} onClick={open}>상자 열기<small>조각 {pcFmt(cost)}개</small></button>
-      </div>
-      <div className="pc-bar"><i style={{width: pct + "%"}} /></div>
-      {wait.length > 0 && <div className="pc-wait">받을 상품 — {wait.map((p) => <span key={p.pid} className="pc-chip">{p.name}</span>)} <span className="cm-hint">선생님께 받아요</span></div>}
-      <div className="cm-hint" style={{lineHeight: 1.7, marginTop: 8}}>
-        답을 적어 낸 문제 하나에 조각 {pcFmt(R.per)}개. <b>화면을 떠나지 않고 이어 풀면</b> 10분 ×1.2 · 20분 ×1.5 · 40분 <b>×2</b>.
-        다른 앱으로 가거나 화면이 꺼지면 배율이 <b>처음부터</b>예요({R.shortSec}초 안에 돌아오면 {R.shortFree}번까지 봐줘요).
-        틀린 문제를 다시 풀어 맞히면 {pcFmt(R.retry)}개. 하루 {pcFmt(R.dayCap)}개까지.
-        {" "}<button className="cm-link" style={{fontSize: "inherit"}} onClick={() => setOdds((v) => !v)}>{odds ? "확률 닫기" : "상자 확률 보기"}</button>
-      </div>
-      {odds && (d.items.length ? (
-        <div className="mx-tw" style={{marginTop: 6}}><table className="mx-table">
-          <thead><tr><th style={{textAlign: "left"}}>상품</th><th>확률</th></tr></thead>
-          <tbody>{d.items.map((x) => <tr key={x.id}><td style={{textAlign: "left"}}>{x.name}</td><td>{x.out ? "다 나감" : x.pct + "%"}</td></tr>)}</tbody>
-        </table></div>) : <div className="cm-hint">아직 상자에 든 상품이 없어요</div>)}
-      {got && (
-        <div className="mx-modal"><div className="box" style={{textAlign: "center"}}>
-          {got.rolling ? <div className="pc-roll">🎁</div> : (<>
-            <div className="pc-roll done">🎉</div>
-            <h4 style={{margin: "6px 0 4px"}}>{got.prize.name}</h4>
-            <div className="cm-hint">선생님께 받아요</div>
-            <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => setGot(null)}>확인</button>
-          </>)}
-        </div></div>
-      )}
-    </div>
-  );
-}
-
 // prevNums = 전에 낸 번호. **풀던 화면에 저장하지 않고** 늘 서버 기록에서 받는다 — 저장해 두면 기록을 지워도
 //        그 기기에서 이어 열 때 옛 ✓ 가 그대로 남는다(10/10 한민수 선생님 모드)
 function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
@@ -4418,9 +4316,6 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
   const [ask, setAsk] = useState(false);
   const [away, setAway] = useState(null);   // {from, to} — 화면을 오래 안 본 동안. 있으면 물어본다
   const [err, setErr] = useState("");
-  const [toast, setToast] = useState(null);   // 이탈하고 돌아왔을 때 한 줄 — 콤보가 끊겼는지 봐줬는지
-  const toastT = useRef(null);
-  const say = (m) => { setToast(m); clearTimeout(toastT.current); toastT.current = setTimeout(() => setToast(null), 5000); };
   const [, setTick] = useState(0);
   const busy = useRef(false);
 
@@ -4467,25 +4362,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
   function pause() { const x = sRef.current; if (x && !x.pzAt && x.endT == null) put({ ...x, pzAt: Date.now() }); }
   function resume() {
     const x = sRef.current; if (!x || !x.pzAt) return;
-    const s = Math.round((Date.now() - x.pzAt) / 1000);
-    // 쉬기도 기록한다(조각 — 5분 넘게 쉬면 콤보가 처음부터). nowT 는 쉬는 동안 멈춰 있으니 쉬기 시작한 때다
-    put({ ...x, pausedMs: (x.pausedMs || 0) + (Date.now() - x.pzAt), pzAt: null, ev: [...x.ev, { t: nowT(x), k: "pz", s }] });
-    if (!x.retry && s > PCC.pzKeep && hwFocusLive(x.ev, nowT(x)).combo > 0) say("5분 넘게 쉬어서 콤보가 처음부터예요");
-  }
-  // 이탈 — 풀기 화면을 떠났다 돌아옴. 조각 배율에 쓴다(서버 hwFocus). 2초 안 되는 깜빡임은 안 친다
-  function awayEv(x, gap, rested) {
-    const tH = x.hiddenT != null ? x.hiddenT : nowT(x);
-    const y = { ...x, hiddenAt: null, hiddenT: null, ...(rested ? { pausedMs: (x.pausedMs || 0) + gap * 1000 } : {}) };
-    if (gap < 2) return y;
-    const before = hwFocusLive(x.ev, tH);
-    y.ev = [...x.ev, { t: tH, k: "away", r: rested ? tH : nowT(y), s: Math.round(gap) }];
-    if (!x.retry) {
-      const after = hwFocusLive(y.ev, null);
-      if (after.failed && !before.failed) say("5분 넘게 떠나서 이번 회차는 «집중 실패» — 배율 없이 세요");
-      else if (before.combo > 0 && after.combo === 0) say("화면을 떠나서 콤보가 처음부터예요");
-      else if (after.combo > 0) say("짧게 떠난 건 봐줬어요 — 남은 봐주기 " + after.shortLeft + "번");
-    }
-    return y;
+    put({ ...x, pausedMs: (x.pausedMs || 0) + (Date.now() - x.pzAt), pzAt: null });
   }
   async function submit() {
     const x = sRef.current; if (!x || x.sending) return;
@@ -4527,13 +4404,12 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
     const check = () => {
       const x = sRef.current; if (!x || !x.hiddenAt) return;
       const gap = (Date.now() - x.hiddenAt) / 1000;
-      if (x.pzAt || x.endT != null) { put({ ...x, hiddenAt: null, hiddenT: null }); return; }
-      if (gap < HW_AWAY) { put(awayEv(x, gap, false)); return; }
+      if (x.pzAt || x.endT != null || gap < HW_AWAY) { put({ ...x, hiddenAt: null }); return; }
       setAway({ from: x.hiddenAt, to: Date.now() });
     };
     const vis = () => {
       const x = sRef.current; if (!x || x.endT != null) return;
-      if (document.visibilityState === "hidden") { if (!x.hiddenAt && !x.pzAt) put({ ...x, hiddenAt: Date.now(), hiddenT: nowT(x) }); }
+      if (document.visibilityState === "hidden") { if (!x.hiddenAt && !x.pzAt) put({ ...x, hiddenAt: Date.now() }); }
       else { grab(); check(); }
     };
     grab(); check();   // 창이 닫혔다가(폰이 탭을 내림) 다시 열렸을 때도
@@ -4550,7 +4426,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
   function awayAnswer(rested) {
     const x = sRef.current, a = away; setAway(null);
     if (!x) return;
-    put(a ? awayEv(x, (a.to - a.from) / 1000, rested) : { ...x, hiddenAt: null, hiddenT: null });
+    put(rested && a ? { ...x, hiddenAt: null, pausedMs: (x.pausedMs || 0) + (a.to - a.from) } : { ...x, hiddenAt: null });
   }
 
   if (!S) return null;
@@ -4597,17 +4473,10 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
     <div className="mx-run">
       <div className="mx-top">
         <div><div className="mx-who">{me.name}</div><div className="mx-ttl">{S.title}{S.retry ? " · 틀린 문제 다시" : ""}</div></div>
-        {!S.retry && (() => {
-          const F = hwFocusLive(S.ev, frozen ? null : nowT(S));
-          return <div className={"mx-combo" + (F.mult > 10 ? " hot" : "") + (F.failed ? " fail" : "")}
-            title={F.failed ? "5분 넘게 떠나서 이번 회차는 배율 없이" : F.next ? "이어 풀면 " + Math.ceil(F.next.left / 60) + "분 뒤 ×" + F.next.mult / 10 : "최고 배율"}>
-            {F.failed ? "집중 실패" : <>🔥 {Math.floor(F.combo / 60)}분 <b>×{F.mult / 10}</b></>}{F.idle && !F.failed ? <small> 멈춤</small> : null}</div>;
-        })()}
         <div className="mx-clock" title="쉰 시간은 빼고 센다">{mxClock(nowT(S))}</div>
         <button className="mx-sub" style={{background: "transparent", color: "#fff", border: "1.5px solid rgba(255,255,255,.6)"}} disabled={frozen} onClick={pause}>쉬기</button>
         <button className="mx-sub" disabled={frozen || (S.all && !answered.length)} onClick={() => setAsk(true)}>제출</button>
       </div>
-      {toast && <div className="pc-toast">{toast}</div>}
       <div className="mx-body">
         <div className="mx-q">
           <div className="mx-num">{q.n}번<small>{q.type === "essay" ? "스스로 채점" : MX_TYPE[q.type]}{unit ? " · " + unit : ""}</small></div>
@@ -4731,12 +4600,6 @@ function HwResult({ log: log0, book, onBack, onRetry, canSelf }) {
         <div><div className="v s">{mxHm(log.endT || 0)}</div><div className="l">푼 시간{log.pausedSec ? " (쉰 " + mxHm(log.pausedSec) + " 뺌)" : ""}</div></div>
         {avg ? <div><div className="v s">{mxHm(avg)}</div><div className="l">문제당</div></div> : null}
       </div>
-      {log.focus && (
-        <div className="pc-line">
-          {log.teacher ? <>선생님 모드 — 조각 없음</> : <>🧩 조각 <b>+{pcFmt(log.pieces || 0)}</b>{log.capped ? " (오늘 상한까지)" : ""}</>}
-          <span> · 이탈 {log.focus.hides}번{log.focus.failed ? " · 집중 실패(배율 없음)" : ""} · 가장 길게 이어 푼 {Math.floor((log.focus.maxCombo || 0) / 60)}분</span>
-        </div>
-      )}
       {onRetry && wrong.length > 0 && (
         <button className="cm-btn cm-btn-primary" style={{marginBottom: 12}} onClick={() => onRetry(log, wrong)}>틀린 {wrong.length}문제 다시 풀기</button>
       )}
@@ -4884,89 +4747,6 @@ function HwTab({ cls, me, home, onChanged }) {
   </>);
 }
 
-// 선생님 — 조각 장부 · 받을 상품 지급 · 손 조정 · 상품표(세 반 공통)
-function PieceBoard({ cls }) {
-  const [rows, setRows] = useState(null);
-  const [err, setErr] = useState("");
-  const [items, setItems] = useState(null);   // 상품표 고치는 중
-  const [busy, setBusy] = useState(false);
-  const load = () => pcApi({ action: "pcBoard", cid: cls.id }).then((j) => { setRows(j.rows); setErr(""); }).catch((e) => setErr(e.message));
-  useEffect(() => { setRows(null); load(); }, [cls.id]);
-  const kids = (cls.roster || []).filter((r) => r && r.id && r.name && !r.teacher && !isEnded(r));
-  const byId = {}; (rows || []).forEach((x) => { byId[x.sid] = x; });
-  async function act(body, msg) {
-    if (busy) return; setBusy(true);
-    try { await pcApi({ cid: cls.id, ...body }); await load(); } catch (e) { alert(e.message); }
-    setBusy(false);
-  }
-  function adjust(r) {
-    const v = prompt(r.name + " — 조각을 몇 개 더할까요? (빼려면 -2 처럼, 0.5 단위도 돼요)");
-    if (v == null || v.trim() === "") return;
-    const n = Number(v); if (!isFinite(n) || !n) { alert("숫자로 적어 주세요"); return; }
-    const why = prompt("까닭 (학생 장부에 남아요)", "") || "";
-    act({ action: "pcAdjust", sid: r.id, name: r.name, delta: Math.round(n * 10), why });
-  }
-  async function editItems() {
-    try { const j = await pcApi({ action: "pcItemsGet" }); setItems(j.items.map((x) => ({ ...x, stock: x.stock == null ? "" : String(x.stock), w: String(x.w) }))); }
-    catch (e) { alert(e.message); }
-  }
-  async function saveItems() {
-    if (busy) return; setBusy(true);
-    try { await pcApi({ action: "pcItemsSet", items: items.filter((x) => x.name.trim()).map((x) => ({ id: x.id, name: x.name, w: Number(x.w) || 0, stock: x.stock === "" ? null : Number(x.stock) })) }); setItems(null); }
-    catch (e) { alert(e.message); }
-    setBusy(false);
-  }
-  const wsum = (items || []).filter((x) => Number(x.w) > 0 && (x.stock === "" || Number(x.stock) > 0)).reduce((s, x) => s + Number(x.w), 0);
-  const setIt = (i, k, v) => setItems(items.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
-  return (<>
-    <div className="cm-card">
-      <h3 className="cm-h3">🧩 조각 <span className="cm-h-hint">(과제 집중 보상 · 상자 = 조각 10개)</span></h3>
-      {err ? <div className="cm-err">{err}</div> : rows === null ? <div className="cm-empty">불러오는 중…</div> : (
-        <div className="mx-tw"><table className="mx-table">
-          <thead><tr><th style={{textAlign: "left"}}>이름</th><th>조각</th><th>오늘</th><th>모은 것</th><th>연 상자</th><th style={{textAlign: "left"}}>받을 상품</th><th></th></tr></thead>
-          <tbody>{kids.map((r) => { const x = byId[r.id] || { bal: 0, today: 0, earned: 0, opened: 0, prizes: [] }; const wait = (x.prizes || []).filter((p) => !p.given);
-            return (
-              <tr key={r.id}>
-                <td style={{textAlign: "left", whiteSpace: "nowrap"}}>{r.name}</td>
-                <td><b>{pcFmt(x.bal)}</b></td><td>{x.today ? pcFmt(x.today) : ""}</td><td>{x.earned ? pcFmt(x.earned) : ""}</td><td>{x.opened || ""}</td>
-                <td style={{textAlign: "left"}}>{wait.map((p) => (
-                  <button key={p.pid} className="pc-chip go" disabled={busy} title="눌러서 «줬음»"
-                    onClick={() => confirm(r.name + " — «" + p.name + "» 줬나요?") && act({ action: "pcGive", sid: r.id, pid: p.pid })}>{p.name} ✓</button>))}</td>
-                <td><button className="cm-link" disabled={busy} onClick={() => adjust(r)}>± 조정</button></td>
-              </tr>
-            ); })}</tbody>
-        </table></div>
-      )}
-      <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.6}}>받을 상품을 누르면 «줬음» 으로 지워져요. 숫자는 조각 개수(0.1 단위).</div>
-    </div>
-    <div className="cm-card">
-      <h3 className="cm-h3">상자 상품 · 확률 <span className="cm-h-hint">(세 반 공통 · 학생은 확률을 볼 수 있어요)</span></h3>
-      {!items ? <button className="cm-btn cm-btn-ghost" onClick={editItems}>상품표 열기</button> : (<>
-        <div className="mx-tw"><table className="mx-table">
-          <thead><tr><th style={{textAlign: "left"}}>상품</th><th>가중치</th><th>재고 <small>(빈칸 = 무제한)</small></th><th>확률</th><th></th></tr></thead>
-          <tbody>{items.map((x, i) => { const live = Number(x.w) > 0 && (x.stock === "" || Number(x.stock) > 0);
-            return (
-              <tr key={x.id || "n" + i}>
-                <td><input className="cm-input" style={{margin: 0}} value={x.name} placeholder="예: 젤리" onChange={(e) => setIt(i, "name", e.target.value)} /></td>
-                <td><input className="cm-input" style={{margin: 0, width: 70}} inputMode="numeric" value={x.w} onChange={(e) => setIt(i, "w", e.target.value.replace(/[^\d.]/g, ""))} /></td>
-                <td><input className="cm-input" style={{margin: 0, width: 70}} inputMode="numeric" value={x.stock} onChange={(e) => setIt(i, "stock", e.target.value.replace(/\D/g, ""))} /></td>
-                <td>{live && wsum ? Math.round(Number(x.w) / wsum * 1000) / 10 + "%" : "–"}</td>
-                <td><button className="cm-link" onClick={() => setItems(items.filter((_, j) => j !== i))}>빼기</button></td>
-              </tr>
-            ); })}</tbody>
-        </table></div>
-        <div style={{display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap"}}>
-          <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} onClick={() => setItems([...items, { id: "", name: "", w: "10", stock: "" }])}>+ 상품</button>
-          <span style={{flex: 1}} />
-          <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} onClick={() => setItems(null)}>닫기</button>
-          <button className="cm-btn cm-btn-primary" style={{marginTop: 0}} disabled={busy} onClick={saveItems}>저장</button>
-        </div>
-        <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.6}}>확률 = 가중치 ÷ 가중치 합. 재고가 0이 되면 그 상품은 안 나오고 나머지끼리 다시 나눠요. 상품이 하나도 없으면 학생이 상자를 못 열어요.</div>
-      </>)}
-    </div>
-  </>);
-}
-
 // 선생님 — 수업 전 판. 반 · 기간 · 교재로 «안 낸 학생 · 많이 틀린 문제 · 오래 걸린 문제 · 단원별» 을 본다
 function HwBoard({ cls }) {
   const books = useHwBooks(cls, HW_T);
@@ -5040,7 +4820,7 @@ function HwBoard({ cls }) {
       <div className="cm-card">
         <h3 className="cm-h3">학생별 <span className="cm-h-hint">(이름을 누르면 낸 것 목록)</span></h3>
         <div className="mx-tw"><table className="mx-table">
-          <thead><tr><th style={{textAlign: "left"}}>이름</th><th>낸 횟수</th><th>푼 문제</th><th>처음 정답률</th><th>안 적음</th><th>다시 맞힘</th><th>푼 시간</th><th>문제당</th><th>이탈</th><th>마지막</th></tr></thead>
+          <thead><tr><th style={{textAlign: "left"}}>이름</th><th>낸 횟수</th><th>푼 문제</th><th>처음 정답률</th><th>안 적음</th><th>다시 맞힘</th><th>푼 시간</th><th>문제당</th><th>마지막</th></tr></thead>
           <tbody>{per.map(({ r, mine, s, last }) => (
             <React.Fragment key={r.id}>
               <tr className={mine.length ? "go" : ""} onClick={() => mine.length && setOpenSid(openSid === r.id ? "" : r.id)}>
@@ -5049,11 +4829,8 @@ function HwBoard({ cls }) {
                   <td>{mine.length}</td><td>{s.n}</td>
                   <td><b style={{color: s.rate != null && s.rate < 60 ? "#d6453f" : undefined}}>{s.rate == null ? "–" : s.rate + "%"}</b></td>
                   <td>{s.blank || ""}</td><td>{s.fixed || ""}</td><td>{mxHm(mine.reduce((a, l) => a + (l.endT || 0), 0))}</td>
-                  <td>{s.avg ? mxHm(s.avg) : ""}</td>
-                  <td>{(() => { const h = mine.reduce((a, l) => a + ((l.focus && l.focus.hides) || 0), 0), f = mine.filter((l) => l.focus && l.focus.failed).length;
-                    return <span style={{color: f ? "#d6453f" : undefined, fontWeight: f ? 700 : undefined}}>{h || ""}{f ? " (실패 " + f + ")" : ""}</span>; })()}</td>
-                  <td>{last.date.slice(5).replace("-", "/")}</td>
-                </>) : <td colSpan={9} style={{color: "#d6453f", fontWeight: 700}}>안 냄</td>}
+                  <td>{s.avg ? mxHm(s.avg) : ""}</td><td>{last.date.slice(5).replace("-", "/")}</td>
+                </>) : <td colSpan={8} style={{color: "#d6453f", fontWeight: 700}}>안 냄</td>}
               </tr>
               {openSid === r.id && mine.map((l) => (
                 <tr key={l.rid} className="go" onClick={() => setView(l)} style={{background: "#f7f4ee"}}>
@@ -5112,7 +4889,6 @@ function HwBoard({ cls }) {
         </div>
       )}
     </>)}
-    <PieceBoard cls={cls} />
   </>);
 }
 
