@@ -864,19 +864,6 @@ export default async function handler(req, res) {
         res.status(200).json({ ok: true, dry: !!body.dry, cid, name, before, total, books }); return;
       }
       // 과제 채점 기록 — 극복 문제(쌓인 오답 → 내신대비 자료)를 만들 때 PC 로 받는다. cid 를 안 주면 과제 교재가 걸린 반 전부
-      // 조건부 쓰기(patchDocIf)가 진짜 Firestore 에서 도는지 — 시험 문서 하나를 만들고 · 고치고 · 낡은 시각으로 막히는지 보고 지운다
-      if (body.action === "pcSelfTest") {
-        const p = "appConfig/pcSelfTest", out = {};
-        await deleteDoc(p);
-        out.create = await patchDocIf(p, { n: 1 }, ["n"], null);
-        out.createAgain = await patchDocIf(p, { n: 9 }, ["n"], null);          // 이미 있으니 false 여야
-        const a1 = await getDocV(p);
-        out.update = await patchDocIf(p, { n: 2 }, ["n"], a1.v);
-        out.stale = await patchDocIf(p, { n: 3 }, ["n"], a1.v);                 // 낡은 시각 — false 여야
-        out.final = (await getDocV(p)).doc;
-        await deleteDoc(p);
-        res.status(200).json({ ok: out.create === true && out.createAgain === false && out.update === true && out.stale === false && out.final && out.final.n === 2, ...out }); return;
-      }
       if (body.action === "hwLogs") {
         const since = String(body.since || "0000-00-00");
         let cids = body.cid ? [String(body.cid)] : [];
