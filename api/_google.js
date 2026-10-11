@@ -236,7 +236,9 @@ export async function patchDocIf(path, data, maskPaths, v) {
     const r = await call(docBase() + "/" + path + "?" + mask + pre, { method: "PATCH", body: JSON.stringify({ fields: toFields(data) }) });
     return r !== null;
   } catch (e) {
-    if (/FAILED_PRECONDITION|ALREADY_EXISTS|precondition|already exists/i.test(String(e.message))) return false;
+    // 진짜 Firestore 문구: 시각이 다르면 «the stored version (…) does not match the required base version (…)»,
+    // 이미 있으면 «Document already exists» (10/11 pcSelfTest 로 확인 — 처음엔 FAILED_PRECONDITION 만 봐서 던졌다)
+    if (/FAILED_PRECONDITION|ALREADY_EXISTS|precondition|already exists|does not match the required base version|stored version/i.test(String(e.message))) return false;
     throw e;
   }
 }
