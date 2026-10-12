@@ -252,7 +252,7 @@ const STUB = `
       if (!on) return ok({ ok: true, on: false });
       var d = ledger(b.cid, b.sid), ta = todayAw(d), sum = 0; (cfg.items || []).forEach(function(x){ sum += x.pct; });
       return ok({ ok: true, on: true, bal: d.bal, earned: d.earned, opened: d.opened, awayN: ta.n, awayTot: ta.tot, prizes: d.prizes, rules: rules(),
-        items: (cfg.items || []).map(function(x){ return { id: x.id, name: x.name, pct: x.pct, out: x.stock != null && x.stock <= 0 }; }), blank: Math.round((100 - sum) * 100) / 100 });
+        hasItems: (cfg.items || []).length > 0 });
     }
     if (b.action === "hwAway") {
       if (!on || tch || rowOf(b.sid).teacher) return ok({ ok: true, on: on });
@@ -269,9 +269,10 @@ const STUB = `
       var d3 = ledger(b.cid, b.sid);
       if (d3.bal < PCF.cost) return bad("조각이 " + PCF.cost + "개 있어야 구슬을 열 수 있어요");
       var r = Math.random() * 100, pick = null; (cfg.items || []).some(function(x){ r -= x.pct; if (r < 0) { pick = x; return true; } return false; });
-      if (pick && pick.stock != null && pick.stock <= 0) return ok({ ok: true, soldOut: pick.name, bal: d3.bal });
-      if (pick && pick.stock != null) pick.stock--;
-      var prize = pick ? { pid: "p" + Date.now(), id: pick.id, name: pick.name, at: Date.now(), given: false } : { pid: "b" + Date.now(), id: "blank", name: "꽝", blank: true };
+      var vo = !!(pick && pick.stock != null && pick.stock <= 0);
+      if (pick && pick.stock != null && !vo) pick.stock--;
+      var prize = vo ? { pid: "v" + Date.now(), id: pick.id, name: Number(pick.price).toLocaleString("ko-KR") + "원 교환권", of: pick.name, price: pick.price, voucher: true, at: Date.now(), given: false }
+        : pick ? { pid: "p" + Date.now(), id: pick.id, name: pick.name, at: Date.now(), given: false } : { pid: "b" + Date.now(), id: "blank", name: "꽝", blank: true };
       d3.bal -= PCF.cost; d3.opened++; if (pick) d3.prizes.push(prize);
       return ok({ ok: true, prize: prize, bal: d3.bal });
     }

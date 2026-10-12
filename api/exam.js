@@ -510,12 +510,8 @@ async function pcAdd(cid, sid, name, pts, rec) {
   return { add: pts, bal: r.next.bal };
 }
 const pcToday = (d) => (d.awayDay === kstDate(Date.now()) ? { n: d.awayN || 0, tot: d.awayTot || 0 } : { n: 0, tot: 0 });
-// 학생에게 보이는 확률표 — 재고 숫자는 안 보인다
-function pcPublic(items) {
-  const sum = items.reduce((s, x) => s + (Number(x.pct) || 0), 0);
-  return { items: items.filter((x) => Number(x.pct) > 0).map((x) => ({ id: x.id, name: x.name, pct: Number(x.pct), out: x.stock != null && x.stock <= 0 })),
-           blank: Math.max(0, Math.round((100 - sum) * 100) / 100) };
-}
+// 재고 없는 상품이 뽑히면 그 값의 교환권(10/12 마왕님) — 이름은 «6,000원 교환권»
+const pcVoucherName = (x) => (Number(x.price) > 0 ? Number(x.price).toLocaleString("ko-KR") + "원" : x.name) + " 교환권";
 const pcRules = () => ({ cost: PC.cost, streak: PC.streak, awayMin: PC.awayMin, awayEvery: PC.awayEvery, awayPen: PC.awayPen });
 async function pcMe(res, claims, b) {
   const cid = String(b.cid || ""), sid = String(b.sid || "");
@@ -525,7 +521,7 @@ async function pcMe(res, claims, b) {
   const d = (await getDoc(pcPath(cid, sid)).catch(() => null)) || {};
   const td = pcToday(d);
   res.status(200).json({ ok: true, on: true, teacher: !!who.teacher, bal: d.bal || 0, earned: d.earned || 0, opened: d.opened || 0,
-    awayN: td.n, awayTot: td.tot, prizes: (d.prizes || []).slice(-60), ...pcPublic(cfg.items), rules: pcRules() });
+    awayN: td.n, awayTot: td.tot, prizes: (d.prizes || []).slice(-60), hasItems: cfg.items.length > 0, rules: pcRules() });   // 확률표는 학생에게 안 보인다(10/12)
 }
 // 이탈 — 앱이 돌아온 순간 바로 보낸다(제출 때 몰아 보내면 «그만두기» 로 기록이 사라진다). aid 로 두 번 받지 않는다
 async function hwAway(res, claims, b) {
@@ -567,15 +563,17 @@ async function pcOpen(res, claims, b) {
     if (!cfg.items.length) { res.status(400).json({ error: "아직 구슬에 든 상품이 없어요. 선생님께 말해 주세요" }); return; }
     let r = Math.random() * 100, pick = null;
     for (const x of cfg.items) { r -= Number(x.pct) || 0; if (r < 0) { pick = x; break; } }
-    let held = false;
-    if (pick && pick.stock != null) {
-      if (pick.stock <= 0) { res.status(200).json({ ok: true, soldOut: pick.name, bal: d.bal }); return; }
+    let held = false, voucher = false;
+    if (pick && pick.stock != null && pick.stock <= 0) voucher = true;   // 재고 없음 → 구슬은 쓰고 교환권(재고는 그대로 0)
+    else if (pick && pick.stock != null) {
       const its = cfg.items.map((x) => (x.id === pick.id ? { ...x, stock: x.stock - 1 } : x));
       if (!(await patchDocIf("appConfig/pieces", { items: its }, ["items"], cfg.v))) { cfg = await pcCfg(); continue; }
       held = true;
     }
     const now = Date.now();
-    const prize = pick ? { pid: now.toString(36) + Math.random().toString(36).slice(2, 6), id: pick.id, name: pick.name, at: now, given: false }
+    const pid = now.toString(36) + Math.random().toString(36).slice(2, 6);
+    const prize = voucher ? { pid, id: pick.id, name: pcVoucherName(pick), of: pick.name, price: Number(pick.price) || 0, voucher: true, at: now, given: false }
+                : pick ? { pid, id: pick.id, name: pick.name, at: now, given: false }
                        : { pid: now.toString(36), id: "blank", name: "꽝", at: now, blank: true };
     const next = { name: who.name, bal: d.bal - PC.cost, opened: (d.opened || 0) + 1, ...(pick ? { prizes: [...(d.prizes || []), prize].slice(-200) } : {}),
                    log: [...(d.log || []), { t: now, k: "open", d: -PC.cost, prize: prize.name }].slice(-PC_LOG) };

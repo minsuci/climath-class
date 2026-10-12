@@ -4344,8 +4344,7 @@ function PieceCard({ cls, me, ver }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const [got, setGot] = useState(null);    // {rolling} · {prize} · {soldOut}
-  const [odds, setOdds] = useState(false);
+  const [got, setGot] = useState(null);    // {rolling} · {prize}
   const load = () => pcApi({ action: "pcMe", cid: cls.id, sid: me.id }).then((j) => { setD(j); setErr(""); }).catch((e) => setErr(e.message));
   useEffect(() => { pcAwayFlush(cls.id, me.id).finally(load); }, [cls.id, me.id, ver]);
   async function open() {
@@ -4353,7 +4352,7 @@ function PieceCard({ cls, me, ver }) {
     setBusy(true); setGot({ rolling: true });
     try {
       const [j] = await Promise.all([pcApi({ action: "pcOpen", cid: cls.id, sid: me.id }), new Promise((ok) => setTimeout(ok, 1200))]);
-      setGot(j.soldOut ? { soldOut: j.soldOut } : { prize: j.prize }); load();
+      setGot({ prize: j.prize }); load();
     } catch (e) { setGot(null); alert(e.message); }
     setBusy(false);
   }
@@ -4375,23 +4374,14 @@ function PieceCard({ cls, me, ver }) {
       <div className="cm-hint" style={{lineHeight: 1.7, marginTop: 8}}>
         처음에 맞히면 조각 <b>1개</b> · 틀린 문제를 다시 풀어 맞혀도 <b>1개</b> · 번호 순서로 <b>{R.streak}문제 연속</b> 맞히면 <b>+1</b>. 조각 {R.cost}개가 모이면 구슬 하나 — 열면 기프티콘이 나올 수도 있어요.
         풀기 화면을 떠나면(다른 앱 · 홈 · 화면 꺼짐) 기록돼요. {R.awayMin}초까지는 괜찮고, 하루에 {R.awayEvery}번째마다 조각 {R.awayPen}개가 빠져요.
-        {" "}<button className="cm-link" style={{fontSize: "inherit"}} onClick={() => setOdds((v) => !v)}>{odds ? "확률 닫기" : "구슬 확률 보기"}</button>
       </div>
-      {odds && (d.items.length ? (
-        <div className="mx-tw" style={{marginTop: 6}}><table className="mx-table">
-          <thead><tr><th style={{textAlign: "left"}}>나오는 것</th><th>확률</th></tr></thead>
-          <tbody>
-            {d.items.map((x) => <tr key={x.id}><td style={{textAlign: "left"}}>{x.name}{x.out ? <small className="cm-hint"> (지금 재고 없음)</small> : null}</td><td>{x.pct}%</td></tr>)}
-            <tr><td style={{textAlign: "left"}}>꽝</td><td>{d.blank}%</td></tr>
-          </tbody>
-        </table></div>) : <div className="cm-hint">아직 구슬에 든 상품이 없어요</div>)}
       {got && (
         <div className="mx-modal"><div className="box" style={{textAlign: "center"}}>
           {got.rolling ? <div className="pc-roll">🔮</div>
-            : got.soldOut ? (<>
-              <div className="pc-roll done">📦</div>
-              <h4 style={{margin: "6px 0 4px"}}>«{got.soldOut}» 이 나왔는데 지금 재고가 없어요</h4>
-              <div className="cm-hint">구슬은 그대로 있어요. 나중에 다시 열어 주세요.</div>
+            : got.prize.voucher ? (<>
+              <div className="pc-roll done">🎟️</div>
+              <h4 style={{margin: "6px 0 4px"}}>{got.prize.name}</h4>
+              <div className="cm-hint">«{got.prize.of}» 이 나왔는데 지금 재고가 없어서 교환권으로 드려요.<br />선생님께 나중에 기프티콘으로 바꿔 받아요.</div>
               <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => setGot(null)}>확인</button>
             </>) : got.prize.blank ? (<>
               <div className="pc-roll done">💨</div>
@@ -4952,6 +4942,7 @@ function PieceBoard({ cls }) {
   const psum = (items || []).reduce((s, x) => s + (Number(x.pct) || 0), 0);
   const money = (items || []).reduce((s, x) => s + (Number(x.price) || 0) * (x.stock === "" ? 0 : Number(x.stock) || 0), 0);
   const ev = (items || []).reduce((s, x) => s + (Number(x.pct) || 0) / 100 * (Number(x.price) || 0), 0);
+  const vouch = {}; (rows || []).forEach((x) => (x.prizes || []).forEach((p) => { if (p.voucher && !p.given) vouch[p.id] = (vouch[p.id] || 0) + 1; }));
   const won = (n) => Math.round(n).toLocaleString("ko-KR") + "원";
   const tm = (ms) => { const d = new Date(ms); return (d.getMonth() + 1) + "/" + d.getDate() + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
   return (<>
@@ -4987,10 +4978,10 @@ function PieceBoard({ cls }) {
       <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.6}}>받을 상품을 누르면 «줬음» 으로 지워져요. 이탈 = 풀기 화면을 {rules ? rules.awayMin : 5}초 넘게 떠남(다른 앱 · 홈 · 화면 꺼짐) — 어느 앱으로 갔는지는 몰라요.</div>
     </div>
     <div className="cm-card">
-      <h3 className="cm-h3">구슬 상품 · 확률 <span className="cm-h-hint">(대상 반 공통 · 학생은 확률을 볼 수 있어요)</span></h3>
+      <h3 className="cm-h3">구슬 상품 · 확률 <span className="cm-h-hint">(대상 반 공통 · 학생에겐 확률이 안 보여요)</span></h3>
       {!items ? <button className="cm-btn cm-btn-ghost" onClick={editItems}>상품표 열기</button> : (<>
         <div className="mx-tw"><table className="mx-table">
-          <thead><tr><th style={{textAlign: "left"}}>상품</th><th>값(원)</th><th>확률(%)</th><th>재고 <small>(빈칸 = 무제한)</small></th><th>재고 금액</th><th></th></tr></thead>
+          <thead><tr><th style={{textAlign: "left"}}>상품</th><th>값(원)</th><th>확률(%)</th><th>재고 <small>(빈칸 = 무제한)</small></th><th>재고 금액</th><th>교환권 대기 <small>(이 반)</small></th><th></th></tr></thead>
           <tbody>{items.map((x, i) => (
             <tr key={x.id || "n" + i}>
               <td><input className="cm-input" style={{margin: 0}} value={x.name} placeholder="예: 편의점 1천원권" onChange={(e) => setIt(i, "name", e.target.value)} /></td>
@@ -4998,16 +4989,17 @@ function PieceBoard({ cls }) {
               <td><input className="cm-input" style={{margin: 0, width: 70}} inputMode="decimal" value={x.pct} onChange={(e) => setIt(i, "pct", e.target.value.replace(/[^\d.]/g, ""))} /></td>
               <td><input className="cm-input" style={{margin: 0, width: 70}} inputMode="numeric" value={x.stock} onChange={(e) => setIt(i, "stock", e.target.value.replace(/\D/g, ""))} /></td>
               <td>{x.price && x.stock !== "" ? won(Number(x.price) * Number(x.stock)) : ""}</td>
+              <td style={{color: vouch[x.id] ? "#b3261e" : undefined, fontWeight: vouch[x.id] ? 700 : undefined}}>{vouch[x.id] ? vouch[x.id] + "장" : ""}</td>
               <td><button className="cm-link" onClick={() => setItems(items.filter((_, j) => j !== i))}>빼기</button></td>
             </tr>
           ))}
-          <tr><td style={{textAlign: "left"}}>꽝</td><td></td><td style={{color: psum > 100 ? "#d6453f" : undefined, fontWeight: 700}}>{Math.round((100 - psum) * 100) / 100}</td><td></td><td></td><td></td></tr>
+          <tr><td style={{textAlign: "left"}}>꽝</td><td></td><td style={{color: psum > 100 ? "#d6453f" : undefined, fontWeight: 700}}>{Math.max(0, Math.round((100 - psum) * 100) / 100)}</td><td></td><td></td><td></td><td></td></tr>
           </tbody>
         </table></div>
         <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.7}}>
           당첨 <b>{Math.round(psum * 100) / 100}%</b> · 재고 다 나가면 <b>{won(money)}</b> · 구슬 하나 기댓값 {won(ev)}
           {psum > 100 ? <b style={{color: "#d6453f"}}> — 확률 합이 100% 를 넘어요</b> : null}<br />
-          재고가 0인 상품이 뽑히면 구슬을 안 쓰고 «나중에 다시 열어 주세요» 가 떠요(확률은 그대로).
+          재고가 0인 상품이 뽑히면 구슬은 쓰고 그 값의 <b>교환권</b>(예: 6,000원 교환권)을 줘요 — 받을 상품에 남으니 기프티콘을 사서 바꿔 주세요. 교환권은 재고 상한 밖이라 예산을 넘을 수 있어요.
         </div>
         <div style={{display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap"}}>
           <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} onClick={() => setItems([...items, { id: "", name: "", price: "", pct: "", stock: "" }])}>+ 상품</button>
