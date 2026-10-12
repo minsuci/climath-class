@@ -670,8 +670,12 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - 장부 `classes/{cid}/pieces/{sid}` {name, bal, earned, opened, prizes[], log[], aways[], awayDay, awayN, awayTot} — 쓰기는 서버만, **조건부 쓰기**(`_google.js` `getDocV` · `patchDocIf`. 진짜 Firestore 겹침 문구는 «does not match the required base version» · «already exists» — 정규식에 넣어 둠)
 - 상품표 `appConfig/pieces.items[{id,name,pct,price,stock|null}]` — 확률 합 100 넘으면 400. 선생님 «과제» 판 맨 아래 «상품표 열기»(재고 금액 · 당첨% · 구슬 기댓값 보임). **학생에겐 확률표를 안 보인다**(10/12 마왕님 — `pcMe` 는 `hasItems` 만) 10/12 확정표: 1,000원 30%·95 / 2,000원 6%·20 / 3,000원 3%·10 / 4,500원 1.2%·4 / 6,000원 0.8%·2 → 당첨 41% · 131개 · 195,000원
 - 서버 동작: 학생 `pcMe` · `pcOpen` · `hwAway` / 선생님 `pcItemsGet` · `pcItemsSet` · `pcBoard` · `pcGive`(지급, undo) · `pcAdjust`(±, 까닭, 0에서 멈춤). 선생님 모드 제출·이탈은 조각 없음. hwLogs 에 `pieces{first, streaks, pts}`
+- **교환권 바꾸기**(10/12): 재고가 채워지면 학생 카드 «받을 상품» 의 교환권에 «→ 바꾸기» 가 뜬다(`pcMe` 가 `canSwap` 을 붙임) → `pcSwap` 이 재고를 조건부로 하나 잡고 장부의 교환권을 상품으로 바꾼다(겹치면 재고 되돌림). 재고 옮기기는 `pcStockMove(id, ±1, inEvent)` 하나로
+- **오늘만 이벤트**(10/12): `appConfig/pieces.event{day, title, cap, items[]}` — `day` 가 오늘(한국)이면 상품표 대신 이것으로 뽑는다. **한 사람 당첨 한도 `cap`**(장부 `evDay` · `evWins`) — 다 받으면 그날은 구슬을 못 연다(남은 구슬은 다음 날, 400 `capped`). 상품·교환권에 `ev: 날짜` 가 붙어 이벤트 재고로 바꾼다. 선생님 «과제» 판 맨 아래 «🎁 오늘만 이벤트»(`pcEventSet`, 날짜는 서버가 찍음 · `off`). 다음 날이면 저절로 꺼진다
+- **시험용 과제 교재 `free: true`**(examPut) — 답을 적으면 다 정답(조각 흐름 시험용). link 가 없는 과제 교재는 학생 «과제» 탭에 따로 잠근 카드로 뜬다(`StudentHomework` 의 `loose`)
+- 서버 시뮬레이션: 스크래치 `sim.mjs`(세 명 · 바나나우유 재고 2 · 한도 1 · 교환권 → 채움 → 바꾸기 · 다음 날 평소 표, 22개)
 - 학생 결과 화면 «🧩 조각 +N» = pieces.pts + log.fixed + 스스로 채점 O 수(서버 장부와 같은 셈)
-- 미리보기: `tools/make-preview.mjs` 에 가짜 `/api/exam`(과제 채점 · 조각 전부) — 일반반 `c-reg` 가 대상, 교재A 정답은 «객관식 ①, 단답 1», 25번은 스스로 채점. 서버 시험은 스크래치 `pc2.mjs`(35개)
+- 미리보기: `tools/make-preview.mjs` 에 가짜 `/api/exam`(과제 채점 · 조각 · 이벤트 · 바꾸기) — 일반반 `c-reg` 가 대상(김서진·임서윤·김태윤), 교재A 정답은 «객관식 ①, 단답 1», 25번은 스스로 채점, «조각 시험» 20문항은 아무 답이나 정답. 조각 문서는 sessionStorage `__pvPc` 에 남아 선생님↔학생 화면을 오가도 이어진다(처음부터 하려면 지울 것). 서버 시험은 스크래치 `pc2.mjs`(35개)
 
 ### 앱 설치(PWA) — 학생 앱 · 선생님 앱 따로 (2026-10-10)
 - 팀체크와 같은 꼴: 루트 `sw.js`(캐시 **안 함** — 설치 조건만 채우는 빈 fetch 처리기. 캐시를 넣으면 배포 직후 옛 판이 뜬다)

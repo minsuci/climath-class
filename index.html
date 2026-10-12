@@ -339,6 +339,9 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .pc-wait{margin-top:8px; font-size:13.5px;}
 .pc-chip{display:inline-block; background:#fff4e5; color:#7a4a12; border:1px solid #f0d3a8; border-radius:999px; padding:2px 9px; margin:2px 4px 2px 0; font-size:12.5px; font-weight:700; font-family:inherit;}
 .pc-chip.go{cursor:pointer;}
+.pc-ev{margin-top:10px; background:#fff8d6; border:1px solid #f1dc7a; border-radius:12px; padding:9px 12px; font-size:13.5px; line-height:1.6; color:#5c4a00;}
+.pc-ev b{color:#3d3200;}
+.pc-chip.swap{background:#e9f6ec; color:#1f6b35; border-color:#a8d8b5; cursor:pointer;}
 .pc-line{background:#f6f1e7; border-radius:10px; padding:9px 12px; margin:-4px 0 12px; font-size:14px;} .pc-line span{color:var(--muted); font-size:13px;}
 .pc-roll{font-size:64px; line-height:1.2; animation:pcShake .5s ease-in-out infinite;} .pc-roll.done{animation:pcPop .4s ease-out;}
 @keyframes pcShake{0%,100%{transform:rotate(0)}25%{transform:rotate(-12deg)}75%{transform:rotate(12deg)}}
@@ -4180,7 +4183,9 @@ function StudentHomework({ cls, me }) {
   if (!done || hwBooks === null) return <div className="cm-card cm-empty">불러오는 중…</div>;
   const myBooks = getStudentBooks(cls, me);
   const byLink = {}; hwBooks.forEach((h) => { if (h.link && !byLink[h.link]) byLink[h.link] = h; });
-  const anyLocked = myBooks.some((b) => byLink[b.name]);
+  // 반 교재에 안 이어진 과제 교재(예: «조각 시험» — 아무 답이나 정답) — 따로 잠근 카드로 띄운다
+  const loose = hwBooks.filter((h) => !h.link && (h.questions || []).length);
+  const anyLocked = myBooks.some((b) => byLink[b.name]) || loose.length > 0;
   const anyFree = myBooks.some((b) => !byLink[b.name]);
   const cards = (ctl) => (<>
     {ctl && <PieceCard cls={cls} me={me} ver={ver} />}
@@ -4202,6 +4207,11 @@ function StudentHomework({ cls, me }) {
       return <BookHwCard key={b.name} book={b} initial={done[b.name] || []}
         qNumbers={qbooks[b.name]} xNumbers={xs[b.name]} onClearQuestion={(n) => removeQuestioned(cls.id, me.id, b.name, n)}
         onChange={(arr) => persistBook(b.name, arr)} />;
+    })}
+    {ctl && loose.map((h) => {
+      const total = Math.max(...h.questions.map((q) => q.n)), nx = ctl.next(h);
+      return <BookHwCard key={"hw-" + h.id} book={{ name: h.title, total }} initial={ctl.answered(h.id).filter((n) => n <= total)} locked
+        startHint={nx ? nx + "번부터" : ""} onStart={(n) => ctl.start(h, n)} />;
     })}
   </>);
   if (!anyLocked) return cards(null);
@@ -4359,6 +4369,14 @@ function PieceCard({ cls, me, ver }) {
   if (err) return <div className="cm-card cm-hint">조각을 불러오지 못했어요 — {err}</div>;
   if (!d || !d.on) return null;
   const R = d.rules, marbles = Math.floor(d.bal / R.cost), left = d.bal % R.cost, wait = (d.prizes || []).filter((p) => !p.given);
+  const ev = d.event, capped = !!ev && ev.won >= ev.cap;   // 오늘만 이벤트 — 한 사람 cap 개 받으면 그날은 못 연다
+  async function swap(p) {
+    if (busy || !confirm("«" + p.name + "» 을 «" + (p.of || p.name) + "» 로 바꿀까요?")) return;
+    setBusy(true);
+    try { const j = await pcApi({ action: "pcSwap", cid: cls.id, sid: me.id, pid: p.pid }); setGot({ prize: j.prize }); load(); }
+    catch (e) { alert(e.message); load(); }
+    setBusy(false);
+  }
   return (
     <div className="cm-card pc-card">
       <div className="pc-head">
@@ -4366,11 +4384,14 @@ function PieceCard({ cls, me, ver }) {
           <div className="pc-big">🧩 조각 <b>{d.bal}</b>개 <span className="pc-sep">·</span> 🔮 구슬 <b>{marbles}</b>개</div>
           <div className="cm-hint">다음 구슬까지 조각 {R.cost - left}개 · 지금까지 연 구슬 {d.opened}개</div>
         </div>
-        <button className="cm-btn cm-btn-primary pc-open" disabled={busy || marbles < 1} onClick={open}>구슬 열기<small>조각 {R.cost}개</small></button>
+        <button className="cm-btn cm-btn-primary pc-open" disabled={busy || marbles < 1 || capped} onClick={open}>{capped ? "오늘은 다 받았어요" : "구슬 열기"}<small>{capped ? "남은 구슬은 내일" : "조각 " + R.cost + "개"}</small></button>
       </div>
       <div className="pc-bar"><i style={{width: Math.round(left / R.cost * 100) + "%"}} /></div>
+      {ev && <div className="pc-ev">🎁 <b>{ev.title || "오늘만 이벤트"}</b> — 오늘 구슬을 열면 <b>{ev.names.join(" · ")}</b>{ev.sure ? "" : " 이(가) 나올 수 있어요"} · 한 사람 {ev.cap}개까지 <b>({ev.won}/{ev.cap})</b></div>}
       <div className={"pc-away" + (d.awayN === R.awayEvery - 1 ? " warn" : "")}>오늘 이탈 <b>{d.awayN} / {R.awayEvery}</b>{d.awayTot > d.awayN ? <span> (오늘 모두 {d.awayTot}번)</span> : null} — {R.awayEvery}번째면 조각 {R.awayPen}개가 빠져요</div>
-      {wait.length > 0 && <div className="pc-wait">받을 상품 — {wait.map((p) => <span key={p.pid} className="pc-chip">{p.name}</span>)} <span className="cm-hint">선생님께 받아요</span></div>}
+      {wait.length > 0 && <div className="pc-wait">받을 상품 — {wait.map((p) => (p.voucher && p.canSwap
+          ? <button key={p.pid} className="pc-chip swap" disabled={busy} onClick={() => swap(p)} title="재고가 채워졌어요">{p.name} → 바꾸기</button>
+          : <span key={p.pid} className="pc-chip" title={p.voucher ? "재고가 채워지면 여기서 바꿀 수 있어요" : ""}>{p.name}</span>))} <span className="cm-hint">선생님께 받아요{wait.some((p) => p.voucher && !p.canSwap) ? " · 교환권은 재고가 채워지면 «바꾸기» 가 떠요" : ""}</span></div>}
       <div className="cm-hint" style={{lineHeight: 1.7, marginTop: 8}}>
         처음에 맞히면 조각 <b>1개</b> · 틀린 문제를 다시 풀어 맞혀도 <b>1개</b> · 번호 순서로 <b>{R.streak}문제 연속</b> 맞히면 <b>+1</b>. 조각 {R.cost}개가 모이면 구슬 하나 — 열면 기프티콘이 나올 수도 있어요.
         풀기 화면을 떠나면(다른 앱 · 홈 · 화면 꺼짐) 기록돼요. {R.awayMin}초까지는 괜찮고, 하루에 {R.awayEvery}번째마다 조각 {R.awayPen}개가 빠져요.
@@ -4381,7 +4402,7 @@ function PieceCard({ cls, me, ver }) {
             : got.prize.voucher ? (<>
               <div className="pc-roll done">🎟️</div>
               <h4 style={{margin: "6px 0 4px"}}>{got.prize.name}</h4>
-              <div className="cm-hint">«{got.prize.of}» 이 나왔는데 지금 재고가 없어서 교환권으로 드려요.<br />선생님께 나중에 기프티콘으로 바꿔 받아요.</div>
+              <div className="cm-hint">«{got.prize.of}» 이 나왔는데 지금 재고가 없어서 교환권으로 드려요.<br />재고가 채워지면 여기 «받을 상품» 에 «바꾸기» 가 떠요.</div>
               <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => setGot(null)}>확인</button>
             </>) : got.prize.blank ? (<>
               <div className="pc-roll done">💨</div>
@@ -4391,7 +4412,7 @@ function PieceCard({ cls, me, ver }) {
             </>) : (<>
               <div className="pc-roll done">🎉</div>
               <h4 style={{margin: "6px 0 4px"}}>{got.prize.name}</h4>
-              <div className="cm-hint">선생님께 받아요</div>
+              <div className="cm-hint">{got.prize.swappedAt ? "교환권을 바꿨어요 — " : ""}선생님께 받아요</div>
               <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => setGot(null)}>확인</button>
             </>)}
         </div></div>
@@ -4911,7 +4932,10 @@ function PieceBoard({ cls }) {
   const [items, setItems] = useState(null);   // 상품표 고치는 중
   const [openSid, setOpenSid] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = () => pcApi({ action: "pcBoard", cid: cls.id }).then((j) => { setRows(j.rows); setOn(j.on); setRules(j.rules); setErr(""); }).catch((e) => setErr(e.message));
+  const [evt, setEvt] = useState(null);        // 오늘만 이벤트(서버 그대로)
+  const [today, setToday] = useState("");
+  const [evEdit, setEvEdit] = useState(null);  // 이벤트 고치는 중 {title, cap, id, name, pct, stock}
+  const load = () => pcApi({ action: "pcBoard", cid: cls.id }).then((j) => { setRows(j.rows); setOn(j.on); setRules(j.rules); setEvt(j.event || null); setToday(j.today || ""); setErr(""); }).catch((e) => setErr(e.message));
   useEffect(() => { setRows(null); load(); }, [cls.id]);
   if (!on) return <div className="cm-card cm-hint">🧩 조각 — 이 반은 아직 안 써요 (이번 기말: 고1S · 고1자사고반)</div>;
   const kids = (cls.roster || []).filter((r) => r && r.id && r.name && !r.teacher && !isEnded(r));
@@ -4939,6 +4963,27 @@ function PieceBoard({ cls }) {
     setBusy(false);
   }
   const setIt = (i, k, v) => setItems(items.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+  const evOn = !!evt && evt.day === today && (evt.items || []).length > 0, evIt = evt && (evt.items || [])[0];
+  function evStart() {
+    const x = evIt || {};
+    setEvEdit({ title: (evt && evt.title) || "", cap: String((evt && evt.cap) || 1), id: x.id || "", name: x.name || "", pct: String(x.pct != null ? x.pct : 100), stock: x.stock == null ? "" : String(x.stock) });
+  }
+  async function evSave(off) {
+    if (busy) return;
+    if (!off && !evEdit.name.trim()) { alert("상품 이름을 적어 주세요"); return; }
+    if (off && !confirm("오늘 이벤트를 끌까요? (받은 상품 · 교환권은 그대로)")) return;
+    setBusy(true);
+    try {
+      await pcApi(off ? { action: "pcEventSet", off: true }
+        : { action: "pcEventSet", title: evEdit.title, cap: Number(evEdit.cap) || 1,
+            items: [{ id: evEdit.id, name: evEdit.name, pct: Number(evEdit.pct) || 0, stock: evEdit.stock === "" ? null : Number(evEdit.stock) }] });
+      setEvEdit(null); await load();
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+  const evVouch = {}; (rows || []).forEach((x) => (x.prizes || []).forEach((p) => { if (p.ev && p.voucher && !p.given) evVouch[p.id] = (evVouch[p.id] || 0) + 1; }));
+  const evGot = (rows || []).filter((x) => (x.prizes || []).some((p) => p.ev === today)).map((x) => x.name);
+  const evSet = (k, v) => setEvEdit({ ...evEdit, [k]: v });
   const psum = (items || []).reduce((s, x) => s + (Number(x.pct) || 0), 0);
   const money = (items || []).reduce((s, x) => s + (Number(x.price) || 0) * (x.stock === "" ? 0 : Number(x.stock) || 0), 0);
   const ev = (items || []).reduce((s, x) => s + (Number(x.pct) || 0) / 100 * (Number(x.price) || 0), 0);
@@ -5007,6 +5052,37 @@ function PieceBoard({ cls }) {
           <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} onClick={() => setItems(null)}>닫기</button>
           <button className="cm-btn cm-btn-primary" style={{marginTop: 0}} disabled={busy || psum > 100} onClick={saveItems}>저장</button>
         </div>
+      </>)}
+    </div>
+    <div className="cm-card">
+      <h3 className="cm-h3">🎁 오늘만 이벤트 <span className="cm-h-hint">(오늘 하루 상품표 대신 · 한 사람 당첨 한도 · 내일이면 저절로 꺼져요)</span></h3>
+      {evEdit ? (<>
+        <div style={{display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8}}>
+          <label className="cm-hint">제목<input className="cm-input" style={{margin: 0}} value={evEdit.title} placeholder="예: 오늘만 — 바나나우유" onChange={(e) => evSet("title", e.target.value)} /></label>
+          <label className="cm-hint">상품<input className="cm-input" style={{margin: 0}} value={evEdit.name} placeholder="예: CU 바나나우유 240ml" onChange={(e) => evSet("name", e.target.value)} /></label>
+          <label className="cm-hint">재고 <small>(빈칸 = 무제한)</small><input className="cm-input" style={{margin: 0}} inputMode="numeric" value={evEdit.stock} onChange={(e) => evSet("stock", e.target.value.replace(/\D/g, ""))} /></label>
+          <label className="cm-hint">확률(%) <small>(100 = 꼭 나옴)</small><input className="cm-input" style={{margin: 0}} inputMode="decimal" value={evEdit.pct} onChange={(e) => evSet("pct", e.target.value.replace(/[^\d.]/g, ""))} /></label>
+          <label className="cm-hint">한 사람 당첨 한도<input className="cm-input" style={{margin: 0}} inputMode="numeric" value={evEdit.cap} onChange={(e) => evSet("cap", e.target.value.replace(/\D/g, ""))} /></label>
+        </div>
+        <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.7}}>재고보다 많이 뽑히면 «{evEdit.name || "상품"} 교환권» 이 나가요. 재고를 다시 적어 저장하면 학생이 앱에서 «바꾸기» 로 받아요. 한도만큼 받은 학생은 오늘 구슬을 더 못 열어요(남은 구슬은 내일).</div>
+        <div style={{display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap"}}>
+          <span style={{flex: 1}} />
+          <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} onClick={() => setEvEdit(null)}>닫기</button>
+          <button className="cm-btn cm-btn-primary" style={{marginTop: 0}} disabled={busy || Number(evEdit.pct) > 100} onClick={() => evSave(false)}>{evOn ? "저장" : "오늘 이벤트 켜기"}</button>
+        </div>
+      </>) : evOn ? (<>
+        <div style={{lineHeight: 1.8}}>
+          <b>{evt.title || "오늘만 이벤트"}</b> — {evIt.name} · 확률 {evIt.pct}% · 재고 <b>{evIt.stock == null ? "무제한" : evIt.stock + "개"}</b> · 한 사람 {evt.cap}개
+          {evVouch[evIt.id] ? <b style={{color: "#b3261e"}}> · 교환권 대기 {evVouch[evIt.id]}장</b> : null}
+          <div className="cm-hint">이 반에서 받은 학생: {evGot.length ? evGot.join(" · ") : "아직 없어요"}</div>
+        </div>
+        <div style={{display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap"}}>
+          <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} onClick={evStart}>고치기 · 재고 채우기</button>
+          <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} disabled={busy} onClick={() => evSave(true)}>끄기</button>
+        </div>
+      </>) : (<>
+        {evt && evt.day ? <div className="cm-hint" style={{marginBottom: 6}}>지난 이벤트: {evt.day} · {evIt ? evIt.name : ""}{evIt && evVouch[evIt.id] ? " · 교환권 대기 " + evVouch[evIt.id] + "장 (재고를 채우면 학생이 바꿔요)" : ""}</div> : null}
+        <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} onClick={evStart}>{evt && evt.day ? "오늘 다시 열기 · 재고 채우기" : "오늘 이벤트 만들기"}</button>
       </>)}
     </div>
   </>);

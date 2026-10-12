@@ -202,7 +202,7 @@ const STUB = `
   var ledger = function(cid, sid){ var k = "classes/" + cid + "/pieces/" + sid; return store[k] || (store[k] = { bal: 0, earned: 0, opened: 0, prizes: [], aways: [], log: [] }); };
   var todayAw = function(d){ return d.awayDay === kstDay() ? { n: d.awayN || 0, tot: d.awayTot || 0 } : { n: 0, tot: 0 }; };
   var hwOk = function(q, a){ return a == null ? false : q.type === "mc" ? Number(a) === 1 : q.type === "short" ? String(a).trim() === "1" : null; };
-  window.fetch = function(url, init){
+  var pcHandle = function(url, init){
     if (String(url).indexOf("/api/exam") < 0) return _fetch2(url, init);
     var b = {}; try { b = JSON.parse((init && init.body) || "{}"); } catch(e){}
     var ok = function(o){ return Promise.resolve({ ok: true, status: 200, json: function(){ return Promise.resolve(o); } }); };
@@ -214,10 +214,13 @@ const STUB = `
     var rules = function(){ return { cost: PCF.cost, streak: PCF.streak, awayMin: PCF.awayMin, awayEvery: PCF.awayEvery, awayPen: PCF.awayPen }; };
     var add = function(sid, n, k){ if (!n) return; var d = ledger(b.cid, sid); d.name = rowOf(sid).name; d.bal += n; d.earned += n; d.log.push({ t: Date.now(), k: k, d: n }); };
     var book = ((store["appConfig/examList"] || {}).exams || []).filter(function(e){ return e.id === b.bookId; })[0];
+    var evNow = cfg.event && cfg.event.day === kstDay() && (cfg.event.items || []).length ? cfg.event : null;
+    var evWon = function(d){ return evNow && d.evDay === evNow.day ? d.evWins || 0 : 0; };
+    var itemOf = function(p){ var l = p.ev ? ((cfg.event || {}).items || []) : (cfg.items || []); return l.filter(function(y){ return y.id === p.id; })[0]; };
     if (b.action === "hwSubmit") {
       var asT = tch || !!rowOf(b.sid).teacher, byN = {}; (book.questions || []).forEach(function(q){ byN[q.n] = q; });
       var qs = (b.nums || []).map(function(n){ var q = byN[n], a = b.answers[n]; a = a == null || a === "" ? null : a;
-        return { n: n, type: q.type, u: q.u, answer: a, auto: a == null ? false : hwOk(q, a), sec: 20 + (n % 7) * 9 }; });
+        return { n: n, type: q.type, u: q.u, answer: a, auto: a == null ? false : book.free ? true : hwOk(q, a), sec: 20 + (n % 7) * 9 }; });
       var date = kstDay();
       var log = { rid: b.rid, cid: b.cid, sid: b.sid, name: rowOf(b.sid).name, bookId: b.bookId, title: book.title, date: date, startedAt: b.startedAt, endT: b.endT,
         pausedSec: b.pausedSec || 0, nums: b.nums, questions: qs, ev: b.ev, n: qs.length, correct: qs.filter(function(q){ return q.auto === true; }).length,
@@ -251,8 +254,11 @@ const STUB = `
     if (b.action === "pcMe") {
       if (!on) return ok({ ok: true, on: false });
       var d = ledger(b.cid, b.sid), ta = todayAw(d), sum = 0; (cfg.items || []).forEach(function(x){ sum += x.pct; });
-      return ok({ ok: true, on: true, bal: d.bal, earned: d.earned, opened: d.opened, awayN: ta.n, awayTot: ta.tot, prizes: d.prizes, rules: rules(),
-        hasItems: (cfg.items || []).length > 0 });
+      return ok({ ok: true, on: true, bal: d.bal, earned: d.earned, opened: d.opened, awayN: ta.n, awayTot: ta.tot, rules: rules(),
+        prizes: d.prizes.map(function(p){ var it = p.voucher && !p.given ? itemOf(p) : null; return p.voucher && !p.given ? Object.assign({}, p, { canSwap: !!it && (it.stock == null || it.stock > 0) }) : p; }),
+        hasItems: (cfg.items || []).length > 0 || !!evNow,
+        event: evNow ? { title: evNow.title, cap: evNow.cap, won: evWon(d), names: evNow.items.map(function(x){ return x.name; }),
+                         sure: evNow.items.reduce(function(s, x){ return s + x.pct; }, 0) >= 99.99 } : null });
     }
     if (b.action === "hwAway") {
       if (!on || tch || rowOf(b.sid).teacher) return ok({ ok: true, on: on });
@@ -268,28 +274,57 @@ const STUB = `
     if (b.action === "pcOpen") {
       var d3 = ledger(b.cid, b.sid);
       if (d3.bal < PCF.cost) return bad("조각이 " + PCF.cost + "개 있어야 구슬을 열 수 있어요");
-      var r = Math.random() * 100, pick = null; (cfg.items || []).some(function(x){ r -= x.pct; if (r < 0) { pick = x; return true; } return false; });
+      var w3 = evWon(d3);
+      if (evNow && w3 >= evNow.cap) return bad("오늘은 한 사람에 " + evNow.cap + "개까지예요 — 남은 구슬은 내일 열 수 있어요");
+      var r = Math.random() * 100, pick = null; ((evNow ? evNow.items : cfg.items) || []).some(function(x){ r -= x.pct; if (r < 0) { pick = x; return true; } return false; });
       var vo = !!(pick && pick.stock != null && pick.stock <= 0);
       if (pick && pick.stock != null && !vo) pick.stock--;
-      var prize = vo ? { pid: "v" + Date.now(), id: pick.id, name: Number(pick.price).toLocaleString("ko-KR") + "원 교환권", of: pick.name, price: pick.price, voucher: true, at: Date.now(), given: false }
-        : pick ? { pid: "p" + Date.now(), id: pick.id, name: pick.name, at: Date.now(), given: false } : { pid: "b" + Date.now(), id: "blank", name: "꽝", blank: true };
+      var tag = evNow ? { ev: evNow.day } : {};
+      var prize = vo ? Object.assign({ pid: "v" + Date.now(), id: pick.id, name: (Number(pick.price) > 0 ? Number(pick.price).toLocaleString("ko-KR") + "원" : pick.name) + " 교환권", of: pick.name, price: pick.price, voucher: true, at: Date.now(), given: false }, tag)
+        : pick ? Object.assign({ pid: "p" + Date.now(), id: pick.id, name: pick.name, at: Date.now(), given: false }, tag) : { pid: "b" + Date.now(), id: "blank", name: "꽝", blank: true };
       d3.bal -= PCF.cost; d3.opened++; if (pick) d3.prizes.push(prize);
+      if (evNow && pick) { d3.evDay = evNow.day; d3.evWins = w3 + 1; }
       return ok({ ok: true, prize: prize, bal: d3.bal });
     }
     if (b.action === "pcBoard") {
       var rows = Object.keys(store).filter(function(k){ return k.indexOf("classes/" + b.cid + "/pieces/") === 0; }).map(function(k){ var d = store[k], ta = todayAw(d);
         return { sid: k.split("/").pop(), name: d.name, bal: d.bal, earned: d.earned, opened: d.opened, awayN: ta.n, awayTot: ta.tot, aways: d.aways, prizes: d.prizes }; });
-      return ok({ ok: true, on: on, rules: rules(), rows: rows });
+      return ok({ ok: true, on: on, rules: rules(), rows: rows, event: cfg.event || null, today: kstDay() });
     }
     if (b.action === "pcGive") { var d4 = ledger(b.cid, b.sid); d4.prizes = d4.prizes.map(function(x){ return x.pid === b.pid ? Object.assign({}, x, { given: true }) : x; }); return ok({ ok: true }); }
     if (b.action === "pcAdjust") { var d5 = ledger(b.cid, b.sid); d5.bal = Math.max(0, d5.bal + Number(b.delta)); return ok({ ok: true, bal: d5.bal }); }
-    if (b.action === "pcItemsGet") return ok({ ok: true, items: cfg.items || [], cids: cfg.cids, rules: rules() });
+    if (b.action === "pcItemsGet") return ok({ ok: true, items: cfg.items || [], cids: cfg.cids, rules: rules(), event: cfg.event || null, today: kstDay() });
+    if (b.action === "pcEventSet") {
+      if (b.off) { cfg.event = null; return ok({ ok: true, event: null }); }
+      var eits = (b.items || []).map(function(x, i){ return { id: x.id || "e" + Date.now() + i, name: x.name, pct: Number(x.pct) || 0, price: Number(x.price) || 0, stock: x.stock == null || x.stock === "" ? null : Number(x.stock) }; });
+      cfg.event = { day: kstDay(), title: b.title || "", cap: Math.max(1, Number(b.cap) || 1), items: eits }; store["appConfig/pieces"] = cfg;
+      return ok({ ok: true, event: cfg.event });
+    }
+    if (b.action === "pcSwap") {
+      var d6 = ledger(b.cid, b.sid), pz = d6.prizes.filter(function(x){ return x.pid === b.pid; })[0];
+      if (!pz || !pz.voucher || pz.given) return bad("바꿀 교환권이 없어요");
+      var it6 = itemOf(pz);
+      if (!it6) return bad("그 상품이 상품표에서 빠졌어요 — 선생님께 말해 주세요");
+      if (it6.stock != null && it6.stock <= 0) return bad("아직 재고가 없어요 — 채워지면 바꿀 수 있어요");
+      if (it6.stock != null) it6.stock--;
+      var np = Object.assign({}, pz, { name: pz.of || pz.name, voucher: false, swappedAt: Date.now() });
+      d6.prizes = d6.prizes.map(function(x){ return x.pid === b.pid ? np : x; });
+      return ok({ ok: true, prize: np });
+    }
     if (b.action === "pcItemsSet") { cfg.items = (b.items || []).map(function(x, i){ return Object.assign({}, x, { id: x.id || "n" + Date.now() + i }); }); store["appConfig/pieces"] = cfg; return ok({ ok: true, items: cfg.items }); }
     return ok({ ok: true });
   };
+  var PC_KEEP = { test: function(k){ return k === "appConfig/pieces" || ["pieces", "days", "homework"].some(function(c){ return k.indexOf("classes/c-reg/" + c + "/") === 0; }); } };
+  var pcSave = function(){ try { var o = {}; Object.keys(store).forEach(function(k){ if (PC_KEEP.test(k)) o[k] = store[k]; }); sessionStorage.setItem("__pvPc", JSON.stringify(o)); } catch(e){} };
+  window.fetch = function(url, init){
+    if (String(url).indexOf("/api/exam") < 0) return _fetch2(url, init);
+    var out = pcHandle(url, init); pcSave(); return out;
+  };
   /* 미리보기 과제 교재 — 일반반의 «교재A» 와 잇는다(정답: 객관식 ①, 단답 1, 25번은 스스로 채점) */
   store["appConfig/examList"] = { exams: [{ id: "pv-hw", kind: "hw", title: "교재A (미리보기 · 정답 ①)", link: "교재A", units: ["1단원", "2단원"], cids: ["c-reg"],
-    questions: Array.from({ length: 100 }, function(_, i){ var n = i + 1; return { n: n, type: n === 25 ? "essay" : n % 10 === 0 ? "short" : "mc", u: n <= 50 ? 0 : 1 }; }) }] };
+    questions: Array.from({ length: 100 }, function(_, i){ var n = i + 1; return { n: n, type: n === 25 ? "essay" : n % 10 === 0 ? "short" : "mc", u: n <= 50 ? 0 : 1 }; }) },
+    { id: "pc-test", kind: "hw", free: true, title: "조각 시험 (아무 답이나 정답)", link: "", units: [], cids: ["c-reg"],
+      questions: Array.from({ length: 20 }, function(_, i){ return { n: i + 1, type: "mc" }; }) }] };
   store["appConfig/pieces"] = { cids: ["c-reg"], items: [
     { id: "g1", name: "1,000원 기프티콘", price: 1000, pct: 30, stock: 95 }, { id: "g2", name: "2,000원 기프티콘", price: 2000, pct: 6, stock: 20 },
     { id: "g3", name: "3,000원 기프티콘", price: 3000, pct: 3, stock: 10 }, { id: "g4", name: "4,500원 기프티콘", price: 4500, pct: 1.2, stock: 4 },
@@ -299,7 +334,8 @@ const STUB = `
   var t0 = Date.now();
   store["classes/c-reg"] = { name: "미리보기 일반반", classDays: [1,5], type: "regular", time: t0,
     books: [{ name: "교재A", total: 100 }, { name: "교재B", total: 50 }],
-    roster: [{ id:"s1", name:"김서진" }, { id:"s2", name:"임서윤" }, { id:"t1", name:"한민수", teacher:true }] };
+    roster: [{ id:"s1", name:"김서진" }, { id:"s2", name:"임서윤" }, { id:"s3", name:"김태윤" }, { id:"t1", name:"한민수", teacher:true }] };
+  try { var kept = JSON.parse(sessionStorage.getItem("__pvPc") || "null"); if (kept) Object.keys(kept).forEach(function(k){ store[k] = kept[k]; }); } catch(e){}
   store["classes/c-ind"] = { name: "미리보기 개진반", classDays: [], type: "individual", time: t0 + 1, books: [],
     roster: [{ id:"s1", name:"지승훈", days:[2,4], books:[{ name:"개별교재", total:80 }] },
              { id:"t1", name:"한민수", teacher:true }] };
