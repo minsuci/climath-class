@@ -341,6 +341,10 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .pc-chip.go{cursor:pointer;}
 .pc-ev{margin-top:10px; background:#fff8d6; border:1px solid #f1dc7a; border-radius:12px; padding:9px 12px; font-size:13.5px; line-height:1.6; color:#5c4a00;}
 .pc-ev b{color:#3d3200;}
+.pc-chip.gift{background:#eef3ff; color:#233a8a; border-color:#b9c8f2; cursor:pointer;}
+.pc-coupon{position:fixed; inset:0; z-index:60; background:#fff; display:flex; flex-direction:column; align-items:center; overflow:auto; padding:14px 12px 24px;}
+.pc-coupon img{width:100%; max-width:440px; height:auto; display:block; border-radius:10px; box-shadow:0 2px 12px rgba(0,0,0,.12);}
+.pc-coupon .top{width:100%; max-width:440px; display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px;}
 .pc-chip.swap{background:#e9f6ec; color:#1f6b35; border-color:#a8d8b5; cursor:pointer;}
 .pc-line{background:#f6f1e7; border-radius:10px; padding:9px 12px; margin:-4px 0 12px; font-size:14px;} .pc-line span{color:var(--muted); font-size:13px;}
 .pc-roll{font-size:64px; line-height:1.2; animation:pcShake .5s ease-in-out infinite;} .pc-roll.done{animation:pcPop .4s ease-out;}
@@ -4355,6 +4359,7 @@ function PieceCard({ cls, me, ver }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [got, setGot] = useState(null);    // {rolling} · {prize}
+  const [coupon, setCoupon] = useState(null);   // {name, img} — 기프티콘 바코드 사진(서버가 주인 확인 뒤에만 준다)
   const load = () => pcApi({ action: "pcMe", cid: cls.id, sid: me.id }).then((j) => { setD(j); setErr(""); }).catch((e) => setErr(e.message));
   useEffect(() => { pcAwayFlush(cls.id, me.id).finally(load); }, [cls.id, me.id, ver]);
   async function open() {
@@ -4370,6 +4375,15 @@ function PieceCard({ cls, me, ver }) {
   if (!d || !d.on) return null;
   const R = d.rules, marbles = Math.floor(d.bal / R.cost), left = d.bal % R.cost, wait = (d.prizes || []).filter((p) => !p.given);
   const ev = d.event, capped = !!ev && ev.won >= ev.cap;   // 오늘만 이벤트 — 한 사람 cap 개 받으면 그날은 못 연다
+  async function view(p) {
+    if (busy) return;
+    setBusy(true);
+    try { const j = await pcApi({ action: "pcCoupon", cid: cls.id, sid: me.id, pid: p.pid }); setCoupon({ name: j.name || p.name, img: j.img }); if (j.first) load(); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+  const gifts = (d.prizes || []).filter((p) => !p.blank && !p.voucher && (!p.given || p.coupon));   // 앱으로 받을 수 있는 것(선생님이 직접 준 것은 빼고)
+  const waitV = wait.filter((p) => p.voucher);
   async function swap(p) {
     if (busy || !confirm("«" + p.name + "» 을 «" + (p.of || p.name) + "» 로 바꿀까요?")) return;
     setBusy(true);
@@ -4389,9 +4403,12 @@ function PieceCard({ cls, me, ver }) {
       <div className="pc-bar"><i style={{width: Math.round(left / R.cost * 100) + "%"}} /></div>
       {ev && <div className="pc-ev">🎁 <b>{ev.title || "오늘만 이벤트"}</b> — 오늘 구슬을 열면 <b>{ev.names.join(" · ")}</b>{ev.sure ? "" : " 이(가) 나올 수 있어요"} · 한 사람 {ev.cap}개까지 <b>({ev.won}/{ev.cap})</b></div>}
       <div className={"pc-away" + (d.awayN === R.awayEvery - 1 ? " warn" : "")}>오늘 이탈 <b>{d.awayN} / {R.awayEvery}</b>{d.awayTot > d.awayN ? <span> (오늘 모두 {d.awayTot}번)</span> : null} — {R.awayEvery}번째면 조각 {R.awayPen}개가 빠져요</div>
-      {wait.length > 0 && <div className="pc-wait">받을 상품 — {wait.map((p) => (p.voucher && p.canSwap
+      {gifts.length > 0 && <div className="pc-wait">🎫 내 기프티콘 — {gifts.map((p) => (
+          <button key={p.pid} className="pc-chip gift" disabled={busy} onClick={() => view(p)}>{p.name} · 바코드 보기</button>))}
+        <span className="cm-hint">가게에서 바코드를 보여 주면 돼요</span></div>}
+      {waitV.length > 0 && <div className="pc-wait">받을 상품 — {waitV.map((p) => (p.voucher && p.canSwap
           ? <button key={p.pid} className="pc-chip swap" disabled={busy} onClick={() => swap(p)} title="재고가 채워졌어요">{p.name} → 바꾸기</button>
-          : <span key={p.pid} className="pc-chip" title={p.voucher ? "재고가 채워지면 여기서 바꿀 수 있어요" : ""}>{p.name}</span>))} <span className="cm-hint">선생님께 받아요{wait.some((p) => p.voucher && !p.canSwap) ? " · 교환권은 재고가 채워지면 «바꾸기» 가 떠요" : ""}</span></div>}
+          : <span key={p.pid} className="pc-chip" title={p.voucher ? "재고가 채워지면 여기서 바꿀 수 있어요" : ""}>{p.name}</span>))} <span className="cm-hint">{waitV.some((p) => !p.canSwap) ? "교환권은 재고가 채워지면 «바꾸기» 가 떠요" : ""}</span></div>}
       <div className="cm-hint" style={{lineHeight: 1.7, marginTop: 8}}>
         처음에 맞히면 조각 <b>1개</b> · 틀린 문제를 다시 풀어 맞혀도 <b>1개</b> · 번호 순서로 <b>{R.streak}문제 연속</b> 맞히면 <b>+1</b>. 조각 {R.cost}개가 모이면 구슬 하나 — 열면 기프티콘이 나올 수도 있어요.
         풀기 화면을 떠나면(다른 앱 · 홈 · 화면 꺼짐) 기록돼요. {R.awayMin}초까지는 괜찮고, 하루에 {R.awayEvery}번째마다 조각 {R.awayPen}개가 빠져요.
@@ -4412,10 +4429,18 @@ function PieceCard({ cls, me, ver }) {
             </>) : (<>
               <div className="pc-roll done">🎉</div>
               <h4 style={{margin: "6px 0 4px"}}>{got.prize.name}</h4>
-              <div className="cm-hint">{got.prize.swappedAt ? "교환권을 바꿨어요 — " : ""}선생님께 받아요</div>
-              <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => setGot(null)}>확인</button>
+              <div className="cm-hint">{got.prize.swappedAt ? "교환권을 바꿨어요 — " : ""}아래에서 바코드를 바로 볼 수 있어요</div>
+              <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => { const p = got.prize; setGot(null); view(p); }}>🎫 바코드 보기</button>
+              <div><button className="cm-link" style={{marginTop: 10}} onClick={() => setGot(null)}>나중에 볼게요</button></div>
             </>)}
         </div></div>
+      )}
+      {coupon && (
+        <div className="pc-coupon" onClick={(e) => e.stopPropagation()}>
+          <div className="top"><b>{coupon.name}</b><button className="mx-btn primary" onClick={() => setCoupon(null)}>닫기</button></div>
+          <img src={coupon.img} alt={coupon.name} />
+          <div className="cm-hint" style={{marginTop: 10, textAlign: "center", lineHeight: 1.6}}>계산할 때 이 화면을 보여 주세요. 화면 밝기를 올리면 잘 찍혀요.<br />한 번 쓰면 다시 못 써요 — 다른 사람에게 보여 주지 마세요.</div>
+        </div>
       )}
     </div>
   );
@@ -4935,7 +4960,9 @@ function PieceBoard({ cls }) {
   const [evt, setEvt] = useState(null);        // 오늘만 이벤트(서버 그대로)
   const [today, setToday] = useState("");
   const [evEdit, setEvEdit] = useState(null);  // 이벤트 고치는 중 {title, cap, id, name, pct, stock}
-  const load = () => pcApi({ action: "pcBoard", cid: cls.id }).then((j) => { setRows(j.rows); setOn(j.on); setRules(j.rules); setEvt(j.event || null); setToday(j.today || ""); setErr(""); }).catch((e) => setErr(e.message));
+  const [coupons, setCoupons] = useState([]);   // 쿠폰 사진 목록(사진은 안 옴) {id, item, used:{name}}
+  const [upMsg, setUpMsg] = useState("");
+  const load = () => pcApi({ action: "pcBoard", cid: cls.id }).then((j) => { setRows(j.rows); setOn(j.on); setRules(j.rules); setEvt(j.event || null); setToday(j.today || ""); setCoupons(j.coupons || []); setErr(""); }).catch((e) => setErr(e.message));
   useEffect(() => { setRows(null); load(); }, [cls.id]);
   if (!on) return <div className="cm-card cm-hint">🧩 조각 — 이 반은 아직 안 써요 (이번 기말: 고1S · 고1자사고반)</div>;
   const kids = (cls.roster || []).filter((r) => r && r.id && r.name && !r.teacher && !isEnded(r));
@@ -4984,6 +5011,24 @@ function PieceBoard({ cls }) {
   const evVouch = {}; (rows || []).forEach((x) => (x.prizes || []).forEach((p) => { if (p.ev && p.voucher && !p.given) evVouch[p.id] = (evVouch[p.id] || 0) + 1; }));
   const evGot = (rows || []).filter((x) => (x.prizes || []).some((p) => p.ev === today)).map((x) => x.name);
   const evSet = (k, v) => setEvEdit({ ...evEdit, [k]: v });
+  // 쿠폰(기프티콘 바코드) 사진 넣기 — 크면 줄여서(JPEG) 보낸다. 같은 사진은 서버가 막는다
+  async function addCoupons(item, files) {
+    if (!files || !files.length) return;
+    setBusy(true); const out = [];
+    for (const f of [...files]) {
+      try {
+        let url = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(f); });
+        if (url.length > 880000) {
+          const im = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; });
+          const w = Math.min(900, im.width), c = document.createElement("canvas"); c.width = w; c.height = Math.round(im.height * w / im.width);
+          c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); url = c.toDataURL("image/jpeg", 0.92);
+        }
+        await pcApi({ action: "pcCouponAdd", item, img: url }); out.push(f.name + " ✓");
+      } catch (e) { out.push(f.name + " — " + e.message); }
+    }
+    setUpMsg(out.join(" · ")); await load(); setBusy(false);
+  }
+  const cpOf = (id) => coupons.filter((c) => c.item === id);
   const psum = (items || []).reduce((s, x) => s + (Number(x.pct) || 0), 0);
   const money = (items || []).reduce((s, x) => s + (Number(x.price) || 0) * (x.stock === "" ? 0 : Number(x.stock) || 0), 0);
   const ev = (items || []).reduce((s, x) => s + (Number(x.pct) || 0) / 100 * (Number(x.price) || 0), 0);
@@ -5075,6 +5120,15 @@ function PieceBoard({ cls }) {
           <b>{evt.title || "오늘만 이벤트"}</b> — {evIt.name} · 확률 {evIt.pct}% · 재고 <b>{evIt.stock == null ? "무제한" : evIt.stock + "개"}</b> · 한 사람 {evt.cap}개
           {evVouch[evIt.id] ? <b style={{color: "#b3261e"}}> · 교환권 대기 {evVouch[evIt.id]}장</b> : null}
           <div className="cm-hint">이 반에서 받은 학생: {evGot.length ? evGot.join(" · ") : "아직 없어요"}</div>
+          {(() => { const cs = cpOf(evIt.id), left = cs.filter((c) => !c.used).length, short = evIt.stock != null && left < evIt.stock;
+            return <div className="cm-hint" style={{marginTop: 4}}>
+              🎫 쿠폰 사진 <b>{cs.length}장</b> · 남은 것 <b style={{color: short ? "#b3261e" : undefined}}>{left}장</b>
+              {cs.some((c) => c.used) ? " · 받은 학생 " + cs.filter((c) => c.used).map((c) => c.used.name).join(", ") : ""}
+              {short ? <b style={{color: "#b3261e"}}> — 재고 {evIt.stock}개보다 사진이 적어요</b> : null}
+              <br /><label className="cm-link" style={{cursor: "pointer"}}>+ 쿠폰 사진 넣기<input type="file" accept="image/*" multiple style={{display: "none"}} disabled={busy}
+                onChange={(e) => { addCoupons(evIt.id, e.target.files); e.target.value = ""; }} /></label>
+              {upMsg ? <span> — {upMsg}</span> : null}
+              <br />학생이 «바코드 보기» 를 누르면 남은 사진 하나가 그 학생 것이 돼요(다른 학생은 못 봐요).</div>; })()}
         </div>
         <div style={{display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap"}}>
           <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} onClick={evStart}>고치기 · 재고 채우기</button>

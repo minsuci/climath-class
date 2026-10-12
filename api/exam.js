@@ -17,6 +17,7 @@
 // 답 고정(lock) — 푸는 동안은 자유롭게 고치고, **제출한 뒤에는** 학생이 결과(O/X)를 못 고친다.
 //   고치는 건 선생님만: 결과 화면 O/X 고침 · «답 고치기»(action "fix", 여기서 다시 채점)
 import { verifyIdToken, getDoc, patchDoc, listDocs, deleteDoc, getDocV, patchDocIf } from "./_google.js";
+import { createHash } from "crypto";
 
 const TOOLKEY_PATH = "team/tools";
 const LIST_PATH = "appConfig/examList";
@@ -530,6 +531,67 @@ async function pcStockMove(id, delta, inEvent) {
   }
   throw new Error("상품표가 바빠요 — 잠깐 뒤에 다시");
 }
+// ── 기프티콘 쿠폰 사진(10/12) — 선생님이 넣은 바코드 사진을 당첨된 학생이 앱에서 본다.
+// pieceCoupons/{사진 해시 앞 24자} {item 상품 id, img data URL, at, by, used:{cid,sid,pid,name,at}|null}
+// 클라이언트 규칙은 이 컬렉션을 못 읽는다(firestore.rules 맨 끝 «나머지 다 막음») — 서버가 주인 확인 뒤에만 사진을 준다.
+// 같은 사진은 해시가 같아 두 번 못 들어간다(10/12 같은 쿠폰 사진 두 장을 받음). 목록은 appConfig/pieceCouponIdx 에 사진 없이
+const PC_CIDX = "appConfig/pieceCouponIdx";
+const pcCouponPath = (id) => "pieceCoupons/" + id;
+async function pcCouponIdxEdit(fn) {
+  for (let k = 0; k < 8; k++) {
+    const { doc, v } = await getDocV(PC_CIDX);
+    const list = fn(((doc || {}).list || []).slice());
+    if (await patchDocIf(PC_CIDX, { list }, ["list"], v)) return list;
+  }
+  throw new Error("쿠폰 목록이 바빠요 — 잠깐 뒤에 다시");
+}
+async function pcCouponAdd(item, img, by) {
+  const m = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(img || ""));
+  if (!m) return { error: "사진(png · jpg)이 아니에요" };
+  if (m[2].length > 900000) return { error: "사진이 너무 커요(650KB 까지)" };
+  const id = createHash("sha256").update(m[2]).digest("hex").slice(0, 24);
+  const ok = await patchDocIf(pcCouponPath(id), { item: String(item), img, at: Date.now(), by, used: null }, ["item", "img", "at", "by", "used"], null);
+  if (!ok) return { error: "같은 쿠폰 사진이 이미 들어 있어요", dup: true, id };
+  await pcCouponIdxEdit((l) => [...l.filter((x) => x.id !== id), { id, item: String(item), at: Date.now(), used: null }]);
+  return { ok: true, id };
+}
+// 학생 — 내 상품의 쿠폰 사진. 처음 누를 때 그 상품의 남은 쿠폰 하나를 붙인다(쿠폰 문서를 조건부로 잡아 두 사람이 같은 것을 못 받는다)
+async function pcCoupon(res, claims, b) {
+  const cid = String(b.cid || ""), sid = String(b.sid || ""), pid = String(b.pid || "");
+  const who = await hwWho(res, claims, cid, sid); if (!who) return;
+  const d = (await getDoc(pcPath(cid, sid)).catch(() => null)) || {};
+  const p = (d.prizes || []).find((x) => x.pid === pid);
+  if (!p || p.blank || p.voucher) { res.status(400).json({ error: "볼 수 있는 상품이 없어요" }); return; }
+  if (p.coupon) {
+    const c = await getDoc(pcCouponPath(p.coupon)).catch(() => null);
+    if (!c || !c.used || c.used.cid !== cid || c.used.sid !== sid) { res.status(404).json({ error: "쿠폰 사진을 못 찾았어요 — 선생님께 말해 주세요" }); return; }
+    res.status(200).json({ ok: true, img: c.img, name: p.name }); return;
+  }
+  if (p.given) { res.status(400).json({ error: "선생님이 이미 직접 준 상품이에요" }); return; }
+  const idx = ((await getDoc(PC_CIDX).catch(() => null)) || {}).list || [];
+  for (const x of idx.filter((y) => y.item === p.id && !y.used)) {
+    const { doc, v } = await getDocV(pcCouponPath(x.id));
+    if (!doc || doc.used) continue;
+    const used = { cid, sid, pid, name: who.name, at: Date.now() };
+    if (!(await patchDocIf(pcCouponPath(x.id), { used }, ["used"], v))) continue;   // 남이 먼저 잡음 — 다음 것
+    let other = "";
+    try {
+      await pcEdit(cid, sid, (L) => {
+        const q = (L.prizes || []).find((y) => y.pid === pid);
+        if (!q || q.coupon) { other = q ? q.coupon : "gone"; return null; }   // 두 번 눌러 이미 붙었다
+        return { prizes: L.prizes.map((y) => (y.pid === pid ? { ...y, coupon: x.id, given: true, givenAt: Date.now(), givenBy: "app" } : y)) };
+      });
+    } catch (e) { other = "busy"; }
+    if (other) {   // 잡은 쿠폰을 놓는다
+      await patchDoc(pcCouponPath(x.id), { used: null });
+      if (other !== "gone" && other !== "busy") { const c = await getDoc(pcCouponPath(other)).catch(() => null); if (c) { res.status(200).json({ ok: true, img: c.img, name: p.name }); return; } }
+      res.status(409).json({ error: "잠깐 뒤에 다시 눌러 주세요" }); return;
+    }
+    await pcCouponIdxEdit((l) => l.map((y) => (y.id === x.id ? { ...y, used } : y))).catch(() => null);
+    res.status(200).json({ ok: true, img: doc.img, name: p.name, first: true }); return;
+  }
+  res.status(404).json({ error: "아직 쿠폰 사진이 안 들어왔어요 — 선생님께 말해 주세요", none: true });
+}
 // 교환권을 지금 바꿀 수 있나(재고가 채워졌나)
 const pcSwapOk = (cfg, p) => {
   const list = p.ev ? ((cfg.doc.event || {}).items || []) : cfg.items, x = list.find((y) => y.id === p.id);
@@ -655,6 +717,20 @@ async function pcTeacherAct(res, claims, b) {
     const c = await pcCfg();
     res.status(200).json({ ok: true, items: c.items, cids: c.cids, by: c.doc.by, at: c.doc.at, rules: pcRules(), event: c.doc.event || null, today: kstDate(Date.now()) }); return;
   }
+  if (b.action === "pcCouponAdd") {
+    if (!(await pcTeacher(res, claims, ""))) return;
+    const r = await pcCouponAdd(b.item, b.img, claims.tid || claims.role);
+    res.status(r.error ? (r.dup ? 409 : 400) : 200).json(r); return;
+  }
+  if (b.action === "pcCouponDel") {
+    if (!(await pcTeacher(res, claims, ""))) return;
+    const id = String(b.id || ""), c = await getDoc(pcCouponPath(id)).catch(() => null);
+    if (!c) { res.status(404).json({ error: "그 쿠폰이 없어요" }); return; }
+    if (c.used) { res.status(400).json({ error: c.used.name + " 학생이 이미 받은 쿠폰이에요" }); return; }
+    await deleteDoc(pcCouponPath(id));
+    await pcCouponIdxEdit((l) => l.filter((x) => x.id !== id));
+    res.status(200).json({ ok: true }); return;
+  }
   // 오늘만 이벤트 — 날짜는 서버가 오늘(한국)로 찍는다. off 면 지운다. 재고를 다시 적으면 채운 것(교환권은 학생이 앱에서 바꾼다)
   if (b.action === "pcEventSet") {
     if (!(await pcTeacher(res, claims, ""))) return;
@@ -694,7 +770,8 @@ async function pcTeacherAct(res, claims, b) {
   if (b.action === "pcBoard") {
     const cfg = await pcCfg();
     const rows = await listDocs("classes/" + cid + "/pieces").catch(() => []);
-    res.status(200).json({ ok: true, on: cfg.cids.includes(cid), rules: pcRules(), event: cfg.doc.event || null, today: kstDate(Date.now()), rows: rows.map((d) => {
+    const coupons = (((await getDoc(PC_CIDX).catch(() => null)) || {}).list || []).map((x) => ({ id: x.id, item: x.item, at: x.at, used: x.used ? { name: x.used.name, at: x.used.at } : null }));
+    res.status(200).json({ ok: true, on: cfg.cids.includes(cid), rules: pcRules(), event: cfg.doc.event || null, today: kstDate(Date.now()), coupons, rows: rows.map((d) => {
       const td = pcToday(d);
       return { sid: d.id, name: d.name, bal: d.bal || 0, earned: d.earned || 0, opened: d.opened || 0, awayN: td.n, awayTot: td.tot,
                aways: (d.aways || []).slice(-80), prizes: (d.prizes || []).slice(-60), log: (d.log || []).slice(-30) };
@@ -990,6 +1067,8 @@ export default async function handler(req, res) {
         }
         if (body.op === "event") return await pcTeacherAct(res, TOOL, { ...body, action: "pcEventSet" });
         if (body.op === "items") return await pcTeacherAct(res, TOOL, { ...body, action: "pcItemsSet" });
+        if (body.op === "couponAdd") { const r = await pcCouponAdd(body.item, body.img, "tool"); res.status(r.error ? (r.dup ? 409 : 400) : 200).json(r); return; }
+        if (body.op === "coupons") { res.status(200).json({ ok: true, list: (((await getDoc(PC_CIDX).catch(() => null)) || {}).list || []) }); return; }
         if (body.op === "resetLedger") {
           const cid = String(body.cid || ""), sids = Array.isArray(body.sids) ? body.sids.map(String) : [];
           if (!cid || !sids.length) { res.status(400).json({ error: "cid · sids 가 필요해요" }); return; }
@@ -1054,8 +1133,9 @@ export default async function handler(req, res) {
     if (body.action === "pcMe") return await pcMe(res, claims, body);
     if (body.action === "pcOpen") return await pcOpen(res, claims, body);
     if (body.action === "pcSwap") return await pcSwap(res, claims, body);
+    if (body.action === "pcCoupon") return await pcCoupon(res, claims, body);
     if (body.action === "hwAway") return await hwAway(res, claims, body);
-    if (["pcItemsGet", "pcItemsSet", "pcEventSet", "pcBoard", "pcGive", "pcAdjust"].includes(body.action)) return await pcTeacherAct(res, claims, body);
+    if (["pcItemsGet", "pcItemsSet", "pcEventSet", "pcCouponAdd", "pcCouponDel", "pcBoard", "pcGive", "pcAdjust"].includes(body.action)) return await pcTeacherAct(res, claims, body);
     if (body.action === "hkRemove") return await hkRemove(res, claims, body);
     res.status(400).json({ error: "그런 동작이 없어요" });
   } catch (e) {

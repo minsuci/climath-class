@@ -663,6 +663,7 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 ### 조각 — 과제 보상 (2026-10-12 운영 시작)
 설계·까닭은 볼트 `20 작업/조각 보상 — 과제 집중 설계.md`. 대상 = `appConfig/pieces.cids`(없으면 서버 `PC.cids` = 고1S `s-mongeum` · 자사고 `jasago`). TOP 은 뺐다.
 - **운영 도구 `tools/pieces.mjs`**(toolKey `pcAdmin`): `--get`(설정 · 이벤트 · 반별 장부) · `--event "이름" --stock N [--pct 100 --cap 1 --id …]`(오늘만 이벤트, 같은 id 로 다시 적으면 재고 채움 → 교환권이 바뀜) · `--event-off` · `--items-clear` · `--reset <반ID> [학생ID…]`(먼저 tools/logs 에 받아 둠)
+- **기프티콘 쿠폰 사진**(10/12): `pieceCoupons/{사진 sha256 앞 24자}` {item, img data URL, used} — 클라이언트 규칙으로 못 읽고(맨 끝 «나머지 다 막음») 서버 `pcCoupon` 이 주인 확인 뒤에만 준다. 학생이 «🎫 바코드 보기» 를 처음 누를 때 그 상품의 남은 쿠폰 하나를 조건부로 잡아 붙이고 상품은 `given(app)` 이 된다(선생님이 직접 준 상품은 못 봄). 같은 사진은 해시가 같아 못 들어감. 목록 `appConfig/pieceCouponIdx`(사진 없음). 넣기: 선생님 판 이벤트 칸 «+ 쿠폰 사진 넣기» 또는 `tools/pieces.mjs --coupon <상품id> 사진…`. 평소 상품표 상품용 넣기 화면은 아직 없음(도구로)
 - 10/12 첫 운영: 임시 교재 `tmp-yurimuri20`(유리·무리 20제, 고1S·자사고, 진짜 답) + 오늘만 이벤트 CU 바나나우유(확률 100 · 한 사람 1 · 재고 2로 시작해 교환권 확인)
 - 10/11 에 «배율» 판을 만들어 배포했다가 마왕님이 «배포하지 말랬지» → 되돌림. 그 코드는 로컬 브랜치 `pieces-draft`(쓰지 않음). 지금 판은 로컬 브랜치 `pieces` — `.git/hooks/pre-push` 가 `pieces*` 푸시를 막는다. 운영에 올릴 땐 main 에 합쳐서
 - **계산은 전부 서버**(`api/exam.js` 의 `PC` 상수 · `hwPieces` · `pcAdd` · `hwAway` · `pcOpen`). 앱은 서버가 준 `rules` 로 글만 쓴다

@@ -289,7 +289,8 @@ const STUB = `
     if (b.action === "pcBoard") {
       var rows = Object.keys(store).filter(function(k){ return k.indexOf("classes/" + b.cid + "/pieces/") === 0; }).map(function(k){ var d = store[k], ta = todayAw(d);
         return { sid: k.split("/").pop(), name: d.name, bal: d.bal, earned: d.earned, opened: d.opened, awayN: ta.n, awayTot: ta.tot, aways: d.aways, prizes: d.prizes }; });
-      return ok({ ok: true, on: on, rules: rules(), rows: rows, event: cfg.event || null, today: kstDay() });
+      return ok({ ok: true, on: on, rules: rules(), rows: rows, event: cfg.event || null, today: kstDay(),
+        coupons: ((store["appConfig/pieceCouponIdx"] || { list: [] }).list).map(function(x){ return { id: x.id, item: x.item, used: x.used }; }) });
     }
     if (b.action === "pcGive") { var d4 = ledger(b.cid, b.sid); d4.prizes = d4.prizes.map(function(x){ return x.pid === b.pid ? Object.assign({}, x, { given: true }) : x; }); return ok({ ok: true }); }
     if (b.action === "pcAdjust") { var d5 = ledger(b.cid, b.sid); d5.bal = Math.max(0, d5.bal + Number(b.delta)); return ok({ ok: true, bal: d5.bal }); }
@@ -299,6 +300,20 @@ const STUB = `
       var eits = (b.items || []).map(function(x, i){ return { id: x.id || "e" + Date.now() + i, name: x.name, pct: Number(x.pct) || 0, price: Number(x.price) || 0, stock: x.stock == null || x.stock === "" ? null : Number(x.stock) }; });
       cfg.event = { day: kstDay(), title: b.title || "", cap: Math.max(1, Number(b.cap) || 1), items: eits }; store["appConfig/pieces"] = cfg;
       return ok({ ok: true, event: cfg.event });
+    }
+    if (b.action === "pcCouponAdd") {
+      var cl = store["appConfig/pieceCouponIdx"] || (store["appConfig/pieceCouponIdx"] = { list: [] });
+      if (cl.list.some(function(x){ return x.img === b.img; })) return bad("같은 쿠폰 사진이 이미 들어 있어요", 409);
+      cl.list.push({ id: "c" + Date.now() + cl.list.length, item: b.item, img: b.img, at: Date.now(), used: null }); return ok({ ok: true });
+    }
+    if (b.action === "pcCoupon") {
+      var d7 = ledger(b.cid, b.sid), p7 = d7.prizes.filter(function(x){ return x.pid === b.pid; })[0], cl7 = (store["appConfig/pieceCouponIdx"] || { list: [] }).list;
+      if (!p7 || p7.voucher) return bad("볼 수 있는 상품이 없어요");
+      if (p7.coupon) { var c7 = cl7.filter(function(x){ return x.id === p7.coupon; })[0]; return ok({ ok: true, img: c7.img, name: p7.name }); }
+      var f7 = cl7.filter(function(x){ return x.item === p7.id && !x.used; })[0];
+      if (!f7) return bad("아직 쿠폰 사진이 안 들어왔어요 — 선생님께 말해 주세요", 404);
+      f7.used = { name: rowOf(b.sid).name, at: Date.now() }; p7.coupon = f7.id; p7.given = true; p7.givenBy = "app";
+      return ok({ ok: true, img: f7.img, name: p7.name, first: true });
     }
     if (b.action === "pcSwap") {
       var d6 = ledger(b.cid, b.sid), pz = d6.prizes.filter(function(x){ return x.pid === b.pid; })[0];
@@ -314,7 +329,7 @@ const STUB = `
     if (b.action === "pcItemsSet") { cfg.items = (b.items || []).map(function(x, i){ return Object.assign({}, x, { id: x.id || "n" + Date.now() + i }); }); store["appConfig/pieces"] = cfg; return ok({ ok: true, items: cfg.items }); }
     return ok({ ok: true });
   };
-  var PC_KEEP = { test: function(k){ return k === "appConfig/pieces" || ["pieces", "days", "homework"].some(function(c){ return k.indexOf("classes/c-reg/" + c + "/") === 0; }); } };
+  var PC_KEEP = { test: function(k){ return k === "appConfig/pieces" || k === "appConfig/pieceCouponIdx" || ["pieces", "days", "homework"].some(function(c){ return k.indexOf("classes/c-reg/" + c + "/") === 0; }); } };
   var pcSave = function(){ try { var o = {}; Object.keys(store).forEach(function(k){ if (PC_KEEP.test(k)) o[k] = store[k]; }); sessionStorage.setItem("__pvPc", JSON.stringify(o)); } catch(e){} };
   window.fetch = function(url, init){
     if (String(url).indexOf("/api/exam") < 0) return _fetch2(url, init);

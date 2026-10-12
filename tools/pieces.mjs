@@ -5,6 +5,8 @@
 //                                                                 오늘만 이벤트 켜기 · 재고 다시 적기(같은 --id 면 교환권이 그 재고로 바뀐다)
 //   node tools/pieces.mjs --event-off                             이벤트 끄기
 //   node tools/pieces.mjs --items-clear                           평소 상품표 비우기(상품이 없으면 구슬이 안 열린다 — 구슬은 그대로)
+//   node tools/pieces.mjs --coupon <상품id> 사진.png [사진2.png …]  쿠폰(기프티콘 바코드) 사진 넣기 — 같은 사진은 서버가 막는다
+//   node tools/pieces.mjs --coupons                               쿠폰 목록(누가 받았나 · 사진은 안 보임)
 //   node tools/pieces.mjs --reset <반ID> [학생ID…]                장부 지우기 — 먼저 tools/logs/pieces-backup-*.json 에 받아 둔다
 import fs from "fs";
 import path from "path";
@@ -40,6 +42,17 @@ else if (has("--event")) {
     items: [{ id: arg("--id") || "ev-1", name: arg("--event"), pct: Number(arg("--pct") || 100), stock: arg("--stock") == null ? null : Number(arg("--stock")) }] });
   console.log("이벤트 켬: " + JSON.stringify(j.event));
 }
+else if (has("--coupon")) {
+  const item = arg("--coupon"), files = args.slice(args.indexOf("--coupon") + 2).filter((x) => !x.startsWith("--"));
+  for (const f of files) {
+    const ext = path.extname(f).toLowerCase(), mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+    const r = await fetch(APP, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toolKey: key, action: "pcAdmin", op: "couponAdd", item, img: "data:" + mime + ";base64," + fs.readFileSync(f).toString("base64") }) });
+    const j = await r.json().catch(() => ({}));
+    console.log(path.basename(f) + " → " + (r.ok ? "넣음 " + j.id : r.status + " " + j.error));
+  }
+}
+else if (has("--coupons")) { const j = await call({ op: "coupons" }); for (const x of j.list) console.log(x.id + " · " + x.item + " · " + (x.used ? "받음 " + x.used.name + " " + new Date(x.used.at).toLocaleString("ko-KR") : "남음")); }
 else if (has("--items-clear")) { await call({ op: "items", items: [] }); console.log("평소 상품표 비움"); }
 else if (has("--reset")) {
   const cid = arg("--reset"), j = await call({ op: "get", cids: [cid] });
