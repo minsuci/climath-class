@@ -326,8 +326,11 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .cm-cell.done.clickable:hover{border-color:var(--clay); color:var(--clay);}
 .cm-cell.q{color:#d6453f; font-weight:700;}
 .cm-cell.x{box-shadow:inset 0 0 0 2px #d6453f;}
-.mx-combo{color:#fff; font-size:13px; font-weight:700; padding:5px 10px; border-radius:999px; background:rgba(255,255,255,.12); white-space:nowrap; margin-right:6px;}
-.mx-combo.hot{background:#c06a3a;} .mx-combo.fail{background:rgba(214,69,63,.85);} .mx-combo small{opacity:.75; font-weight:600;}
+.mx-away{color:#fff; font-size:12.5px; font-weight:700; padding:5px 10px; border-radius:999px; background:rgba(255,255,255,.12); white-space:nowrap; margin-right:6px;}
+.mx-away.warn{background:#c06a3a;}
+@media(max-width:480px){.mx-top>div:first-child{min-width:0; flex:1 1 auto;} .mx-top .mx-ttl{max-width:none;} .mx-away{font-size:11px; padding:4px 7px; margin-right:0;} .mx-away ~ .mx-clock{font-size:20px; margin-left:0;} .mx-top .mx-sub{flex:none;}}
+.pc-away{margin-top:8px; font-size:13px; color:var(--muted);} .pc-away b{color:var(--navy);} .pc-away.warn{color:#b3261e;} .pc-away.warn b{color:#b3261e;}
+.pc-sep{color:var(--muted); margin:0 4px;}
 .pc-toast{margin:10px 12px 0; padding:9px 14px; border-radius:10px; background:#fff4e5; color:#7a4a12; font-size:13.5px; font-weight:600;}
 .pc-card .pc-head{display:flex; align-items:center; gap:12px; justify-content:space-between; flex-wrap:wrap;}
 .pc-big{font-size:18px;} .pc-big b{font-size:24px; color:var(--navy);}
@@ -4310,29 +4313,9 @@ function hwSum(logs) {
            rate: tried ? Math.round((ok / tried) * 100) : null };
 }
 
-// ===== 조각 — 과제 집중 보상 (2026-10-11) =====
-// 볼트 «20 작업/조각 보상 — 과제 집중 설계.md». 조각 · 상자는 **전부 서버**(api/exam.js PC · hwFocus · pcAdd · pcOpen).
-// 여기 숫자는 풀기 화면의 «콤보» 표시용 — 서버 PC 와 같게 둔다(다르면 화면과 실제 조각이 어긋난다)
-const PCC = { shortSec: 30, shortFree: 2, failSec: 300, pzKeep: 300, idle: 300, tiers: [[2400, 20], [1200, 15], [600, 12]] };
-function hwFocusLive(ev, now) {
-  let combo = 0, lastT = 0, lastAct = 0, shortUsed = 0, hides = 0, failed = false;
-  const adv = (t) => { if (t > lastT) { combo += Math.max(0, Math.min(t, lastAct + PCC.idle) - lastT); lastT = t; } };
-  for (const e of ev || []) {
-    adv(e.t);
-    if (e.k === "go" || e.k === "ans") lastAct = Math.max(lastAct, e.t);
-    else if (e.k === "away") {
-      hides++; if (e.s > PCC.failSec) failed = true;
-      if (e.s <= PCC.shortSec && shortUsed < PCC.shortFree) shortUsed++; else combo = 0;
-      lastT = Math.max(lastT, e.r || e.t); lastAct = lastT;
-    } else if (e.k === "pz") { if (e.s > PCC.pzKeep) combo = 0; lastAct = Math.max(lastAct, e.t); }
-  }
-  if (now != null) adv(now);
-  const mult = failed ? 10 : (PCC.tiers.find(([s]) => combo >= s) || [0, 10])[1];
-  const nx = PCC.tiers.slice().reverse().find(([s]) => combo < s);
-  return { combo, mult, failed, hides, shortLeft: Math.max(0, PCC.shortFree - shortUsed), idle: now != null && now - lastAct > PCC.idle,
-           next: !failed && nx ? { left: nx[0] - combo, mult: nx[1] } : null };
-}
-const pcFmt = (x) => String(Math.round(Number(x) || 0) / 10);
+// ===== 조각 — 과제 보상 (설계 확정 2026-10-12) =====
+// 볼트 «20 작업/조각 보상 — 과제 집중 설계.md». 조각 · 이탈 · 구슬은 **전부 서버**(api/exam.js PC · hwPieces · hwAway · pcOpen).
+// 처음 맞힘 1 · 다시 맞힘 1 · 번호 순 5연속 +1 · 이탈(5초 넘게) 하루 3번째마다 −10 · 조각 20 = 구슬 1
 async function pcApi(body) {
   const u = firebase.auth().currentUser;
   if (!u) throw new Error("로그인이 풀렸어요. 다시 들어와 주세요.");
@@ -4341,56 +4324,86 @@ async function pcApi(body) {
   if (!r.ok) throw new Error(j.error || "요청 실패 (" + r.status + ")");
   return j;
 }
-// 학생 «과제» 탭 맨 위 — 모은 조각 · 상자 열기 · 받을 상품 · 확률
+// 이탈은 돌아온 순간 서버로 보낸다(제출 때 몰아 보내면 «그만두기» 로 기록이 사라진다).
+// 못 보냈으면(인터넷) 이 기기에 쌓아 두고 다음에 — aid 가 있어 서버가 두 번 세지 않는다
+const pcAwayKey = (cid, sid) => "climath_pc_away_" + cid + "_" + sid;
+function pcAwayQueue(cid, sid) { try { return JSON.parse(localStorage.getItem(pcAwayKey(cid, sid)) || "[]"); } catch (e) { return []; } }
+function pcAwaySave(cid, sid, q) { try { localStorage.setItem(pcAwayKey(cid, sid), JSON.stringify(q.slice(-50))); } catch (e) {} }
+async function pcAwayFlush(cid, sid) {
+  const out = [];
+  let q = pcAwayQueue(cid, sid);
+  while (q.length) {
+    let r;
+    try { r = await pcApi({ action: "hwAway", cid, sid, ...q[0] }); } catch (e) { break; }
+    out.push(r); q = q.slice(1); pcAwaySave(cid, sid, q);
+  }
+  return out;
+}
+// 학생 «과제» 탭 맨 위 — 조각 · 구슬 · 오늘 이탈 · 받을 상품 · 확률
 function PieceCard({ cls, me, ver }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const [got, setGot] = useState(null);    // 방금 뽑은 것 — {prize} 또는 {rolling:true}
+  const [got, setGot] = useState(null);    // {rolling} · {prize} · {soldOut}
   const [odds, setOdds] = useState(false);
   const load = () => pcApi({ action: "pcMe", cid: cls.id, sid: me.id }).then((j) => { setD(j); setErr(""); }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); }, [cls.id, me.id, ver]);
+  useEffect(() => { pcAwayFlush(cls.id, me.id).finally(load); }, [cls.id, me.id, ver]);
   async function open() {
     if (busy) return;
     setBusy(true); setGot({ rolling: true });
     try {
-      const [j] = await Promise.all([pcApi({ action: "pcOpen", cid: cls.id, sid: me.id }), new Promise((ok) => setTimeout(ok, 1100))]);
-      setGot({ prize: j.prize }); load();
+      const [j] = await Promise.all([pcApi({ action: "pcOpen", cid: cls.id, sid: me.id }), new Promise((ok) => setTimeout(ok, 1200))]);
+      setGot(j.soldOut ? { soldOut: j.soldOut } : { prize: j.prize }); load();
     } catch (e) { setGot(null); alert(e.message); }
     setBusy(false);
   }
   if (err) return <div className="cm-card cm-hint">조각을 불러오지 못했어요 — {err}</div>;
-  if (!d) return null;
-  const R = d.rules, cost = R.cost, wait = (d.prizes || []).filter((p) => !p.given);
-  const pct = Math.min(100, Math.round(d.bal / cost * 100));
+  if (!d || !d.on) return null;
+  const R = d.rules, marbles = Math.floor(d.bal / R.cost), left = d.bal % R.cost, wait = (d.prizes || []).filter((p) => !p.given);
   return (
     <div className="cm-card pc-card">
       <div className="pc-head">
-        <div><div className="pc-big">🧩 조각 <b>{pcFmt(d.bal)}</b>개</div>
-          <div className="cm-hint">오늘 {pcFmt(d.today)} / {pcFmt(R.dayCap)}개 · 지금까지 연 상자 {d.opened}개</div></div>
-        <button className="cm-btn cm-btn-primary pc-open" disabled={busy || d.bal < cost} onClick={open}>상자 열기<small>조각 {pcFmt(cost)}개</small></button>
+        <div>
+          <div className="pc-big">🧩 조각 <b>{d.bal}</b>개 <span className="pc-sep">·</span> 🔮 구슬 <b>{marbles}</b>개</div>
+          <div className="cm-hint">다음 구슬까지 조각 {R.cost - left}개 · 지금까지 연 구슬 {d.opened}개</div>
+        </div>
+        <button className="cm-btn cm-btn-primary pc-open" disabled={busy || marbles < 1} onClick={open}>구슬 열기<small>조각 {R.cost}개</small></button>
       </div>
-      <div className="pc-bar"><i style={{width: pct + "%"}} /></div>
+      <div className="pc-bar"><i style={{width: Math.round(left / R.cost * 100) + "%"}} /></div>
+      <div className={"pc-away" + (d.awayN === R.awayEvery - 1 ? " warn" : "")}>오늘 이탈 <b>{d.awayN} / {R.awayEvery}</b>{d.awayTot > d.awayN ? <span> (오늘 모두 {d.awayTot}번)</span> : null} — {R.awayEvery}번째면 조각 {R.awayPen}개가 빠져요</div>
       {wait.length > 0 && <div className="pc-wait">받을 상품 — {wait.map((p) => <span key={p.pid} className="pc-chip">{p.name}</span>)} <span className="cm-hint">선생님께 받아요</span></div>}
       <div className="cm-hint" style={{lineHeight: 1.7, marginTop: 8}}>
-        답을 적어 낸 문제 하나에 조각 {pcFmt(R.per)}개. <b>화면을 떠나지 않고 이어 풀면</b> 10분 ×1.2 · 20분 ×1.5 · 40분 <b>×2</b>.
-        다른 앱으로 가거나 화면이 꺼지면 배율이 <b>처음부터</b>예요({R.shortSec}초 안에 돌아오면 {R.shortFree}번까지 봐줘요).
-        틀린 문제를 다시 풀어 맞히면 {pcFmt(R.retry)}개. 하루 {pcFmt(R.dayCap)}개까지.
-        {" "}<button className="cm-link" style={{fontSize: "inherit"}} onClick={() => setOdds((v) => !v)}>{odds ? "확률 닫기" : "상자 확률 보기"}</button>
+        처음에 맞히면 조각 <b>1개</b> · 틀린 문제를 다시 풀어 맞혀도 <b>1개</b> · 번호 순서로 <b>{R.streak}문제 연속</b> 맞히면 <b>+1</b>. 조각 {R.cost}개가 모이면 구슬 하나 — 열면 기프티콘이 나올 수도 있어요.
+        풀기 화면을 떠나면(다른 앱 · 홈 · 화면 꺼짐) 기록돼요. {R.awayMin}초까지는 괜찮고, 하루에 {R.awayEvery}번째마다 조각 {R.awayPen}개가 빠져요.
+        {" "}<button className="cm-link" style={{fontSize: "inherit"}} onClick={() => setOdds((v) => !v)}>{odds ? "확률 닫기" : "구슬 확률 보기"}</button>
       </div>
       {odds && (d.items.length ? (
         <div className="mx-tw" style={{marginTop: 6}}><table className="mx-table">
-          <thead><tr><th style={{textAlign: "left"}}>상품</th><th>확률</th></tr></thead>
-          <tbody>{d.items.map((x) => <tr key={x.id}><td style={{textAlign: "left"}}>{x.name}</td><td>{x.out ? "다 나감" : x.pct + "%"}</td></tr>)}</tbody>
-        </table></div>) : <div className="cm-hint">아직 상자에 든 상품이 없어요</div>)}
+          <thead><tr><th style={{textAlign: "left"}}>나오는 것</th><th>확률</th></tr></thead>
+          <tbody>
+            {d.items.map((x) => <tr key={x.id}><td style={{textAlign: "left"}}>{x.name}{x.out ? <small className="cm-hint"> (지금 재고 없음)</small> : null}</td><td>{x.pct}%</td></tr>)}
+            <tr><td style={{textAlign: "left"}}>꽝</td><td>{d.blank}%</td></tr>
+          </tbody>
+        </table></div>) : <div className="cm-hint">아직 구슬에 든 상품이 없어요</div>)}
       {got && (
         <div className="mx-modal"><div className="box" style={{textAlign: "center"}}>
-          {got.rolling ? <div className="pc-roll">🎁</div> : (<>
-            <div className="pc-roll done">🎉</div>
-            <h4 style={{margin: "6px 0 4px"}}>{got.prize.name}</h4>
-            <div className="cm-hint">선생님께 받아요</div>
-            <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => setGot(null)}>확인</button>
-          </>)}
+          {got.rolling ? <div className="pc-roll">🔮</div>
+            : got.soldOut ? (<>
+              <div className="pc-roll done">📦</div>
+              <h4 style={{margin: "6px 0 4px"}}>«{got.soldOut}» 이 나왔는데 지금 재고가 없어요</h4>
+              <div className="cm-hint">구슬은 그대로 있어요. 나중에 다시 열어 주세요.</div>
+              <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => setGot(null)}>확인</button>
+            </>) : got.prize.blank ? (<>
+              <div className="pc-roll done">💨</div>
+              <h4 style={{margin: "6px 0 4px"}}>꽝</h4>
+              <div className="cm-hint">다음 구슬엔 나올 거예요</div>
+              <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => setGot(null)}>확인</button>
+            </>) : (<>
+              <div className="pc-roll done">🎉</div>
+              <h4 style={{margin: "6px 0 4px"}}>{got.prize.name}</h4>
+              <div className="cm-hint">선생님께 받아요</div>
+              <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => setGot(null)}>확인</button>
+            </>)}
         </div></div>
       )}
     </div>
@@ -4418,9 +4431,36 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
   const [ask, setAsk] = useState(false);
   const [away, setAway] = useState(null);   // {from, to} — 화면을 오래 안 본 동안. 있으면 물어본다
   const [err, setErr] = useState("");
-  const [toast, setToast] = useState(null);   // 이탈하고 돌아왔을 때 한 줄 — 콤보가 끊겼는지 봐줬는지
+  const [toast, setToast] = useState(null);   // 이탈하고 돌아왔을 때 한 줄
   const toastT = useRef(null);
-  const say = (m) => { setToast(m); clearTimeout(toastT.current); toastT.current = setTimeout(() => setToast(null), 5000); };
+  const say = (m) => { setToast(m); clearTimeout(toastT.current); toastT.current = setTimeout(() => setToast(null), 6000); };
+  // 조각 — 이 반이 대상이면 «오늘 이탈 n/3» 을 띄우고, 떠났다 돌아오면 바로 서버에 적는다(선생님 모드는 안 셈)
+  const [pc, setPc] = useState(null);   // {on, awayN, rules}
+  const pcRef = useRef(null); pcRef.current = pc;
+  useEffect(() => {
+    if (me.teacher) return;
+    pcApi({ action: "pcMe", cid: cls.id, sid: me.id }).then((j) => {
+      if (!j.on) { setPc({ on: false }); pcAwaySave(cls.id, me.id, []); return; }
+      const p = { on: true, awayN: j.awayN, rules: j.rules };
+      setPc(p); pcRef.current = p;
+      if (pcAwayQueue(cls.id, me.id).length) sendAways(p);   // 앱이 닫혔다 열린 사이의 이탈 · 못 보낸 것
+    }).catch(() => {});
+  }, []);
+  // 떠났다 돌아온 것을 쌓고 보낸다. 조각을 쓰는 반인지 아직 모르면(막 열었을 때) 쌓아만 두고, 위에서 알게 되면 보낸다
+  async function reportAway(s, q, book) {
+    const p = pcRef.current;
+    if (me.teacher || (p && !p.on) || s <= (p ? p.rules.awayMin : 5)) return;
+    pcAwaySave(cls.id, me.id, [...pcAwayQueue(cls.id, me.id), { aid: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), s, q, book }]);
+    if (p) sendAways(p);
+  }
+  async function sendAways(p) {
+    const rs = await pcAwayFlush(cls.id, me.id);
+    if (!rs.length) { say("화면을 떠난 게 기록됐어요(인터넷이 되면 보내요)"); return; }
+    const last = rs[rs.length - 1], hit = rs.find((x) => x.hit);
+    setPc((o) => ({ ...(o || p), awayN: last.n }));
+    say(hit ? "오늘 이탈 " + p.rules.awayEvery + "번째 — " + (hit.lost ? "조각 " + hit.lost + "개가 빠졌어요" : "조각이 없어서 빠진 건 없어요") + ". 다시 1부터 세요"
+            : "화면을 떠난 게 기록됐어요 — 오늘 " + last.n + " / " + p.rules.awayEvery + " (" + p.rules.awayEvery + "번째면 조각 −" + p.rules.awayPen + ")");
+  }
   const [, setTick] = useState(0);
   const busy = useRef(false);
 
@@ -4468,23 +4508,15 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
   function resume() {
     const x = sRef.current; if (!x || !x.pzAt) return;
     const s = Math.round((Date.now() - x.pzAt) / 1000);
-    // 쉬기도 기록한다(조각 — 5분 넘게 쉬면 콤보가 처음부터). nowT 는 쉬는 동안 멈춰 있으니 쉬기 시작한 때다
+    // 쉬기도 ev 에 남긴다(쉰 동안 떠난 건 이탈로 안 센다 — 쉬는 중엔 hiddenAt 을 안 찍는다)
     put({ ...x, pausedMs: (x.pausedMs || 0) + (Date.now() - x.pzAt), pzAt: null, ev: [...x.ev, { t: nowT(x), k: "pz", s }] });
-    if (!x.retry && s > PCC.pzKeep && hwFocusLive(x.ev, nowT(x)).combo > 0) say("5분 넘게 쉬어서 콤보가 처음부터예요");
   }
-  // 이탈 — 풀기 화면을 떠났다 돌아옴. 조각 배율에 쓴다(서버 hwFocus). 2초 안 되는 깜빡임은 안 친다
+  // 이탈 — 풀기 화면을 떠났다 돌아옴. 기록(ev)에도 남긴다(2초 안 되는 깜빡임은 빼고). 조각 셈은 서버 hwAway(reportAway)
   function awayEv(x, gap, rested) {
     const tH = x.hiddenT != null ? x.hiddenT : nowT(x);
     const y = { ...x, hiddenAt: null, hiddenT: null, ...(rested ? { pausedMs: (x.pausedMs || 0) + gap * 1000 } : {}) };
     if (gap < 2) return y;
-    const before = hwFocusLive(x.ev, tH);
-    y.ev = [...x.ev, { t: tH, k: "away", r: rested ? tH : nowT(y), s: Math.round(gap) }];
-    if (!x.retry) {
-      const after = hwFocusLive(y.ev, null);
-      if (after.failed && !before.failed) say("5분 넘게 떠나서 이번 회차는 «집중 실패» — 배율 없이 세요");
-      else if (before.combo > 0 && after.combo === 0) say("화면을 떠나서 콤보가 처음부터예요");
-      else if (after.combo > 0) say("짧게 떠난 건 봐줬어요 — 남은 봐주기 " + after.shortLeft + "번");
-    }
+    y.ev = [...x.ev, { t: tH, k: "away", r: rested ? tH : nowT(y), s: Math.round(gap), q: x.cur }];
     return y;
   }
   async function submit() {
@@ -4528,6 +4560,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
       const x = sRef.current; if (!x || !x.hiddenAt) return;
       const gap = (Date.now() - x.hiddenAt) / 1000;
       if (x.pzAt || x.endT != null) { put({ ...x, hiddenAt: null, hiddenT: null }); return; }
+      reportAway(Math.round(gap), x.cur, x.bookId);   // 쉬었다고 답해도 떠난 건 떠난 것 — 묻기 전에 바로 적는다
       if (gap < HW_AWAY) { put(awayEv(x, gap, false)); return; }
       setAway({ from: x.hiddenAt, to: Date.now() });
     };
@@ -4597,12 +4630,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
     <div className="mx-run">
       <div className="mx-top">
         <div><div className="mx-who">{me.name}</div><div className="mx-ttl">{S.title}{S.retry ? " · 틀린 문제 다시" : ""}</div></div>
-        {!S.retry && (() => {
-          const F = hwFocusLive(S.ev, frozen ? null : nowT(S));
-          return <div className={"mx-combo" + (F.mult > 10 ? " hot" : "") + (F.failed ? " fail" : "")}
-            title={F.failed ? "5분 넘게 떠나서 이번 회차는 배율 없이" : F.next ? "이어 풀면 " + Math.ceil(F.next.left / 60) + "분 뒤 ×" + F.next.mult / 10 : "최고 배율"}>
-            {F.failed ? "집중 실패" : <>🔥 {Math.floor(F.combo / 60)}분 <b>×{F.mult / 10}</b></>}{F.idle && !F.failed ? <small> 멈춤</small> : null}</div>;
-        })()}
+        {pc && pc.on && <div className={"mx-away" + (pc.awayN === pc.rules.awayEvery - 1 ? " warn" : "")} title={"풀기 화면을 떠나면 기록돼요 — 하루 " + pc.rules.awayEvery + "번째마다 조각 −" + pc.rules.awayPen}>이탈 {pc.awayN}/{pc.rules.awayEvery}</div>}
         <div className="mx-clock" title="쉰 시간은 빼고 센다">{mxClock(nowT(S))}</div>
         <button className="mx-sub" style={{background: "transparent", color: "#fff", border: "1.5px solid rgba(255,255,255,.6)"}} disabled={frozen} onClick={pause}>쉬기</button>
         <button className="mx-sub" disabled={frozen || (S.all && !answered.length)} onClick={() => setAsk(true)}>제출</button>
@@ -4731,11 +4759,11 @@ function HwResult({ log: log0, book, onBack, onRetry, canSelf }) {
         <div><div className="v s">{mxHm(log.endT || 0)}</div><div className="l">푼 시간{log.pausedSec ? " (쉰 " + mxHm(log.pausedSec) + " 뺌)" : ""}</div></div>
         {avg ? <div><div className="v s">{mxHm(avg)}</div><div className="l">문제당</div></div> : null}
       </div>
-      {log.focus && (
-        <div className="pc-line">
-          {log.teacher ? <>선생님 모드 — 조각 없음</> : <>🧩 조각 <b>+{pcFmt(log.pieces || 0)}</b>{log.capped ? " (오늘 상한까지)" : ""}</>}
-          <span> · 이탈 {log.focus.hides}번{log.focus.failed ? " · 집중 실패(배율 없음)" : ""} · 가장 길게 이어 푼 {Math.floor((log.focus.maxCombo || 0) / 60)}분</span>
-        </div>
+      {log.pieces && !log.teacher && (
+        (() => {   // 낸 때 받은 것 + 다시 맞힘 + 스스로 채점 O — 서버 장부와 같은 셈
+          const fx = log.fixed || 0, sf = (log.questions || []).filter((q) => q.self && q.auto === true).length;
+          return <div className="pc-line">🧩 조각 <b>+{log.pieces.pts + fx + sf}</b><span> · 처음 맞힘 {log.pieces.first}{log.pieces.streaks ? " · 5연속 " + log.pieces.streaks + "번" : ""}{fx ? " · 다시 맞힘 " + fx : ""}{sf ? " · 스스로 채점 O " + sf : ""}{rows.some(hwWrong) ? " · 틀린 문제는 다시 풀어 맞히면 1개씩" : ""}</span></div>;
+        })()
       )}
       {onRetry && wrong.length > 0 && (
         <button className="cm-btn cm-btn-primary" style={{marginBottom: 12}} onClick={() => onRetry(log, wrong)}>틀린 {wrong.length}문제 다시 풀기</button>
@@ -4884,84 +4912,109 @@ function HwTab({ cls, me, home, onChanged }) {
   </>);
 }
 
-// 선생님 — 조각 장부 · 받을 상품 지급 · 손 조정 · 상품표(세 반 공통)
+// 선생님 — 조각 장부 · 이탈 기록 · 받을 상품 지급 · 손 조정 · 구슬 상품표(대상 반 공통)
 function PieceBoard({ cls }) {
   const [rows, setRows] = useState(null);
+  const [on, setOn] = useState(true);
+  const [rules, setRules] = useState(null);
   const [err, setErr] = useState("");
   const [items, setItems] = useState(null);   // 상품표 고치는 중
+  const [openSid, setOpenSid] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = () => pcApi({ action: "pcBoard", cid: cls.id }).then((j) => { setRows(j.rows); setErr(""); }).catch((e) => setErr(e.message));
+  const load = () => pcApi({ action: "pcBoard", cid: cls.id }).then((j) => { setRows(j.rows); setOn(j.on); setRules(j.rules); setErr(""); }).catch((e) => setErr(e.message));
   useEffect(() => { setRows(null); load(); }, [cls.id]);
+  if (!on) return <div className="cm-card cm-hint">🧩 조각 — 이 반은 아직 안 써요 (이번 기말: 고1S · 고1자사고반)</div>;
   const kids = (cls.roster || []).filter((r) => r && r.id && r.name && !r.teacher && !isEnded(r));
   const byId = {}; (rows || []).forEach((x) => { byId[x.sid] = x; });
-  async function act(body, msg) {
+  async function act(body) {
     if (busy) return; setBusy(true);
     try { await pcApi({ cid: cls.id, ...body }); await load(); } catch (e) { alert(e.message); }
     setBusy(false);
   }
   function adjust(r) {
-    const v = prompt(r.name + " — 조각을 몇 개 더할까요? (빼려면 -2 처럼, 0.5 단위도 돼요)");
+    const v = prompt(r.name + " — 조각을 몇 개 더할까요? (빼려면 -5 처럼)");
     if (v == null || v.trim() === "") return;
-    const n = Number(v); if (!isFinite(n) || !n) { alert("숫자로 적어 주세요"); return; }
+    const n = Math.round(Number(v)); if (!isFinite(n) || !n) { alert("숫자로 적어 주세요"); return; }
     const why = prompt("까닭 (학생 장부에 남아요)", "") || "";
-    act({ action: "pcAdjust", sid: r.id, name: r.name, delta: Math.round(n * 10), why });
+    act({ action: "pcAdjust", sid: r.id, name: r.name, delta: n, why });
   }
   async function editItems() {
-    try { const j = await pcApi({ action: "pcItemsGet" }); setItems(j.items.map((x) => ({ ...x, stock: x.stock == null ? "" : String(x.stock), w: String(x.w) }))); }
+    try { const j = await pcApi({ action: "pcItemsGet" }); setItems(j.items.map((x) => ({ ...x, pct: String(x.pct), price: x.price ? String(x.price) : "", stock: x.stock == null ? "" : String(x.stock) }))); }
     catch (e) { alert(e.message); }
   }
   async function saveItems() {
     if (busy) return; setBusy(true);
-    try { await pcApi({ action: "pcItemsSet", items: items.filter((x) => x.name.trim()).map((x) => ({ id: x.id, name: x.name, w: Number(x.w) || 0, stock: x.stock === "" ? null : Number(x.stock) })) }); setItems(null); }
+    try { await pcApi({ action: "pcItemsSet", items: items.filter((x) => x.name.trim()).map((x) => ({ id: x.id, name: x.name, pct: Number(x.pct) || 0, price: Number(x.price) || 0, stock: x.stock === "" ? null : Number(x.stock) })) }); setItems(null); }
     catch (e) { alert(e.message); }
     setBusy(false);
   }
-  const wsum = (items || []).filter((x) => Number(x.w) > 0 && (x.stock === "" || Number(x.stock) > 0)).reduce((s, x) => s + Number(x.w), 0);
   const setIt = (i, k, v) => setItems(items.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+  const psum = (items || []).reduce((s, x) => s + (Number(x.pct) || 0), 0);
+  const money = (items || []).reduce((s, x) => s + (Number(x.price) || 0) * (x.stock === "" ? 0 : Number(x.stock) || 0), 0);
+  const ev = (items || []).reduce((s, x) => s + (Number(x.pct) || 0) / 100 * (Number(x.price) || 0), 0);
+  const won = (n) => Math.round(n).toLocaleString("ko-KR") + "원";
+  const tm = (ms) => { const d = new Date(ms); return (d.getMonth() + 1) + "/" + d.getDate() + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
   return (<>
     <div className="cm-card">
-      <h3 className="cm-h3">🧩 조각 <span className="cm-h-hint">(과제 집중 보상 · 상자 = 조각 10개)</span></h3>
+      <h3 className="cm-h3">🧩 조각 <span className="cm-h-hint">(구슬 = 조각 {rules ? rules.cost : 20}개 · 이름을 누르면 이탈 기록)</span></h3>
       {err ? <div className="cm-err">{err}</div> : rows === null ? <div className="cm-empty">불러오는 중…</div> : (
         <div className="mx-tw"><table className="mx-table">
-          <thead><tr><th style={{textAlign: "left"}}>이름</th><th>조각</th><th>오늘</th><th>모은 것</th><th>연 상자</th><th style={{textAlign: "left"}}>받을 상품</th><th></th></tr></thead>
-          <tbody>{kids.map((r) => { const x = byId[r.id] || { bal: 0, today: 0, earned: 0, opened: 0, prizes: [] }; const wait = (x.prizes || []).filter((p) => !p.given);
+          <thead><tr><th style={{textAlign: "left"}}>이름</th><th>조각</th><th>구슬</th><th>모은 조각</th><th>연 구슬</th><th>오늘 이탈</th><th style={{textAlign: "left"}}>받을 상품</th><th></th></tr></thead>
+          <tbody>{kids.map((r) => { const x = byId[r.id] || { bal: 0, earned: 0, opened: 0, awayN: 0, awayTot: 0, aways: [], prizes: [] };
+            const wait = (x.prizes || []).filter((p) => !p.given), cost = rules ? rules.cost : 20;
             return (
-              <tr key={r.id}>
-                <td style={{textAlign: "left", whiteSpace: "nowrap"}}>{r.name}</td>
-                <td><b>{pcFmt(x.bal)}</b></td><td>{x.today ? pcFmt(x.today) : ""}</td><td>{x.earned ? pcFmt(x.earned) : ""}</td><td>{x.opened || ""}</td>
-                <td style={{textAlign: "left"}}>{wait.map((p) => (
-                  <button key={p.pid} className="pc-chip go" disabled={busy} title="눌러서 «줬음»"
-                    onClick={() => confirm(r.name + " — «" + p.name + "» 줬나요?") && act({ action: "pcGive", sid: r.id, pid: p.pid })}>{p.name} ✓</button>))}</td>
-                <td><button className="cm-link" disabled={busy} onClick={() => adjust(r)}>± 조정</button></td>
-              </tr>
+              <React.Fragment key={r.id}>
+                <tr className={(x.aways || []).length ? "go" : ""} onClick={() => setOpenSid(openSid === r.id ? "" : r.id)}>
+                  <td style={{textAlign: "left", whiteSpace: "nowrap"}}>{r.name}</td>
+                  <td><b>{x.bal}</b></td><td>{Math.floor(x.bal / cost) || ""}</td><td>{x.earned || ""}</td><td>{x.opened || ""}</td>
+                  <td style={{color: x.awayTot ? "#b3261e" : undefined, fontWeight: x.awayTot ? 700 : undefined}}>{x.awayTot || ""}</td>
+                  <td style={{textAlign: "left"}} onClick={(e) => e.stopPropagation()}>{wait.map((p) => (
+                    <button key={p.pid} className="pc-chip go" disabled={busy} title="눌러서 «줬음»"
+                      onClick={() => confirm(r.name + " — «" + p.name + "» 줬나요?") && act({ action: "pcGive", sid: r.id, pid: p.pid })}>{p.name} ✓</button>))}</td>
+                  <td onClick={(e) => e.stopPropagation()}><button className="cm-link" disabled={busy} onClick={() => adjust(r)}>± 조정</button></td>
+                </tr>
+                {openSid === r.id && (
+                  <tr style={{background: "#f7f4ee"}}><td colSpan={8} style={{textAlign: "left", fontSize: 12.5, lineHeight: 1.7}}>
+                    {(x.aways || []).length ? (x.aways || []).slice().reverse().map((a) => (
+                      <div key={a.aid || a.t}>{tm(a.t)} · {mxHm(a.s)} 떠남{a.q ? " · " + a.q + "번 풀다가" : ""} · 그날 {a.k}번째{a.pen != null ? <b style={{color: "#b3261e"}}> · 조각 −{a.pen}</b> : null}</div>
+                    )) : <span className="cm-hint">이탈 기록 없음</span>}
+                  </td></tr>
+                )}
+              </React.Fragment>
             ); })}</tbody>
         </table></div>
       )}
-      <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.6}}>받을 상품을 누르면 «줬음» 으로 지워져요. 숫자는 조각 개수(0.1 단위).</div>
+      <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.6}}>받을 상품을 누르면 «줬음» 으로 지워져요. 이탈 = 풀기 화면을 {rules ? rules.awayMin : 5}초 넘게 떠남(다른 앱 · 홈 · 화면 꺼짐) — 어느 앱으로 갔는지는 몰라요.</div>
     </div>
     <div className="cm-card">
-      <h3 className="cm-h3">상자 상품 · 확률 <span className="cm-h-hint">(세 반 공통 · 학생은 확률을 볼 수 있어요)</span></h3>
+      <h3 className="cm-h3">구슬 상품 · 확률 <span className="cm-h-hint">(대상 반 공통 · 학생은 확률을 볼 수 있어요)</span></h3>
       {!items ? <button className="cm-btn cm-btn-ghost" onClick={editItems}>상품표 열기</button> : (<>
         <div className="mx-tw"><table className="mx-table">
-          <thead><tr><th style={{textAlign: "left"}}>상품</th><th>가중치</th><th>재고 <small>(빈칸 = 무제한)</small></th><th>확률</th><th></th></tr></thead>
-          <tbody>{items.map((x, i) => { const live = Number(x.w) > 0 && (x.stock === "" || Number(x.stock) > 0);
-            return (
-              <tr key={x.id || "n" + i}>
-                <td><input className="cm-input" style={{margin: 0}} value={x.name} placeholder="예: 젤리" onChange={(e) => setIt(i, "name", e.target.value)} /></td>
-                <td><input className="cm-input" style={{margin: 0, width: 70}} inputMode="numeric" value={x.w} onChange={(e) => setIt(i, "w", e.target.value.replace(/[^\d.]/g, ""))} /></td>
-                <td><input className="cm-input" style={{margin: 0, width: 70}} inputMode="numeric" value={x.stock} onChange={(e) => setIt(i, "stock", e.target.value.replace(/\D/g, ""))} /></td>
-                <td>{live && wsum ? Math.round(Number(x.w) / wsum * 1000) / 10 + "%" : "–"}</td>
-                <td><button className="cm-link" onClick={() => setItems(items.filter((_, j) => j !== i))}>빼기</button></td>
-              </tr>
-            ); })}</tbody>
+          <thead><tr><th style={{textAlign: "left"}}>상품</th><th>값(원)</th><th>확률(%)</th><th>재고 <small>(빈칸 = 무제한)</small></th><th>재고 금액</th><th></th></tr></thead>
+          <tbody>{items.map((x, i) => (
+            <tr key={x.id || "n" + i}>
+              <td><input className="cm-input" style={{margin: 0}} value={x.name} placeholder="예: 편의점 1천원권" onChange={(e) => setIt(i, "name", e.target.value)} /></td>
+              <td><input className="cm-input" style={{margin: 0, width: 80}} inputMode="numeric" value={x.price} onChange={(e) => setIt(i, "price", e.target.value.replace(/\D/g, ""))} /></td>
+              <td><input className="cm-input" style={{margin: 0, width: 70}} inputMode="decimal" value={x.pct} onChange={(e) => setIt(i, "pct", e.target.value.replace(/[^\d.]/g, ""))} /></td>
+              <td><input className="cm-input" style={{margin: 0, width: 70}} inputMode="numeric" value={x.stock} onChange={(e) => setIt(i, "stock", e.target.value.replace(/\D/g, ""))} /></td>
+              <td>{x.price && x.stock !== "" ? won(Number(x.price) * Number(x.stock)) : ""}</td>
+              <td><button className="cm-link" onClick={() => setItems(items.filter((_, j) => j !== i))}>빼기</button></td>
+            </tr>
+          ))}
+          <tr><td style={{textAlign: "left"}}>꽝</td><td></td><td style={{color: psum > 100 ? "#d6453f" : undefined, fontWeight: 700}}>{Math.round((100 - psum) * 100) / 100}</td><td></td><td></td><td></td></tr>
+          </tbody>
         </table></div>
+        <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.7}}>
+          당첨 <b>{Math.round(psum * 100) / 100}%</b> · 재고 다 나가면 <b>{won(money)}</b> · 구슬 하나 기댓값 {won(ev)}
+          {psum > 100 ? <b style={{color: "#d6453f"}}> — 확률 합이 100% 를 넘어요</b> : null}<br />
+          재고가 0인 상품이 뽑히면 구슬을 안 쓰고 «나중에 다시 열어 주세요» 가 떠요(확률은 그대로).
+        </div>
         <div style={{display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap"}}>
-          <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} onClick={() => setItems([...items, { id: "", name: "", w: "10", stock: "" }])}>+ 상품</button>
+          <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} onClick={() => setItems([...items, { id: "", name: "", price: "", pct: "", stock: "" }])}>+ 상품</button>
           <span style={{flex: 1}} />
           <button className="cm-btn cm-btn-ghost" style={{marginTop: 0}} onClick={() => setItems(null)}>닫기</button>
-          <button className="cm-btn cm-btn-primary" style={{marginTop: 0}} disabled={busy} onClick={saveItems}>저장</button>
+          <button className="cm-btn cm-btn-primary" style={{marginTop: 0}} disabled={busy || psum > 100} onClick={saveItems}>저장</button>
         </div>
-        <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.6}}>확률 = 가중치 ÷ 가중치 합. 재고가 0이 되면 그 상품은 안 나오고 나머지끼리 다시 나눠요. 상품이 하나도 없으면 학생이 상자를 못 열어요.</div>
       </>)}
     </div>
   </>);
@@ -5040,7 +5093,7 @@ function HwBoard({ cls }) {
       <div className="cm-card">
         <h3 className="cm-h3">학생별 <span className="cm-h-hint">(이름을 누르면 낸 것 목록)</span></h3>
         <div className="mx-tw"><table className="mx-table">
-          <thead><tr><th style={{textAlign: "left"}}>이름</th><th>낸 횟수</th><th>푼 문제</th><th>처음 정답률</th><th>안 적음</th><th>다시 맞힘</th><th>푼 시간</th><th>문제당</th><th>이탈</th><th>마지막</th></tr></thead>
+          <thead><tr><th style={{textAlign: "left"}}>이름</th><th>낸 횟수</th><th>푼 문제</th><th>처음 정답률</th><th>안 적음</th><th>다시 맞힘</th><th>푼 시간</th><th>문제당</th><th>마지막</th></tr></thead>
           <tbody>{per.map(({ r, mine, s, last }) => (
             <React.Fragment key={r.id}>
               <tr className={mine.length ? "go" : ""} onClick={() => mine.length && setOpenSid(openSid === r.id ? "" : r.id)}>
@@ -5049,11 +5102,8 @@ function HwBoard({ cls }) {
                   <td>{mine.length}</td><td>{s.n}</td>
                   <td><b style={{color: s.rate != null && s.rate < 60 ? "#d6453f" : undefined}}>{s.rate == null ? "–" : s.rate + "%"}</b></td>
                   <td>{s.blank || ""}</td><td>{s.fixed || ""}</td><td>{mxHm(mine.reduce((a, l) => a + (l.endT || 0), 0))}</td>
-                  <td>{s.avg ? mxHm(s.avg) : ""}</td>
-                  <td>{(() => { const h = mine.reduce((a, l) => a + ((l.focus && l.focus.hides) || 0), 0), f = mine.filter((l) => l.focus && l.focus.failed).length;
-                    return <span style={{color: f ? "#d6453f" : undefined, fontWeight: f ? 700 : undefined}}>{h || ""}{f ? " (실패 " + f + ")" : ""}</span>; })()}</td>
-                  <td>{last.date.slice(5).replace("-", "/")}</td>
-                </>) : <td colSpan={9} style={{color: "#d6453f", fontWeight: 700}}>안 냄</td>}
+                  <td>{s.avg ? mxHm(s.avg) : ""}</td><td>{last.date.slice(5).replace("-", "/")}</td>
+                </>) : <td colSpan={8} style={{color: "#d6453f", fontWeight: 700}}>안 냄</td>}
               </tr>
               {openSid === r.id && mine.map((l) => (
                 <tr key={l.rid} className="go" onClick={() => setView(l)} style={{background: "#f7f4ee"}}>

@@ -463,116 +463,130 @@ const hwEv = (ev) => (Array.isArray(ev) ? ev.slice(0, MAX_EV).map((e) => {
 const hwNorm = (q, raw) => (raw == null || raw === "" ? null : (q.type === "mc" ? Number(raw) : String(raw).slice(0, 20)));
 const r1 = (x) => Math.round(x * 10) / 10;
 
-// ===== 조각 — 과제 집중 보상 (2026-10-11) =====
-// 볼트 «20 작업/조각 보상 — 과제 집중 설계.md». 조각은 **푼 문제** 에서 나오고, 이탈 없이 이어 푼 시간은 **배율** 로 얹는다
-// (시간에 주면 켜 두고 엎어 놓기 · 느리게 풀기가 이득). 이탈하면 배율만 0부터 — 번 조각은 안 뺏는다.
-// 단위: 조각 0.1개 = 1 (정수로 센다). 숫자는 써 보며 고친다
+// ===== 조각 — 과제 보상 (설계 확정 2026-10-12) =====
+// 볼트 «20 작업/조각 보상 — 과제 집중 설계.md». 마왕님이 정한 규칙:
+//   처음 맞힘 1조각 · 틀린 것 다시 풀어 맞힘 1조각 · 번호 순 5연속 정답 +1 · 상한 없음
+//   이탈(풀기 화면을 5초 넘게 떠남)은 하루 단위로 세고 3번째마다 −10(다시 1부터, 0에서 멈춤)
+//   조각 20 = 구슬 1. 구슬을 열면 확률로 기프티콘 또는 꽝. 재고 없는 게 뽑히면 구슬을 안 쓴다(«나중에 다시»)
+// 장부 classes/{cid}/pieces/{sid} — 쓰기는 서버만, 조건부 쓰기(getDocV · patchDocIf)로 겹침을 막는다
 const PC = {
-  per: 1,            // 답을 적어 낸 문제 하나 = 0.1 조각 (10문제 = 1조각, ×2 면 5문제)
-  retry: 1,          // 다시 풀어 새로 맞힌 문제 = 0.1 조각(배율 없음)
-  cost: 100,         // 상자 하나 = 10 조각
-  dayCap: 40,        // 하루 4 조각까지(한국 날짜) — 상자는 빨라야 사흘에 하나. 상품 예산 때문
-  fastSec: 8,        // 그 문제에 머문 시간이 이보다 짧으면 0 (찍기)
-  shortSec: 30, shortFree: 2,   // 30초 이하 이탈은 회차당 2번까지 봐준다
-  failSec: 300,      // 5분 넘게 떠난 회차는 «집중 실패» — 전부 ×1
-  pzKeep: 300,       // 쉬기 5분까지는 콤보 유지
-  idle: 300,         // 마지막 손놀림(답 · 번호 옮김) 뒤 5분이 지나면 콤보 시계가 멈춘다 — 켜 두기만 하기 막기
-  tiers: [[2400, 20], [1200, 15], [600, 12]],   // [콤보 초, 배율×10] — 40분 ×2 · 20분 ×1.5 · 10분 ×1.2
+  cids: ["s-mongeum", "jasago"],   // 대상 반 — 10/12 고1S · 고1자사고반(TOP 은 뺌). appConfig/pieces.cids 가 있으면 그것
+  cost: 20,        // 구슬 하나 = 조각 20
+  streak: 5,       // 번호 순 연속 정답 다섯마다 +1
+  awayMin: 5,      // 이만큼(초) 이하로 떠난 건 안 센다
+  awayEvery: 3,    // 하루에 이탈 3번째마다
+  awayPen: 10,     // 조각 −10 (0에서 멈춤)
 };
-const pcMult = (combo, failed) => (failed ? 10 : (PC.tiers.find(([s]) => combo >= s) || [0, 10])[1]);
-// 기록(ev)을 처음부터 다시 걸어 «답을 적은 순간의 콤보» 를 매긴다. 앱(HwRun)의 콤보 표시도 같은 셈을 한다
-function hwFocus(ev, questions) {
-  let combo = 0, lastT = 0, lastAct = 0, shortUsed = 0, hides = 0, awaySec = 0, failed = false, maxCombo = 0, breaks = 0;
-  const at = {};
-  const adv = (t) => { if (t > lastT) { combo += Math.max(0, Math.min(t, lastAct + PC.idle) - lastT); lastT = t; } if (combo > maxCombo) maxCombo = combo; };
-  for (const e of ev || []) {
-    adv(e.t);
-    if (e.k === "go") lastAct = Math.max(lastAct, e.t);
-    else if (e.k === "ans") { lastAct = Math.max(lastAct, e.t); if (e.v != null) at[e.q] = combo; else delete at[e.q]; }
-    else if (e.k === "away") {
-      hides++; awaySec += e.s;
-      if (e.s > PC.failSec) failed = true;
-      if (e.s <= PC.shortSec && shortUsed < PC.shortFree) shortUsed++; else { if (combo > 0) breaks++; combo = 0; }
-      lastT = Math.max(lastT, e.r); lastAct = lastT;   // 떠나 있던 동안은 콤보에 안 넣는다
-    } else if (e.k === "pz") {
-      if (e.s > PC.pzKeep) combo = 0;
-      lastAct = Math.max(lastAct, e.t);
-    }
-  }
-  let pts = 0;
-  const mults = {};
-  (questions || []).forEach((q) => {
-    if (q.answer == null || (q.sec || 0) < PC.fastSec) return;
-    const m = pcMult(at[q.n] || 0, failed);
-    mults[m] = (mults[m] || 0) + 1;
-    pts += PC.per * m;   // 0.01 조각 단위로 더하고 끝에 한 번 반올림(0.1씩 더하면 37.5 가 37.4999 가 된다)
-  });
-  return { hides, awaySec: Math.round(awaySec), shortUsed, breaks, failed, maxCombo: Math.round(maxCombo), pts: Math.round(pts / 10), mults };
-}
 const pcPath = (cid, sid) => "classes/" + cid + "/pieces/" + sid;
-const PC_LOG = 120;
-// 장부에 더한다(하루 상한). 같은 학생이 두 기기로 동시에 내도 안 겹치게 조건부 쓰기 — 남이 먼저 썼으면 다시 읽고 다시
-async function pcAdd(cid, sid, name, pts, rec) {
-  for (let i = 0; i < 5; i++) {
-    const { doc, v } = await getDocV(pcPath(cid, sid));
-    const d = doc || {}, today = kstDate(Date.now());
-    const dayPts = d.day === today ? (d.dayPts || 0) : 0;
-    const add = Math.max(0, Math.min(pts, PC.dayCap - dayPts));
-    const next = {
-      name, bal: (d.bal || 0) + add, earned: (d.earned || 0) + add, opened: d.opened || 0,
-      day: today, dayPts: dayPts + add, prizes: d.prizes || [],
-      log: [...(d.log || []), { t: Date.now(), ...rec, d: add, ...(add < pts ? { want: pts } : {}) }].slice(-PC_LOG),
-    };
-    if (await patchDocIf(pcPath(cid, sid), next, Object.keys(next), v)) return { add, capped: add < pts, bal: next.bal };
-  }
-  throw new Error("조각 장부가 바빠요");
-}
-async function pcItems() {
+const PC_LOG = 150, PC_AWAY = 300;
+async function pcCfg() {
   const { doc, v } = await getDocV("appConfig/pieces");
-  return { items: ((doc && doc.items) || []).filter((x) => x && x.id && x.name), v, doc };
+  const d = doc || {};
+  return { items: (d.items || []).filter((x) => x && x.id && x.name), cids: Array.isArray(d.cids) && d.cids.length ? d.cids : PC.cids, v, doc: d };
 }
-// 학생에게 보이는 상품표 — 확률은 공개(미성년자 대상 랜덤 보상). 재고 숫자는 안 보인다
-const pcLive = (it) => (Number(it.w) || 0) > 0 && (it.stock == null || it.stock > 0);
+// 낸 것 하나에서 번 조각 — 처음 맞힌 문제 + 번호 순 5연속. 안 적은 번호 · 스스로 채점 기다리는 것은 건너뛴다(끊지도 잇지도 않음)
+function hwPieces(questions) {
+  let first = 0, streaks = 0, run = 0;
+  [...(questions || [])].sort((a, b) => a.n - b.n).forEach((q) => {
+    if (q.answer == null || q.auto === null) return;
+    if (q.auto === true) { first++; if (++run >= PC.streak) { streaks++; run = 0; } } else run = 0;
+  });
+  return { first, streaks, pts: first + streaks };
+}
+// 장부 고치기 — 읽고 fn 으로 바꿔 «그 사이 아무도 안 고쳤을 때만» 쓴다. 남이 먼저 썼으면 다시
+async function pcEdit(cid, sid, fn) {
+  for (let i = 0; i < 6; i++) {
+    const { doc, v } = await getDocV(pcPath(cid, sid));
+    const d = doc || {};
+    const next = fn(d);
+    if (!next) return { before: d, next: null };
+    if (await patchDocIf(pcPath(cid, sid), next, Object.keys(next), v)) return { before: d, next };
+  }
+  throw new Error("조각 장부가 바빠요 — 잠깐 뒤에 다시");
+}
+async function pcAdd(cid, sid, name, pts, rec) {
+  const r = await pcEdit(cid, sid, (d) => ({ name, bal: (d.bal || 0) + pts, earned: (d.earned || 0) + pts,
+    log: [...(d.log || []), { t: Date.now(), ...rec, d: pts }].slice(-PC_LOG) }));
+  return { add: pts, bal: r.next.bal };
+}
+const pcToday = (d) => (d.awayDay === kstDate(Date.now()) ? { n: d.awayN || 0, tot: d.awayTot || 0 } : { n: 0, tot: 0 });
+// 학생에게 보이는 확률표 — 재고 숫자는 안 보인다
 function pcPublic(items) {
-  const live = items.filter(pcLive), sum = live.reduce((s, x) => s + Number(x.w), 0);
-  return items.filter((x) => (Number(x.w) || 0) > 0).map((x) => ({ id: x.id, name: x.name, pct: pcLive(x) && sum ? Math.round(Number(x.w) / sum * 1000) / 10 : 0, out: !pcLive(x) }));
+  const sum = items.reduce((s, x) => s + (Number(x.pct) || 0), 0);
+  return { items: items.filter((x) => Number(x.pct) > 0).map((x) => ({ id: x.id, name: x.name, pct: Number(x.pct), out: x.stock != null && x.stock <= 0 })),
+           blank: Math.max(0, Math.round((100 - sum) * 100) / 100) };
 }
-const pcRules = () => ({ per: PC.per, retry: PC.retry, cost: PC.cost, dayCap: PC.dayCap, fastSec: PC.fastSec, shortSec: PC.shortSec, shortFree: PC.shortFree,
-                         failSec: PC.failSec, pzKeep: PC.pzKeep, idle: PC.idle, tiers: PC.tiers });
+const pcRules = () => ({ cost: PC.cost, streak: PC.streak, awayMin: PC.awayMin, awayEvery: PC.awayEvery, awayPen: PC.awayPen });
 async function pcMe(res, claims, b) {
   const cid = String(b.cid || ""), sid = String(b.sid || "");
   const who = await hwWho(res, claims, cid, sid); if (!who) return;
+  const cfg = await pcCfg();
+  if (!cfg.cids.includes(cid)) { res.status(200).json({ ok: true, on: false }); return; }
   const d = (await getDoc(pcPath(cid, sid)).catch(() => null)) || {};
-  const { items } = await pcItems();
-  const today = kstDate(Date.now());
-  res.status(200).json({ ok: true, bal: d.bal || 0, earned: d.earned || 0, opened: d.opened || 0, today: d.day === today ? (d.dayPts || 0) : 0,
-                         prizes: (d.prizes || []).slice(-50), items: pcPublic(items), rules: pcRules() });
+  const td = pcToday(d);
+  res.status(200).json({ ok: true, on: true, teacher: !!who.teacher, bal: d.bal || 0, earned: d.earned || 0, opened: d.opened || 0,
+    awayN: td.n, awayTot: td.tot, prizes: (d.prizes || []).slice(-60), ...pcPublic(cfg.items), rules: pcRules() });
 }
-// 상자 열기 — 조각 10개를 빼고 가중치대로 하나. 장부를 먼저 쓰고(두 번 눌러도 한 번만 빠지게) 재고를 줄인다
+// 이탈 — 앱이 돌아온 순간 바로 보낸다(제출 때 몰아 보내면 «그만두기» 로 기록이 사라진다). aid 로 두 번 받지 않는다
+async function hwAway(res, claims, b) {
+  const cid = String(b.cid || ""), sid = String(b.sid || "");
+  const who = await hwWho(res, claims, cid, sid); if (!who) return;
+  const s = Math.max(0, Math.min(86400, Math.round(Number(b.s) || 0)));
+  if (s <= PC.awayMin) { res.status(200).json({ ok: true, skipped: true }); return; }
+  if (who.teacher) { res.status(200).json({ ok: true, teacher: true }); return; }
+  const cfg = await pcCfg();
+  if (!cfg.cids.includes(cid)) { res.status(200).json({ ok: true, on: false }); return; }
+  const aid = String(b.aid || "").slice(0, 40), now = Date.now(), today = kstDate(now);
+  let dup = false, lost = 0, hit = false;
+  const r = await pcEdit(cid, sid, (d) => {
+    if (aid && (d.aways || []).some((x) => x.aid === aid)) { dup = true; return null; }
+    const td = pcToday(d);
+    let n = td.n + 1;
+    hit = n >= PC.awayEvery; lost = 0;
+    if (hit) { lost = Math.min(d.bal || 0, PC.awayPen); n = 0; }
+    const rec = { aid, t: now, s, day: today, k: td.tot + 1, ...(Number(b.q) ? { q: Number(b.q) } : {}), ...(b.book ? { book: String(b.book).slice(0, 40) } : {}),
+                  ...(hit ? { pen: lost } : {}) };
+    return { name: who.name, awayDay: today, awayN: n, awayTot: td.tot + 1, bal: (d.bal || 0) - lost,
+             aways: [...(d.aways || []), rec].slice(-PC_AWAY),
+             ...(hit ? { log: [...(d.log || []), { t: now, k: "away", d: -lost }].slice(-PC_LOG) } : {}) };
+  });
+  const d = r.next || r.before, td = pcToday(d);
+  res.status(200).json({ ok: true, dup, hit: dup ? false : hit, lost: dup ? 0 : lost, n: td.n, tot: td.tot, bal: d.bal || 0, rules: pcRules() });
+}
+// 구슬 열기 — 조각 20개. 뽑기는 확률표 그대로(꽝 = 100 − 합). 재고 없는 게 뽑히면 구슬을 안 쓰고 알려 준다.
+// 재고를 먼저 하나 잡고(조건부) 장부를 쓴다 — 장부가 겹쳐 못 쓰면 잡은 재고를 돌려놓고 다시
 async function pcOpen(res, claims, b) {
   const cid = String(b.cid || ""), sid = String(b.sid || "");
   const who = await hwWho(res, claims, cid, sid); if (!who) return;
-  for (let i = 0; i < 5; i++) {
+  let cfg = await pcCfg();
+  if (!cfg.cids.includes(cid)) { res.status(400).json({ error: "이 반은 조각을 안 써요" }); return; }
+  for (let i = 0; i < 6; i++) {
     const { doc, v } = await getDocV(pcPath(cid, sid));
     const d = doc || {};
-    if ((d.bal || 0) < PC.cost) { res.status(400).json({ error: "조각이 " + PC.cost / 10 + "개 있어야 열 수 있어요" }); return; }
-    const { items } = await pcItems();
-    const live = items.filter(pcLive);
-    if (!live.length) { res.status(400).json({ error: "아직 상자에 든 상품이 없어요. 선생님께 말해 주세요" }); return; }
-    let r = Math.random() * live.reduce((s, x) => s + Number(x.w), 0), pick = live[live.length - 1];
-    for (const x of live) { r -= Number(x.w); if (r < 0) { pick = x; break; } }
-    const prize = { pid: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), id: pick.id, name: pick.name, at: Date.now(), given: false };
-    const next = { name: who.name, bal: d.bal - PC.cost, opened: (d.opened || 0) + 1, prizes: [...(d.prizes || []), prize].slice(-200),
-                   log: [...(d.log || []), { t: Date.now(), k: "open", d: -PC.cost, prize: pick.name }].slice(-PC_LOG) };
-    if (!(await patchDocIf(pcPath(cid, sid), next, Object.keys(next), v))) continue;
-    if (pick.stock != null) {
-      for (let j = 0; j < 5; j++) {   // 재고 — 실패해도 상품은 이미 나간 것
-        const c = await pcItems();
-        const its = c.items.map((x) => (x.id === pick.id && x.stock != null ? { ...x, stock: Math.max(0, x.stock - 1) } : x));
-        if (await patchDocIf("appConfig/pieces", { items: its }, ["items"], c.v).catch(() => false)) break;
+    if ((d.bal || 0) < PC.cost) { res.status(400).json({ error: "조각이 " + PC.cost + "개 있어야 구슬을 열 수 있어요" }); return; }
+    if (!cfg.items.length) { res.status(400).json({ error: "아직 구슬에 든 상품이 없어요. 선생님께 말해 주세요" }); return; }
+    let r = Math.random() * 100, pick = null;
+    for (const x of cfg.items) { r -= Number(x.pct) || 0; if (r < 0) { pick = x; break; } }
+    let held = false;
+    if (pick && pick.stock != null) {
+      if (pick.stock <= 0) { res.status(200).json({ ok: true, soldOut: pick.name, bal: d.bal }); return; }
+      const its = cfg.items.map((x) => (x.id === pick.id ? { ...x, stock: x.stock - 1 } : x));
+      if (!(await patchDocIf("appConfig/pieces", { items: its }, ["items"], cfg.v))) { cfg = await pcCfg(); continue; }
+      held = true;
+    }
+    const now = Date.now();
+    const prize = pick ? { pid: now.toString(36) + Math.random().toString(36).slice(2, 6), id: pick.id, name: pick.name, at: now, given: false }
+                       : { pid: now.toString(36), id: "blank", name: "꽝", at: now, blank: true };
+    const next = { name: who.name, bal: d.bal - PC.cost, opened: (d.opened || 0) + 1, ...(pick ? { prizes: [...(d.prizes || []), prize].slice(-200) } : {}),
+                   log: [...(d.log || []), { t: now, k: "open", d: -PC.cost, prize: prize.name }].slice(-PC_LOG) };
+    if (await patchDocIf(pcPath(cid, sid), next, Object.keys(next), v)) { res.status(200).json({ ok: true, prize, bal: next.bal }); return; }
+    if (held) {   // 장부를 못 썼다 — 잡은 재고를 돌려놓는다
+      for (let k = 0; k < 6; k++) {
+        const c = await pcCfg();
+        if (await patchDocIf("appConfig/pieces", { items: c.items.map((x) => (x.id === pick.id && x.stock != null ? { ...x, stock: x.stock + 1 } : x)) }, ["items"], c.v)) break;
       }
     }
-    res.status(200).json({ ok: true, prize, bal: next.bal }); return;
+    cfg = await pcCfg();
   }
   res.status(409).json({ error: "잠깐 뒤에 다시 눌러 주세요" });
 }
@@ -589,47 +603,54 @@ async function pcTeacherAct(res, claims, b) {
   const cid = String(b.cid || "");
   if (b.action === "pcItemsGet") {
     if (!(await pcTeacher(res, claims, ""))) return;
-    const { items, doc } = await pcItems();
-    res.status(200).json({ ok: true, items, by: doc && doc.by, at: doc && doc.at, rules: pcRules() }); return;
+    const c = await pcCfg();
+    res.status(200).json({ ok: true, items: c.items, cids: c.cids, by: c.doc.by, at: c.doc.at, rules: pcRules() }); return;
   }
   if (b.action === "pcItemsSet") {
     if (!(await pcTeacher(res, claims, ""))) return;
     const raw = Array.isArray(b.items) ? b.items : null;
-    if (!raw || raw.length > 60) { res.status(400).json({ error: "상품 목록이 이상해요" }); return; }
+    if (!raw || raw.length > 40) { res.status(400).json({ error: "상품 목록이 이상해요" }); return; }
     const items = raw.map((x, i) => ({
       id: String(x.id || ("p" + Date.now().toString(36) + i)).slice(0, 40), name: String(x.name || "").trim().slice(0, 40),
-      w: Math.max(0, Math.min(100000, Number(x.w) || 0)),
+      pct: Math.max(0, Math.min(100, Math.round((Number(x.pct) || 0) * 100) / 100)),
+      price: Math.max(0, Math.min(1000000, Math.round(Number(x.price) || 0))),
       stock: x.stock == null || x.stock === "" ? null : Math.max(0, Math.floor(Number(x.stock) || 0)),
     })).filter((x) => x.name);
+    const sum = items.reduce((s, x) => s + x.pct, 0);
+    if (sum > 100.0001) { res.status(400).json({ error: "확률 합이 100% 를 넘어요 (" + Math.round(sum * 100) / 100 + "%)" }); return; }
     await patchDoc("appConfig/pieces", { items, by: claims.tid || claims.role, at: Date.now() });
     res.status(200).json({ ok: true, items }); return;
   }
   if (!(await pcTeacher(res, claims, cid))) return;
   if (!cid) { res.status(400).json({ error: "반이 없어요" }); return; }
   if (b.action === "pcBoard") {
+    const cfg = await pcCfg();
     const rows = await listDocs("classes/" + cid + "/pieces").catch(() => []);
-    res.status(200).json({ ok: true, rows: rows.map((d) => ({ sid: d.id, name: d.name, bal: d.bal || 0, earned: d.earned || 0, opened: d.opened || 0,
-      today: d.day === kstDate(Date.now()) ? d.dayPts || 0 : 0, prizes: (d.prizes || []).slice(-50), log: (d.log || []).slice(-20) })), rules: pcRules() }); return;
+    res.status(200).json({ ok: true, on: cfg.cids.includes(cid), rules: pcRules(), rows: rows.map((d) => {
+      const td = pcToday(d);
+      return { sid: d.id, name: d.name, bal: d.bal || 0, earned: d.earned || 0, opened: d.opened || 0, awayN: td.n, awayTot: td.tot,
+               aways: (d.aways || []).slice(-80), prizes: (d.prizes || []).slice(-60), log: (d.log || []).slice(-30) };
+    }) }); return;
   }
   const sid = String(b.sid || "");
   if (!sid) { res.status(400).json({ error: "학생이 없어요" }); return; }
-  for (let i = 0; i < 5; i++) {
-    const { doc, v } = await getDocV(pcPath(cid, sid));
-    const d = doc || {};
-    let next;
+  let bad = "";
+  const r = await pcEdit(cid, sid, (d) => {
     if (b.action === "pcGive") {
       const pid = String(b.pid || ""), ps = d.prizes || [];
-      if (!ps.some((p) => p.pid === pid)) { res.status(404).json({ error: "그 상품이 없어요" }); return; }
-      next = { prizes: ps.map((p) => (p.pid === pid ? { ...p, given: b.undo ? false : true, givenAt: b.undo ? null : Date.now(), givenBy: claims.tid || claims.role } : p)) };
-    } else if (b.action === "pcAdjust") {
+      if (!ps.some((p) => p.pid === pid)) { bad = "그 상품이 없어요"; return null; }
+      return { prizes: ps.map((p) => (p.pid === pid ? { ...p, given: !b.undo, givenAt: b.undo ? null : Date.now(), givenBy: claims.tid || claims.role } : p)) };
+    }
+    if (b.action === "pcAdjust") {
       const delta = Math.round(Number(b.delta) || 0);
-      if (!delta || Math.abs(delta) > 1000) { res.status(400).json({ error: "바꿀 조각 수가 이상해요" }); return; }
+      if (!delta || Math.abs(delta) > 1000) { bad = "바꿀 조각 수가 이상해요"; return null; }
       const bal = Math.max(0, (d.bal || 0) + delta);
-      next = { name: d.name || String(b.name || ""), bal, log: [...(d.log || []), { t: Date.now(), k: "adj", d: bal - (d.bal || 0), why: String(b.why || "").slice(0, 60), by: claims.tid || claims.role }].slice(-PC_LOG) };
-    } else { res.status(400).json({ error: "그런 동작이 없어요" }); return; }
-    if (await patchDocIf(pcPath(cid, sid), next, Object.keys(next), v)) { res.status(200).json({ ok: true, ...next }); return; }
-  }
-  res.status(409).json({ error: "잠깐 뒤에 다시 해 주세요" });
+      return { name: d.name || String(b.name || ""), bal, log: [...(d.log || []), { t: Date.now(), k: "adj", d: bal - (d.bal || 0), why: String(b.why || "").slice(0, 60), by: claims.tid || claims.role }].slice(-PC_LOG) };
+    }
+    bad = "그런 동작이 없어요"; return null;
+  });
+  if (bad) { res.status(400).json({ error: bad }); return; }
+  res.status(200).json({ ok: true, ...r.next });
 }
 
 async function hwSubmit(res, claims, b) {
@@ -662,7 +683,6 @@ async function hwSubmit(res, claims, b) {
     n: questions.length, correct: questions.filter((q) => q.auto === true).length,
     blank: questions.filter((q) => q.answer == null).length, pending: questions.filter((q) => q.auto === null).length,
     teacher: who.teacher, time: now,
-    focus: hwFocus(ev, questions),
   };
   const base = "classes/" + cid + "/days/" + date;
   await patchDoc(base, { updated: now });   // 날짜 문서가 없으면 날짜 목록에 안 잡힌다 (submit 과 같은 까닭)
@@ -674,13 +694,17 @@ async function hwSubmit(res, claims, b) {
     marked = await hwMarkDone({ ...who.cls, id: cid }, sid, who.name, key.link, questions.filter((q) => q.answer != null).map((q) => q.n)).catch(() => null);
     if (marked) await patchDoc(base + "/hwLogs/" + rid, { marked });
   }
-  // 조각 — 선생님 모드는 안 준다. 실패해도 제출은 된 것이다
-  let pc = null;
-  if (!who.teacher && log.focus.pts > 0) {
-    pc = await pcAdd(cid, sid, who.name, log.focus.pts, { k: "hw", rid }).catch((e) => { console.error("[pieces]", e); return null; });
-    if (pc) await patchDoc(base + "/hwLogs/" + rid, { pieces: pc.add, ...(pc.capped ? { capped: true } : {}) }).catch(() => {});
+  // 조각 — 대상 반 · 학생만. 실패해도 제출은 된 것이다
+  let pieces = null;
+  if (!who.teacher) {
+    const cfg = await pcCfg().catch(() => null);
+    if (cfg && cfg.cids.includes(cid)) {
+      const p = hwPieces(questions);
+      const pc = p.pts > 0 ? await pcAdd(cid, sid, who.name, p.pts, { k: "hw", rid }).catch((e) => { console.error("[pieces]", e); return null; }) : { add: 0 };
+      if (pc) { pieces = { ...p, add: pc.add, ...(pc.bal != null ? { bal: pc.bal } : {}) }; await patchDoc(base + "/hwLogs/" + rid, { pieces: { first: p.first, streaks: p.streaks, pts: pc.add } }).catch(() => {}); }
+    }
   }
-  res.status(200).json({ ok: true, log: { ...log, ...(marked ? { marked } : {}), ...(pc ? { pieces: pc.add, capped: pc.capped, bal: pc.bal } : {}) } });
+  res.status(200).json({ ok: true, log: { ...log, ...(marked ? { marked } : {}), ...(pieces ? { pieces: { first: pieces.first, streaks: pieces.streaks, pts: pieces.add } } : {}) }, ...(pieces && pieces.bal != null ? { bal: pieces.bal } : {}) });
 }
 
 // 틀린 문항만 다시 푼 것. 첫 시도(auto · answer)는 손대지 않는다
@@ -712,7 +736,10 @@ async function hwRetry(res, claims, b) {
   await patchDoc(path, patch);
   const newly = patch.fixed - (log.fixed || 0);
   let pc = null;
-  if (!who.teacher && newly > 0) pc = await pcAdd(cid, log.sid, who.name, newly * PC.retry, { k: "retry", rid }).catch(() => null);
+  if (!who.teacher && newly > 0) {
+    const cfg = await pcCfg().catch(() => null);
+    if (cfg && cfg.cids.includes(cid)) pc = await pcAdd(cid, log.sid, who.name, newly, { k: "retry", rid }).catch(() => null);
+  }
   res.status(200).json({ ok: true, log: { ...log, ...patch }, ...(pc ? { pieces: pc.add, bal: pc.bal } : {}) });
 }
 
@@ -735,7 +762,14 @@ async function hwSelf(res, claims, b) {
   if (!changed) { res.status(400).json({ error: "정할 문항이 없어요" }); return; }
   const patch = { questions, correct: questions.filter((q) => q.auto === true).length, pending: questions.filter((q) => q.auto === null).length };
   await patchDoc(path, patch);
-  res.status(200).json({ ok: true, log: { ...log, ...patch } });
+  // 스스로 채점에서 O = 처음 맞힘 → 조각 1 (5연속은 낼 때 건너뛴 것이라 안 센다)
+  const gain = (log.correct != null ? patch.correct - log.correct : 0);
+  let pc = null;
+  if (!who.teacher && gain > 0) {
+    const cfg = await pcCfg().catch(() => null);
+    if (cfg && cfg.cids.includes(cid)) pc = await pcAdd(cid, log.sid, who.name, gain, { k: "self", rid }).catch(() => null);
+  }
+  res.status(200).json({ ok: true, log: { ...log, ...patch }, ...(pc ? { pieces: pc.add, bal: pc.bal } : {}) });
 }
 
 export default async function handler(req, res) {
@@ -932,6 +966,7 @@ export default async function handler(req, res) {
     if (body.action === "hwSelf") return await hwSelf(res, claims, body);
     if (body.action === "pcMe") return await pcMe(res, claims, body);
     if (body.action === "pcOpen") return await pcOpen(res, claims, body);
+    if (body.action === "hwAway") return await hwAway(res, claims, body);
     if (["pcItemsGet", "pcItemsSet", "pcBoard", "pcGive", "pcAdjust"].includes(body.action)) return await pcTeacherAct(res, claims, body);
     if (body.action === "hkRemove") return await hkRemove(res, claims, body);
     res.status(400).json({ error: "그런 동작이 없어요" });

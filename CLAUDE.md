@@ -660,15 +660,18 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - PC 로 꺼내기: `node tools/exam-push.mjs --hwlogs [반ID] [--book id] [--since 날짜]` → 극복 문제 만들 때
 - 폰에서 `.mx-body` 가 10px 넘치던 것(동그라미 다섯 개의 최소 폭) — `minmax(0,1fr)` 와 480px 이하 줄임으로 고침. 실전 시험에도 같이 적용된다
 
-### 조각 — 과제 집중 보상 (2026-10-11)
-설계·까닭은 볼트 `20 작업/조각 보상 — 과제 집중 설계.md`. 대상 = 과제 채점 교재가 걸린 반(고1S·자사고·TOP).
-- **계산은 전부 서버**(`api/exam.js` 의 `PC` 상수 · `hwFocus` · `pcAdd` · `pcOpen`). 앱의 `PCC` · `hwFocusLive` 는 풀기 화면 «🔥 콤보» 표시용 — **숫자를 바꾸면 두 곳 다**
-- 조각은 **푼 문제 × 집중 배율**(시간이 아니다 — 켜 두기만·느리게 풀기 막기). 0.1조각/문제, 이탈 없이 10분 ×1.2 · 20분 ×1.5 · 40분 ×2, 8초 미만 찍기 0, 다시 풀어 맞힘 0.1, 하루 4조각. 단위는 정수(조각 0.1개 = 1)
-- 이탈 = 풀기 화면이 숨겨짐(visibilitychange). `HwRun` 이 ev 에 `{k:"away", t 떠난 때, r 돌아온 때(둘 다 푼 시간 시계), s 실제 초}` · 쉬기는 `{k:"pz", t, s}` 를 남긴다. 2초 미만은 안 남김. 30초 이하 2번까지 봐줌, 그 밖엔 배율 0부터(번 조각은 안 뺏음), 5분 넘으면 그 회차 «집중 실패»(×1)
-- 장부 `classes/{cid}/pieces/{sid}` {bal, earned, opened, day, dayPts, prizes[], log[]} — 쓰기는 서버만, **조건부 쓰기**(`_google.js` `getDocV` · `patchDocIf`, updateTime 이 그대로일 때만)로 두 번 눌러 두 번 빠지는 것 막음. 학생 앱은 장부를 직접 안 읽고 `pcMe` 로 받는다(규칙 손 안 댐)
-- 상품표 `appConfig/pieces.items[{id,name,w 가중치,stock|null}]` — 세 반 공통, 선생님 «과제» 판 맨 아래에서 고친다. 학생에겐 확률(%)만, 재고 0이면 «다 나감»
-- 서버 동작: 학생 `pcMe` · `pcOpen` / 선생님 `pcItemsGet` · `pcItemsSet` · `pcBoard` · `pcGive`(지급, undo) · `pcAdjust`(±, 까닭)
-- 선생님 모드 제출은 조각 없음. 제출 기록(hwLogs)에 `focus{hides, awaySec, shortUsed, breaks, failed, maxCombo, pts, mults}` · `pieces` · `capped`
+### 조각 — 과제 보상 (설계 2026-10-12 · ⚠ «올려» 전엔 배포 안 함)
+설계·까닭은 볼트 `20 작업/조각 보상 — 과제 집중 설계.md`. 대상 = `appConfig/pieces.cids`(없으면 서버 `PC.cids` = 고1S `s-mongeum` · 자사고 `jasago`). TOP 은 뺐다.
+- 10/11 에 «배율» 판을 만들어 배포했다가 마왕님이 «배포하지 말랬지» → 되돌림. 그 코드는 로컬 브랜치 `pieces-draft`(쓰지 않음). 지금 판은 로컬 브랜치 `pieces` — `.git/hooks/pre-push` 가 `pieces*` 푸시를 막는다. 운영에 올릴 땐 main 에 합쳐서
+- **계산은 전부 서버**(`api/exam.js` 의 `PC` 상수 · `hwPieces` · `pcAdd` · `hwAway` · `pcOpen`). 앱은 서버가 준 `rules` 로 글만 쓴다
+- 버는 법: 처음 맞힘 1 · 틀린 것 다시 풀어 맞힘 1(`hwRetry` 의 새로 고친 수) · 스스로 채점 O 1(`hwSelf`) · **번호 순 5연속 처음 맞힘 +1**(틀리면 다음 번호부터 다시 1, 다섯 차면 +1 하고 다시 1). 한 번 낸 것 안에서만 센다. 안 적은 번호·스스로 채점(대기)은 건너뜀(끊지도 잇지도 않음). 하루 상한 없음
+- 이탈: 풀기 화면을 **5초 넘게** 떠남(쉬기 중 제외). 돌아오자마자 `hwAway{s, q, book, aid}` 로 서버에 — `aid` 로 같은 건 두 번 안 셈, 못 보낸 건 localStorage `climath_pc_away_{cid}_{sid}` 에 쌓았다가 다음에. **하루(한국 날짜) 3번째마다 −10** 하고 다시 1부터, 0에서 멈춤. 장부 `aways[]` 에 {t, s, q, k 그날 몇 번째, pen} → 선생님 판에서 이름 누르면 보인다. 학생 풀기 화면 머리에 «이탈 n/3»(2/3 이면 주황)
+- 구슬 = **조각 20개**. 열면 `items[].pct` 대로 뽑고, 나머지가 꽝. **뽑힌 상품이 재고 0이면 구슬을 안 쓰고** `{soldOut}` → «나중에 다시 열어 주세요»(확률은 그대로 — 남은 것끼리 나눠 갖지 않는다). 재고는 cfg 를 조건부로 먼저 줄이고, 장부 쓰기가 겹쳐 실패하면 되돌린다. 꽝은 `prizes` 에 안 넣는다
+- 장부 `classes/{cid}/pieces/{sid}` {name, bal, earned, opened, prizes[], log[], aways[], awayDay, awayN, awayTot} — 쓰기는 서버만, **조건부 쓰기**(`_google.js` `getDocV` · `patchDocIf`. 진짜 Firestore 겹침 문구는 «does not match the required base version» · «already exists» — 정규식에 넣어 둠)
+- 상품표 `appConfig/pieces.items[{id,name,pct,price,stock|null}]` — 확률 합 100 넘으면 400. 선생님 «과제» 판 맨 아래 «상품표 열기»(재고 금액 · 당첨% · 구슬 기댓값 보임). 10/12 확정표: 1,000원 30%·95 / 2,000원 6%·20 / 3,000원 3%·10 / 4,500원 1.2%·4 / 6,000원 0.8%·2 → 당첨 41% · 131개 · 195,000원
+- 서버 동작: 학생 `pcMe` · `pcOpen` · `hwAway` / 선생님 `pcItemsGet` · `pcItemsSet` · `pcBoard` · `pcGive`(지급, undo) · `pcAdjust`(±, 까닭, 0에서 멈춤). 선생님 모드 제출·이탈은 조각 없음. hwLogs 에 `pieces{first, streaks, pts}`
+- 학생 결과 화면 «🧩 조각 +N» = pieces.pts + log.fixed + 스스로 채점 O 수(서버 장부와 같은 셈)
+- 미리보기: `tools/make-preview.mjs` 에 가짜 `/api/exam`(과제 채점 · 조각 전부) — 일반반 `c-reg` 가 대상, 교재A 정답은 «객관식 ①, 단답 1», 25번은 스스로 채점. 서버 시험은 스크래치 `pc2.mjs`(35개)
 
 ### 앱 설치(PWA) — 학생 앱 · 선생님 앱 따로 (2026-10-10)
 - 팀체크와 같은 꼴: 루트 `sw.js`(캐시 **안 함** — 설치 조건만 채우는 빈 fetch 처리기. 캐시를 넣으면 배포 직후 옛 판이 뜬다)

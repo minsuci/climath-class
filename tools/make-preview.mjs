@@ -193,6 +193,107 @@ const STUB = `
     return ok({ ok: true });
   };
 
+  /* ---- 가짜 /api/exam — 과제 채점 · 조각 (2026-10-12) ----
+     실제 서버(api/exam.js)를 얇게 흉내 낸다. 미리보기 교재의 정답은 «객관식 ①, 단답 1». 조각 규칙은 서버 PC 와 같게 */
+  var _fetch2 = window.fetch;
+  var PCF = { cost: 20, streak: 5, awayMin: 5, awayEvery: 3, awayPen: 10 };
+  var kstDay = function(){ return new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10); };
+  var claimsOf = function(tok){ try { return JSON.parse(decodeURIComponent(escape(atob(String(tok).split(".")[1])))).claims || {}; } catch(e){ return {}; } };
+  var ledger = function(cid, sid){ var k = "classes/" + cid + "/pieces/" + sid; return store[k] || (store[k] = { bal: 0, earned: 0, opened: 0, prizes: [], aways: [], log: [] }); };
+  var todayAw = function(d){ return d.awayDay === kstDay() ? { n: d.awayN || 0, tot: d.awayTot || 0 } : { n: 0, tot: 0 }; };
+  var hwOk = function(q, a){ return a == null ? false : q.type === "mc" ? Number(a) === 1 : q.type === "short" ? String(a).trim() === "1" : null; };
+  window.fetch = function(url, init){
+    if (String(url).indexOf("/api/exam") < 0) return _fetch2(url, init);
+    var b = {}; try { b = JSON.parse((init && init.body) || "{}"); } catch(e){}
+    var ok = function(o){ return Promise.resolve({ ok: true, status: 200, json: function(){ return Promise.resolve(o); } }); };
+    var bad = function(m, c){ return Promise.resolve({ ok: false, status: c || 400, json: function(){ return Promise.resolve({ error: m }); } }); };
+    var c = claimsOf(b.idToken), tch = c.role === "teacher" || c.role === "owner";
+    var cfg = store["appConfig/pieces"] || { cids: [], items: [] }, on = (cfg.cids || []).indexOf(b.cid) >= 0;
+    var cls = store["classes/" + b.cid] || {};
+    var rowOf = function(sid){ return (cls.roster || []).filter(function(r){ return r.id === sid; })[0] || {}; };
+    var rules = function(){ return { cost: PCF.cost, streak: PCF.streak, awayMin: PCF.awayMin, awayEvery: PCF.awayEvery, awayPen: PCF.awayPen }; };
+    var add = function(sid, n, k){ if (!n) return; var d = ledger(b.cid, sid); d.name = rowOf(sid).name; d.bal += n; d.earned += n; d.log.push({ t: Date.now(), k: k, d: n }); };
+    var book = ((store["appConfig/examList"] || {}).exams || []).filter(function(e){ return e.id === b.bookId; })[0];
+    if (b.action === "hwSubmit") {
+      var asT = tch || !!rowOf(b.sid).teacher, byN = {}; (book.questions || []).forEach(function(q){ byN[q.n] = q; });
+      var qs = (b.nums || []).map(function(n){ var q = byN[n], a = b.answers[n]; a = a == null || a === "" ? null : a;
+        return { n: n, type: q.type, u: q.u, answer: a, auto: a == null ? false : hwOk(q, a), sec: 20 + (n % 7) * 9 }; });
+      var date = kstDay();
+      var log = { rid: b.rid, cid: b.cid, sid: b.sid, name: rowOf(b.sid).name, bookId: b.bookId, title: book.title, date: date, startedAt: b.startedAt, endT: b.endT,
+        pausedSec: b.pausedSec || 0, nums: b.nums, questions: qs, ev: b.ev, n: qs.length, correct: qs.filter(function(q){ return q.auto === true; }).length,
+        blank: qs.filter(function(q){ return q.answer == null; }).length, pending: qs.filter(function(q){ return q.auto === null; }).length, teacher: asT, time: Date.now() };
+      if (!asT && on) {
+        var first = 0, st = 0, run = 0;
+        qs.slice().sort(function(x, y){ return x.n - y.n; }).forEach(function(q){ if (q.answer == null || q.auto === null) return; if (q.auto) { first++; if (++run >= PCF.streak) { st++; run = 0; } } else run = 0; });
+        add(b.sid, first + st, "hw"); log.pieces = { first: first, streaks: st, pts: first + st };
+      }
+      if (!asT && book.link) { var hk = "classes/" + b.cid + "/homework/" + b.sid, hd = store[hk] || { books: {} }; hd.books = hd.books || {};
+        var had = hd.books[book.link] || []; hd.books[book.link] = had.concat(qs.filter(function(q){ return q.answer != null && had.indexOf(q.n) < 0; }).map(function(q){ return q.n; })); store[hk] = hd; }
+      store["classes/" + b.cid + "/days/" + date] = store["classes/" + b.cid + "/days/" + date] || { updated: Date.now() };
+      store["classes/" + b.cid + "/days/" + date + "/hwLogs/" + b.rid] = log;
+      return ok({ ok: true, log: log });
+    }
+    if (b.action === "hwRetry" || b.action === "hwSelf") {
+      var p = "classes/" + b.cid + "/days/" + b.date + "/hwLogs/" + b.rid, L = store[p]; if (!L) return bad("그 기록이 없어요", 404);
+      var bk = ((store["appConfig/examList"] || {}).exams || []).filter(function(e){ return e.id === L.bookId; })[0], bn = {}; (bk.questions || []).forEach(function(q){ bn[q.n] = q; });
+      var gain = 0;
+      L.questions = L.questions.map(function(r){
+        if (b.action === "hwSelf") { if (!(String(r.n) in (b.marks || {})) || r.auto !== null) return r; if (b.marks[r.n] === true) gain++; return Object.assign({}, r, { auto: b.marks[r.n] === true, self: true }); }
+        if (!(r.n in (b.answers || {})) || r.auto !== false || r.fin) return r;
+        var okk = hwOk(bn[r.n], b.answers[r.n]); if (okk) gain++;
+        return Object.assign({}, r, { tries: (r.tries || []).concat([{ a: b.answers[r.n], ok: okk, sec: 15, at: Date.now() }]), fin: okk });
+      });
+      L.correct = L.questions.filter(function(q){ return q.auto === true; }).length; L.pending = L.questions.filter(function(q){ return q.auto === null; }).length;
+      L.fixed = L.questions.filter(function(q){ return q.auto === false && q.fin; }).length;
+      if (!L.teacher && on) add(L.sid, gain, b.action === "hwSelf" ? "self" : "retry");
+      return ok({ ok: true, log: L });
+    }
+    if (b.action === "pcMe") {
+      if (!on) return ok({ ok: true, on: false });
+      var d = ledger(b.cid, b.sid), ta = todayAw(d), sum = 0; (cfg.items || []).forEach(function(x){ sum += x.pct; });
+      return ok({ ok: true, on: true, bal: d.bal, earned: d.earned, opened: d.opened, awayN: ta.n, awayTot: ta.tot, prizes: d.prizes, rules: rules(),
+        items: (cfg.items || []).map(function(x){ return { id: x.id, name: x.name, pct: x.pct, out: x.stock != null && x.stock <= 0 }; }), blank: Math.round((100 - sum) * 100) / 100 });
+    }
+    if (b.action === "hwAway") {
+      if (!on || tch || rowOf(b.sid).teacher) return ok({ ok: true, on: on });
+      if ((b.s || 0) <= PCF.awayMin) return ok({ ok: true, skipped: true });
+      var d2 = ledger(b.cid, b.sid);
+      if ((d2.aways || []).some(function(a){ return a.aid === b.aid; })) { var t2 = todayAw(d2); return ok({ ok: true, dup: true, n: t2.n, tot: t2.tot, bal: d2.bal }); }
+      var ta2 = todayAw(d2), n2 = ta2.n + 1, hit = n2 >= PCF.awayEvery, lost = 0;
+      if (hit) { lost = Math.min(d2.bal, PCF.awayPen); d2.bal -= lost; n2 = 0; }
+      d2.name = rowOf(b.sid).name; d2.awayDay = kstDay(); d2.awayN = n2; d2.awayTot = ta2.tot + 1;
+      d2.aways.push({ aid: b.aid, t: Date.now(), s: b.s, q: b.q, k: d2.awayTot, pen: hit ? lost : undefined });
+      return ok({ ok: true, hit: hit, lost: lost, n: n2, tot: d2.awayTot, bal: d2.bal, rules: rules() });
+    }
+    if (b.action === "pcOpen") {
+      var d3 = ledger(b.cid, b.sid);
+      if (d3.bal < PCF.cost) return bad("조각이 " + PCF.cost + "개 있어야 구슬을 열 수 있어요");
+      var r = Math.random() * 100, pick = null; (cfg.items || []).some(function(x){ r -= x.pct; if (r < 0) { pick = x; return true; } return false; });
+      if (pick && pick.stock != null && pick.stock <= 0) return ok({ ok: true, soldOut: pick.name, bal: d3.bal });
+      if (pick && pick.stock != null) pick.stock--;
+      var prize = pick ? { pid: "p" + Date.now(), id: pick.id, name: pick.name, at: Date.now(), given: false } : { pid: "b" + Date.now(), id: "blank", name: "꽝", blank: true };
+      d3.bal -= PCF.cost; d3.opened++; if (pick) d3.prizes.push(prize);
+      return ok({ ok: true, prize: prize, bal: d3.bal });
+    }
+    if (b.action === "pcBoard") {
+      var rows = Object.keys(store).filter(function(k){ return k.indexOf("classes/" + b.cid + "/pieces/") === 0; }).map(function(k){ var d = store[k], ta = todayAw(d);
+        return { sid: k.split("/").pop(), name: d.name, bal: d.bal, earned: d.earned, opened: d.opened, awayN: ta.n, awayTot: ta.tot, aways: d.aways, prizes: d.prizes }; });
+      return ok({ ok: true, on: on, rules: rules(), rows: rows });
+    }
+    if (b.action === "pcGive") { var d4 = ledger(b.cid, b.sid); d4.prizes = d4.prizes.map(function(x){ return x.pid === b.pid ? Object.assign({}, x, { given: true }) : x; }); return ok({ ok: true }); }
+    if (b.action === "pcAdjust") { var d5 = ledger(b.cid, b.sid); d5.bal = Math.max(0, d5.bal + Number(b.delta)); return ok({ ok: true, bal: d5.bal }); }
+    if (b.action === "pcItemsGet") return ok({ ok: true, items: cfg.items || [], cids: cfg.cids, rules: rules() });
+    if (b.action === "pcItemsSet") { cfg.items = (b.items || []).map(function(x, i){ return Object.assign({}, x, { id: x.id || "n" + Date.now() + i }); }); store["appConfig/pieces"] = cfg; return ok({ ok: true, items: cfg.items }); }
+    return ok({ ok: true });
+  };
+  /* 미리보기 과제 교재 — 일반반의 «교재A» 와 잇는다(정답: 객관식 ①, 단답 1, 25번은 스스로 채점) */
+  store["appConfig/examList"] = { exams: [{ id: "pv-hw", kind: "hw", title: "교재A (미리보기 · 정답 ①)", link: "교재A", units: ["1단원", "2단원"], cids: ["c-reg"],
+    questions: Array.from({ length: 100 }, function(_, i){ var n = i + 1; return { n: n, type: n === 25 ? "essay" : n % 10 === 0 ? "short" : "mc", u: n <= 50 ? 0 : 1 }; }) }] };
+  store["appConfig/pieces"] = { cids: ["c-reg"], items: [
+    { id: "g1", name: "1,000원 기프티콘", price: 1000, pct: 30, stock: 95 }, { id: "g2", name: "2,000원 기프티콘", price: 2000, pct: 6, stock: 20 },
+    { id: "g3", name: "3,000원 기프티콘", price: 3000, pct: 3, stock: 10 }, { id: "g4", name: "4,500원 기프티콘", price: 4500, pct: 1.2, stock: 4 },
+    { id: "g5", name: "6,000원 기프티콘", price: 6000, pct: 0.8, stock: 2 }] };
+
   /* ---- 시험용 반 ---- 실제 시드 생성은 앱에서 없앴으므로 여기서 넣는다 */
   var t0 = Date.now();
   store["classes/c-reg"] = { name: "미리보기 일반반", classDays: [1,5], type: "regular", time: t0,
