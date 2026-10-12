@@ -979,6 +979,24 @@ export default async function handler(req, res) {
         await deleteDoc(p);
         res.status(200).json({ ok: out.create === true && out.createAgain === false && out.update === true && out.stale === false && out.final && out.final.n === 2, ...out }); return;
       }
+      // 조각 운영 — PC 도구(tools/pieces.mjs). op: get(설정 · 반별 장부) · event(오늘만 이벤트, pcEventSet 과 같음) · items(상품표) · resetLedger(장부 지우기 — 도구가 먼저 받아 둔다)
+      if (body.action === "pcAdmin") {
+        const TOOL = { role: "owner", tid: "tool" };
+        if (body.op === "get") {
+          const cfg = await pcCfg(), cids = Array.isArray(body.cids) && body.cids.length ? body.cids.map(String) : cfg.cids, ledgers = {};
+          for (const c of cids) ledgers[c] = await listDocs("classes/" + c + "/pieces").catch(() => []);
+          res.status(200).json({ ok: true, cfg: cfg.doc, cids: cfg.cids, today: kstDate(Date.now()), ledgers }); return;
+        }
+        if (body.op === "event") return await pcTeacherAct(res, TOOL, { ...body, action: "pcEventSet" });
+        if (body.op === "items") return await pcTeacherAct(res, TOOL, { ...body, action: "pcItemsSet" });
+        if (body.op === "resetLedger") {
+          const cid = String(body.cid || ""), sids = Array.isArray(body.sids) ? body.sids.map(String) : [];
+          if (!cid || !sids.length) { res.status(400).json({ error: "cid · sids 가 필요해요" }); return; }
+          for (const s of sids) await deleteDoc(pcPath(cid, s));
+          res.status(200).json({ ok: true, cid, deleted: sids.length }); return;
+        }
+        res.status(400).json({ error: "op 는 get · event · items · resetLedger" }); return;
+      }
       if (body.action === "hwLogs") {
         const since = String(body.since || "0000-00-00");
         let cids = body.cid ? [String(body.cid)] : [];
