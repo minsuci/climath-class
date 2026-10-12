@@ -341,6 +341,7 @@ button.cm-cell{cursor:pointer; font-family:inherit;}
 .pc-chip.go{cursor:pointer;}
 .pc-ev{margin-top:10px; background:#fff8d6; border:1px solid #f1dc7a; border-radius:12px; padding:9px 12px; font-size:13.5px; line-height:1.6; color:#5c4a00;}
 .pc-ev b{color:#3d3200;}
+.cm-newver{position:sticky; top:0; z-index:40; display:block; width:100%; border:0; background:#1f6b35; color:#fff; font-weight:700; font-size:14px; padding:10px 12px; cursor:pointer; font-family:inherit;}
 .pc-chip.gift{background:#eef3ff; color:#233a8a; border-color:#b9c8f2; cursor:pointer;}
 .pc-coupon{position:fixed; inset:0; z-index:60; background:#fff; display:flex; flex-direction:column; align-items:center; overflow:auto; padding:14px 12px 24px;}
 .pc-coupon img{width:100%; max-width:440px; height:auto; display:block; border-radius:10px; box-shadow:0 2px 12px rgba(0,0,0,.12);}
@@ -12085,6 +12086,33 @@ function InstallButton() {
   }}>앱 설치</button>;
 }
 
+// 새 판 알림(10/12) — 앱을 켜 둔 채로 배포되면 옛 화면이 그대로 남는다(서진이가 바코드 보기가 없는 옛 판에서 교환권을 바꿈).
+// 처음 받은 index.html 의 ETag 를 기억해 두고, 앱으로 돌아올 때 · 5분마다 HEAD 로만 견준다(본문은 안 받음)
+function NewVersionBar() {
+  const [stale, setStale] = useState(false);
+  useEffect(() => {
+    let tag = null, last = 0, gone = false;
+    const url = IS_T_PATH ? "/t/" : "/";
+    const check = async (force) => {
+      if (gone || (!force && Date.now() - last < 60000)) return;
+      last = Date.now();
+      try {
+        const r = await fetch(url, { method: "HEAD", cache: "no-store" });
+        const e = r.headers.get("etag") || r.headers.get("last-modified");
+        if (!e) return;
+        if (tag == null) tag = e; else if (e !== tag) setStale(true);
+      } catch (er) {}
+    };
+    check(true);
+    const vis = () => { if (document.visibilityState === "visible") check(false); };
+    document.addEventListener("visibilitychange", vis);
+    const iv = setInterval(() => check(true), 5 * 60000);
+    return () => { gone = true; document.removeEventListener("visibilitychange", vis); clearInterval(iv); };
+  }, []);
+  if (!stale) return null;
+  return <button className="cm-newver" onClick={() => window.location.reload()}>새 판이 나왔어요 — 눌러서 새로 열기</button>;
+}
+
 function App() {
   const params = new URLSearchParams(window.location.search);
   const isAdmin = IS_T_PATH || params.get("admin") === "1";
@@ -12107,6 +12135,7 @@ function App() {
         <div className="cm-brand" style={{flex: 1, minWidth: 0}}><span className="cm-logo">CLIMATH</span><span className="cm-sub">{sub}</span></div>
         <InstallButton />
       </header>
+      <NewVersionBar />
       <div className="cm-shell"><main className="cm-main">{main}</main></div>
     </SideCtx.Provider>
   );
