@@ -729,6 +729,7 @@ async function hwSubmit(res, claims, b) {
   const key = await getDoc("examKeys/" + bookId).catch(() => null);
   if (!key || key.kind !== "hw") { res.status(404).json({ error: "그 교재가 없어요" }); return; }
   if ((key.cids || []).length && !key.cids.includes(cid) && !who.teacher) { res.status(403).json({ error: "이 반 교재가 아니에요" }); return; }
+  if ((key.sids || []).length && !who.teacher && !key.sids.includes(cid + "/" + sid) && !key.sids.includes(sid)) { res.status(403).json({ error: "이 교재는 정해진 학생만 낼 수 있어요" }); return; }
   const byN = {}; (key.questions || []).forEach((q) => { byN[q.n] = q; });
   const nums = [...new Set((Array.isArray(b.nums) ? b.nums : []).map(Number))].filter((n) => byN[n]).sort((x, y) => x - y);
   if (!nums.length) { res.status(400).json({ error: "푼 번호가 없어요" }); return; }

@@ -660,8 +660,10 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - PC 로 꺼내기: `node tools/exam-push.mjs --hwlogs [반ID] [--book id] [--since 날짜]` → 극복 문제 만들 때
 - 폰에서 `.mx-body` 가 10px 넘치던 것(동그라미 다섯 개의 최소 폭) — `minmax(0,1fr)` 와 480px 이하 줄임으로 고침. 실전 시험에도 같이 적용된다
 
-### 조각 — 과제 보상 (설계 2026-10-12 · ⚠ «올려» 전엔 배포 안 함)
+### 조각 — 과제 보상 (2026-10-12 운영 시작)
 설계·까닭은 볼트 `20 작업/조각 보상 — 과제 집중 설계.md`. 대상 = `appConfig/pieces.cids`(없으면 서버 `PC.cids` = 고1S `s-mongeum` · 자사고 `jasago`). TOP 은 뺐다.
+- **운영 도구 `tools/pieces.mjs`**(toolKey `pcAdmin`): `--get`(설정 · 이벤트 · 반별 장부) · `--event "이름" --stock N [--pct 100 --cap 1 --id …]`(오늘만 이벤트, 같은 id 로 다시 적으면 재고 채움 → 교환권이 바뀜) · `--event-off` · `--items-clear` · `--reset <반ID> [학생ID…]`(먼저 tools/logs 에 받아 둠)
+- 10/12 첫 운영: 임시 교재 `tmp-yurimuri20`(유리·무리 20제, 고1S·자사고, 진짜 답) + 오늘만 이벤트 CU 바나나우유(확률 100 · 한 사람 1 · 재고 2로 시작해 교환권 확인)
 - 10/11 에 «배율» 판을 만들어 배포했다가 마왕님이 «배포하지 말랬지» → 되돌림. 그 코드는 로컬 브랜치 `pieces-draft`(쓰지 않음). 지금 판은 로컬 브랜치 `pieces` — `.git/hooks/pre-push` 가 `pieces*` 푸시를 막는다. 운영에 올릴 땐 main 에 합쳐서
 - **계산은 전부 서버**(`api/exam.js` 의 `PC` 상수 · `hwPieces` · `pcAdd` · `hwAway` · `pcOpen`). 앱은 서버가 준 `rules` 로 글만 쓴다
 - 버는 법: 처음 맞힘 1 · 틀린 것 다시 풀어 맞힘 1(`hwRetry` 의 새로 고친 수) · 스스로 채점 O 1(`hwSelf`) · **번호 순 5연속 처음 맞힘 +1**(틀리면 다음 번호부터 다시 1, 다섯 차면 +1 하고 다시 1). 한 번 낸 것 안에서만 센다. 안 적은 번호·스스로 채점(대기)은 건너뜀(끊지도 잇지도 않음). 하루 상한 없음

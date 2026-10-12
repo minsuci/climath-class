@@ -4238,9 +4238,9 @@ function useHwBooks(cls, me) {
     if (!cid) { setBooks([]); return; }
     return examListDoc().onSnapshot((d) => {
       const all = (d.exists && d.data().exams) || [];
-      setBooks(all.filter((e) => isHwBook(e) && (!e.test || tch) && (!(e.cids || []).length || e.cids.includes(cid))));
+      setBooks(all.filter((e) => isHwBook(e) && (!e.test || tch) && (!(e.cids || []).length || e.cids.includes(cid)) && (tch || !me || !me.id || mxOpenTo(e, cid, me.id))));   // names 로 건 교재는 그 학생만(10/12)
     }, () => setBooks([]));
-  }, [cid, tch]);
+  }, [cid, tch, me && me.id]);
   return books;
 }
 // 반 «과제» 번호표에 띄울 «과제 채점에서 처음에 틀린 번호» — {반 교재 이름: Set(번호)}. 교재의 link 로 잇는다.
