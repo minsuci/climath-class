@@ -134,7 +134,7 @@ const STUB = `
       get currentUser(){ return _user; },
       signInWithCustomToken: function(tok){
         try { sessionStorage.setItem("__pvTok", tok); } catch(e){}
-        var c = JSON.parse(atob(String(tok).split(".")[1]));
+        var c = JSON.parse(decodeURIComponent(escape(atob(String(tok).split(".")[1]))));
         _user = { uid: c.uid, isAnonymous: false,
                   getIdToken: function(){ return Promise.resolve(tok); },
                   getIdTokenResult: function(){ return Promise.resolve({ claims: c.claims }); } };
@@ -179,7 +179,7 @@ const STUB = `
     if (b.action === "defaultPinReport") return ok({ total: 0, groups: [] });
     /* 방금 만든 반을 만든 사람 담당으로. 실제 서버와 같은 검사(createdBy)를 한다 */
     if (b.action === "claimClass") {
-      var cl = JSON.parse(atob(String(b.idToken).split(".")[1])).claims || {};
+      var cl = JSON.parse(decodeURIComponent(escape(atob(String(b.idToken).split(".")[1])))).claims || {};
       var doc = store["classes/" + b.cid];
       if (!doc) return bad("없는 반입니다", 404);
       if (String(doc.createdBy || "") !== String(cl.tid || "")) return bad("본인이 만든 반이 아닙니다", 403);

@@ -2290,6 +2290,31 @@ function StudentGate({ onClsChange }) {
   const [busy, setBusy] = useState(false);
   const norm = (s) => (s || "").replace(/\s+/g, "");
   useEffect(() => { onClsChange && onClsChange(cls); }, [cls]);
+  useEffect(() => { if (cls) { try { localStorage.setItem("climath_lastcls", cls.id); } catch (e) {} } }, [cls]);
+  // 새로고침 · 앱을 다시 열어도 로그인 유지(10/12) — 파이어베이스 로그인은 기기에 남는다(로그아웃을 눌러야 지워짐).
+  // 예전엔 학생 화면이 «누가 들어왔나» 를 화면 상태로만 들고 있어 새로고침하면 로그인 화면으로 돌아갔다(선생님 화면은 복구했음).
+  // 토큰의 학생 이름(sname)으로 반을 다시 찾는다. 초기 PIN 을 아직 안 바꾼 학생은 그 표시도 이 기기에 남겨 둔다
+  const [restoring, setRestoring] = useState(() => { try { return !!firebase.auth().currentUser; } catch (e) { return false; } });
+  useEffect(() => {
+    (async () => {
+      try {
+        const u = firebase.auth().currentUser; if (!u) return;
+        const c = await authClaims(true);
+        if (!c || c.role !== "student" || !c.sname) return;
+        if (!CLASSES.length) await loadClasses();
+        const nm = norm(c.sname);
+        const mine = CLASSES
+          .map((x) => ({ cls: x, member: (x.roster || []).find((r) => norm(r.name) === nm) }))
+          .filter((x) => x.member && !isClassEnded(x.cls));
+        let mp = false, last = ""; try { mp = localStorage.getItem("climath_mustpin") === nm; last = localStorage.getItem("climath_lastcls") || ""; } catch (e) {}
+        MUST_CHANGE_PIN = mp;
+        setName(c.sname); setMatches(mine);
+        const pick = mine.find((m) => m.cls.id === last) || (mine.length === 1 ? mine[0] : null);
+        if (pick) setCls(pick.cls);
+      } catch (e) { /* 복구 실패하면 그냥 로그인 화면 */ }
+      finally { setRestoring(false); }
+    })();
+  }, []);
 
   async function login() {
     if (busy) return;
@@ -2303,6 +2328,7 @@ function StudentGate({ onClsChange }) {
       await signInWithToken(r.token);
       setPinKept(pin);   // 비밀번호 변경 때 "지금 PIN"으로 다시 쓴다
       MUST_CHANGE_PIN = !!r.mustChangePin;
+      try { if (r.mustChangePin) localStorage.setItem("climath_mustpin", nm); else localStorage.removeItem("climath_mustpin"); } catch (e) {}
       const mine = CLASSES
         .map((c) => ({ cls: c, member: (c.roster || []).find((x) => norm(x.name) === nm) }))
         .filter((x) => x.member && !isClassEnded(x.cls));
@@ -2321,10 +2347,12 @@ function StudentGate({ onClsChange }) {
       setErr(e.message);
     }
   }
-  function fullLogout() { setMatches(null); setCls(null); setPin(""); setErr(""); }
+  // 로그아웃은 이 기기의 로그인까지 지운다(안 지우면 새로고침 때 다시 들어와진다)
+  function fullLogout() { signOutAll(); try { localStorage.removeItem("climath_lastcls"); } catch (e) {} setMatches(null); setCls(null); setPin(""); setErr(""); }
   const gatePickRef = useSwipeBack(fullLogout);
 
   // ---- 로그인 전 ----
+  if (!matches && restoring) return <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>;
   if (!matches) {
     return (
       <div className="cm-card">
@@ -4094,6 +4122,7 @@ function ChangePin({ cls, me, onDone }) {
     try {
       await authApi({ action: "changePin", name: me.name, oldPin: needCur ? cur : SESSION_PIN, newPin: p1 });
       setPinKept(p1);
+      MUST_CHANGE_PIN = false; try { localStorage.removeItem("climath_mustpin"); } catch (e) {}
       setMsg("비밀번호가 변경됐어요"); setTimeout(onDone, 800);
     } catch (e) { setMsg(e.message); }
     setBusy(false);
