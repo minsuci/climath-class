@@ -688,6 +688,7 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - `beforeinstallprompt` 를 일찍 잡아 머리글 «앱 설치» 단추(`InstallButton`)가 쓴다. 학생 주소에서 누르면 학생 앱, `?admin=1` 에서 누르면 선생님 앱이 깔린다. 주소창 설치 아이콘도 같다
 - 학생 쪽에서 선생님 토큰으로 «선생님 모드로 보기» 하던 것은 넣었다가 뺐다(10/10 마왕님). 학생 화면은 학생 로그인으로만
 - 프리뷰 가짜 firebase 는 토큰을 sessionStorage 에 둬서 새로고침해도 로그인이 남는다
+- **새로고침 · 새 판 알림**(10/12): 설치한 앱엔 새로고침 단추가 없어서 머리줄 오른쪽에 ↻(`cm-reload`). 앱을 켜 둔 채 배포되면 옛 화면이 남는다(서진이가 바코드 보기 없는 옛 판에서 교환권을 바꿈) → `NewVersionBar` 가 처음 받은 index.html ETag 를 기억하고 돌아올 때 · 5분마다 HEAD 로 견줘 «새 판이 나왔어요 — 눌러서 새로 열기»
 
 ### 참여표 (`ExamBoard`)
 
