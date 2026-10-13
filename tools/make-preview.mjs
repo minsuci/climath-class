@@ -289,7 +289,7 @@ const STUB = `
     if (b.action === "pcBoard") {
       var rows = Object.keys(store).filter(function(k){ return k.indexOf("classes/" + b.cid + "/pieces/") === 0; }).map(function(k){ var d = store[k], ta = todayAw(d);
         return { sid: k.split("/").pop(), name: d.name, bal: d.bal, earned: d.earned, opened: d.opened, awayN: ta.n, awayTot: ta.tot, aways: d.aways, prizes: d.prizes }; });
-      return ok({ ok: true, on: on, rules: rules(), rows: rows, event: cfg.event || null, today: kstDay(),
+      return ok({ ok: true, on: on, rules: rules(), rows: rows, event: cfg.event || null, items: cfg.items || [], today: kstDay(),
         coupons: ((store["appConfig/pieceCouponIdx"] || { list: [] }).list).map(function(x){ return { id: x.id, item: x.item, used: x.used }; }) });
     }
     if (b.action === "pcGive") { var d4 = ledger(b.cid, b.sid); d4.prizes = d4.prizes.map(function(x){ return x.pid === b.pid ? Object.assign({}, x, { given: true }) : x; }); return ok({ ok: true }); }
@@ -304,7 +304,10 @@ const STUB = `
     if (b.action === "pcCouponAdd") {
       var cl = store["appConfig/pieceCouponIdx"] || (store["appConfig/pieceCouponIdx"] = { list: [] });
       if (cl.list.some(function(x){ return x.img === b.img; })) return bad("같은 쿠폰 사진이 이미 들어 있어요", 409);
-      cl.list.push({ id: "c" + Date.now() + cl.list.length, item: b.item, img: b.img, at: Date.now(), used: null }); return ok({ ok: true });
+      cl.list.push({ id: "c" + Date.now() + cl.list.length, item: b.item, img: b.img, at: Date.now(), used: null });
+      var si = (cfg.items || []).filter(function(x){ return x.id === b.item; })[0] || ((cfg.event || {}).items || []).filter(function(x){ return x.id === b.item; })[0];
+      if (si && si.stock != null) si.stock++;
+      return ok({ ok: true, stocked: !!si });
     }
     if (b.action === "pcCoupon") {
       var d7 = ledger(b.cid, b.sid), p7 = d7.prizes.filter(function(x){ return x.pid === b.pid; })[0], cl7 = (store["appConfig/pieceCouponIdx"] || { list: [] }).list;

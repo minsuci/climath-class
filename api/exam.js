@@ -553,8 +553,11 @@ async function pcCouponAdd(item, img, by) {
   const ok = await patchDocIf(pcCouponPath(id), { item: String(item), img, at: Date.now(), by, used: null }, ["item", "img", "at", "by", "used"], null);
   if (!ok) return { error: "같은 쿠폰 사진이 이미 들어 있어요", dup: true, id };
   await pcCouponIdxEdit((l) => [...l.filter((x) => x.id !== id), { id, item: String(item), at: Date.now(), used: null }]);
-  return { ok: true, id };
+  // 사진 한 장 = 재고 하나(10/13) — 산 만큼 사진을 넣으면 재고가 맞는다. 상품표에 있으면 그쪽, 없고 이벤트에 있으면 이벤트 재고
+  const st = await pcStockMove(String(item), +1, pcInEvent(await pcCfg(), String(item))).catch(() => null);
+  return { ok: true, id, stocked: st === true };
 }
+const pcInEvent = (cfg, id) => !cfg.items.some((x) => x.id === id) && ((cfg.doc.event || {}).items || []).some((x) => x.id === id);
 // 학생 — 내 상품의 쿠폰 사진. 처음 누를 때 그 상품의 남은 쿠폰 하나를 붙인다(쿠폰 문서를 조건부로 잡아 두 사람이 같은 것을 못 받는다)
 async function pcCoupon(res, claims, b) {
   const cid = String(b.cid || ""), sid = String(b.sid || ""), pid = String(b.pid || "");
@@ -729,6 +732,7 @@ async function pcTeacherAct(res, claims, b) {
     if (c.used) { res.status(400).json({ error: c.used.name + " 학생이 이미 받은 쿠폰이에요" }); return; }
     await deleteDoc(pcCouponPath(id));
     await pcCouponIdxEdit((l) => l.filter((x) => x.id !== id));
+    await pcStockMove(c.item, -1, pcInEvent(await pcCfg(), c.item)).catch(() => null);   // 사진을 빼면 재고도 하나 뺀다
     res.status(200).json({ ok: true }); return;
   }
   // 오늘만 이벤트 — 날짜는 서버가 오늘(한국)로 찍는다. off 면 지운다. 재고를 다시 적으면 채운 것(교환권은 학생이 앱에서 바꾼다)
@@ -771,7 +775,7 @@ async function pcTeacherAct(res, claims, b) {
     const cfg = await pcCfg();
     const rows = await listDocs("classes/" + cid + "/pieces").catch(() => []);
     const coupons = (((await getDoc(PC_CIDX).catch(() => null)) || {}).list || []).map((x) => ({ id: x.id, item: x.item, at: x.at, used: x.used ? { name: x.used.name, at: x.used.at } : null }));
-    res.status(200).json({ ok: true, on: cfg.cids.includes(cid), rules: pcRules(), event: cfg.doc.event || null, today: kstDate(Date.now()), coupons, rows: rows.map((d) => {
+    res.status(200).json({ ok: true, on: cfg.cids.includes(cid), rules: pcRules(), event: cfg.doc.event || null, items: cfg.items, today: kstDate(Date.now()), coupons, rows: rows.map((d) => {
       const td = pcToday(d);
       return { sid: d.id, name: d.name, bal: d.bal || 0, earned: d.earned || 0, opened: d.opened || 0, awayN: td.n, awayTot: td.tot,
                aways: (d.aways || []).slice(-80), prizes: (d.prizes || []).slice(-60), log: (d.log || []).slice(-30) };
