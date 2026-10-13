@@ -1305,8 +1305,16 @@ async function authClaims(force) {
   return AUTH;
 }
 
+// 학생 로그인은 6시간까지(10/13) — 학원 공용 태블릿에서 앞 학생이 그대로 남지 않게. 선생님은 그대로
+const STU_LOGIN_MAX = 6 * 3600e3;
+async function studentLoginAge() {
+  let at = 0; try { at = Number(localStorage.getItem("climath_loginAt")) || 0; } catch (e) {}
+  if (!at) { try { const r = await firebase.auth().currentUser.getIdTokenResult(); at = Date.parse(r.authTime) || 0; } catch (e) {} }
+  return at ? Date.now() - at : Infinity;
+}
 async function signInWithToken(token) {
   await firebase.auth().signInWithCustomToken(token);
+  try { localStorage.setItem("climath_loginAt", String(Date.now())); } catch (e) {}
   await authClaims(true);
   await loadClasses();
 }
@@ -2301,6 +2309,7 @@ function StudentGate({ onClsChange }) {
         const u = firebase.auth().currentUser; if (!u) return;
         const c = await authClaims(true);
         if (!c || c.role !== "student" || !c.sname) return;
+        if ((await studentLoginAge()) > STU_LOGIN_MAX) { await signOutAll(); setErr("들어온 지 6시간이 지나 로그아웃됐어요. 다시 들어와 주세요."); return; }
         if (!CLASSES.length) await loadClasses();
         const nm = norm(c.sname);
         const mine = CLASSES
@@ -2348,7 +2357,20 @@ function StudentGate({ onClsChange }) {
     }
   }
   // 로그아웃은 이 기기의 로그인까지 지운다(안 지우면 새로고침 때 다시 들어와진다)
-  function fullLogout() { signOutAll(); try { localStorage.removeItem("climath_lastcls"); } catch (e) {} setMatches(null); setCls(null); setPin(""); setErr(""); }
+  function fullLogout() { signOutAll(); try { localStorage.removeItem("climath_lastcls"); localStorage.removeItem("climath_loginAt"); } catch (e) {} setMatches(null); setCls(null); setPin(""); setErr(""); }
+  // 켜 둔 채로 6시간이 지나도 로그아웃 — 1분마다 · 화면으로 돌아올 때 본다
+  useEffect(() => {
+    if (!matches) return;
+    let gone = false;
+    const check = async () => {
+      if (gone || !firebase.auth().currentUser) return;
+      if ((await studentLoginAge()) > STU_LOGIN_MAX && !gone) { fullLogout(); setErr("들어온 지 6시간이 지나 로그아웃됐어요. 다시 들어와 주세요."); }
+    };
+    const vis = () => { if (document.visibilityState === "visible") check(); };
+    const iv = setInterval(check, 60000);
+    document.addEventListener("visibilitychange", vis);
+    return () => { gone = true; clearInterval(iv); document.removeEventListener("visibilitychange", vis); };
+  }, [!!matches]);
   const gatePickRef = useSwipeBack(fullLogout);
 
   // ---- 로그인 전 ----
