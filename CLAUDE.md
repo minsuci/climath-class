@@ -661,7 +661,8 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - 폰에서 `.mx-body` 가 10px 넘치던 것(동그라미 다섯 개의 최소 폭) — `minmax(0,1fr)` 와 480px 이하 줄임으로 고침. 실전 시험에도 같이 적용된다
 
 ### 조각 — 과제 보상 (2026-10-12 운영 시작)
-설계·까닭은 볼트 `20 작업/조각 보상 — 과제 집중 설계.md`. 대상 = `appConfig/pieces.cids`(없으면 서버 `PC.cids` = 고1S `s-mongeum` · 자사고 `jasago`). TOP 은 뺐다.
+설계·까닭은 볼트 `20 작업/조각 보상 — 과제 집중 설계.md`. 대상 = `appConfig/pieces.cids`(없으면 서버 `PC.cids` = 고1S `s-mongeum` · 자사고 `jasago`). TOP 은 뺐다 → **10/13 TOP(`L9gWXKhXF2TERwEHV5r8`) 더함**(`pieces.mjs --cids …`, pcAdmin op `cids`).
+- **10/13 상품표 = 실물 상품 네 칸**(금액권 아님 — 잔액이 남아 귀찮음. SPC 계열 안 삼): 작은 간식 9% · 간식 12% · 음료·초콜릿 7.5% · 투썸 떠먹는 아박 1.5% · 꽝 70%. 칸 안에 여러 상품 사진을 섞어 넣는다. 교환권 이름은 금액이 아니라 칸 이름(«작은 간식 교환권»)
 - **운영 도구 `tools/pieces.mjs`**(toolKey `pcAdmin`): `--get`(설정 · 이벤트 · 반별 장부) · `--event "이름" --stock N [--pct 100 --cap 1 --id …]`(오늘만 이벤트, 같은 id 로 다시 적으면 재고 채움 → 교환권이 바뀜) · `--event-off` · `--items-clear` · `--reset <반ID> [학생ID…]`(먼저 tools/logs 에 받아 둠)
 - **기프티콘 쿠폰 사진**(10/12): `pieceCoupons/{사진 sha256 앞 24자}` {item, img data URL, used} — 클라이언트 규칙으로 못 읽고(맨 끝 «나머지 다 막음») 서버 `pcCoupon` 이 주인 확인 뒤에만 준다. 학생이 «🎫 바코드 보기» 를 처음 누를 때 그 상품의 남은 쿠폰 하나를 조건부로 잡아 붙이고 상품은 `given(app)` 이 된다(선생님이 직접 준 상품은 못 봄). 같은 사진은 해시가 같아 못 들어감. 목록 `appConfig/pieceCouponIdx`(사진 없음). 넣기: 선생님 판 이벤트 칸 «+ 쿠폰 사진 넣기» 또는 `tools/pieces.mjs --coupon <상품id> 사진…`. 평소 상품표 상품용 넣기 화면은 아직 없음(도구로)
 - **사진 한 장 = 재고 하나**(10/13): 쿠폰 사진을 넣으면(`pcCouponAdd`) 그 상품 재고 +1, 안 쓴 사진을 빼면 −1. 상품표에 있으면 그쪽, 없고 이벤트에 있으면 이벤트 재고(`pcInEvent`). 선생님 «과제» 판 «구슬 상품» 칸이 늘 보이는 표(확률 · 재고 · 쿠폰 남은/전체 · 교환권 대기 · «+ 사진»)이고, 고치기는 «상품표 고치기». ⚠ `--event --stock` 처럼 재고를 손으로 적으면 사진과 따로 논다 — 사진으로 채울 것

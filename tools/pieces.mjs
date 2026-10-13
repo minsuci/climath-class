@@ -6,6 +6,7 @@
 //   node tools/pieces.mjs --event-off                             이벤트 끄기
 //   node tools/pieces.mjs --items-clear                           평소 상품표 비우기(상품이 없으면 구슬이 안 열린다 — 구슬은 그대로)
 //   node tools/pieces.mjs --coupon <상품id> 사진.png [사진2.png …]  쿠폰(기프티콘 바코드) 사진 넣기 — 같은 사진은 서버가 막는다
+//   node tools/pieces.mjs --cids s-mongeum jasago L9gW…          조각 쓰는 반 바꾸기(있는 반만 · 10/13 TOP 더함)
 //   node tools/pieces.mjs --coupons                               쿠폰 목록(누가 받았나 · 사진은 안 보임)
 //   node tools/pieces.mjs --reset <반ID> [학생ID…]                장부 지우기 — 먼저 tools/logs/pieces-backup-*.json 에 받아 둔다
 import fs from "fs";
@@ -53,6 +54,7 @@ else if (has("--coupon")) {
   }
 }
 else if (has("--coupons")) { const j = await call({ op: "coupons" }); for (const x of j.list) console.log(x.id + " · " + x.item + " · " + (x.used ? "받음 " + x.used.name + " " + new Date(x.used.at).toLocaleString("ko-KR") : "남음")); }
+else if (has("--cids")) { const i = args.indexOf("--cids"), cs = args.slice(i + 1).filter((x) => !x.startsWith("--")); const j = await call({ op: "cids", cids: cs }); console.log("조각 쓰는 반:", j.cids.join(", ")); }
 else if (has("--items-clear")) { await call({ op: "items", items: [] }); console.log("평소 상품표 비움"); }
 else if (has("--reset")) {
   const cid = arg("--reset"), j = await call({ op: "get", cids: [cid] });

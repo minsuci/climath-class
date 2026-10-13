@@ -471,7 +471,7 @@ const r1 = (x) => Math.round(x * 10) / 10;
 //   조각 20 = 구슬 1. 구슬을 열면 확률로 기프티콘 또는 꽝. 재고 없는 게 뽑히면 구슬을 안 쓴다(«나중에 다시»)
 // 장부 classes/{cid}/pieces/{sid} — 쓰기는 서버만, 조건부 쓰기(getDocV · patchDocIf)로 겹침을 막는다
 const PC = {
-  cids: ["s-mongeum", "jasago"],   // 대상 반 — 10/12 고1S · 고1자사고반(TOP 은 뺌). appConfig/pieces.cids 가 있으면 그것
+  cids: ["s-mongeum", "jasago"],   // 대상 반 — 10/12 고1S · 고1자사고반(TOP 은 뺌). appConfig/pieces.cids 가 있으면 그것(10/13 TOP 더함 — pieces.mjs --cids)
   cost: 20,        // 구슬 하나 = 조각 20
   streak: 5,       // 번호 순 연속 정답 다섯마다 +1
   awayMin: 5,      // 이만큼(초) 이하로 떠난 건 안 센다
@@ -512,7 +512,8 @@ async function pcAdd(cid, sid, name, pts, rec) {
 }
 const pcToday = (d) => (d.awayDay === kstDate(Date.now()) ? { n: d.awayN || 0, tot: d.awayTot || 0 } : { n: 0, tot: 0 });
 // 재고 없는 상품이 뽑히면 그 값의 교환권(10/12 마왕님) — 이름은 «6,000원 교환권»
-const pcVoucherName = (x) => (Number(x.price) > 0 ? Number(x.price).toLocaleString("ko-KR") + "원" : x.name) + " 교환권";
+// 10/13 실물 상품을 칸으로 묶으면서(«작은 간식» 처럼) 금액이 아니라 상품 이름으로 — «작은 간식 교환권»
+const pcVoucherName = (x) => x.name + " 교환권";
 // 오늘만 이벤트(10/12) — appConfig/pieces.event {day 한국 날짜, title, cap 한 사람 당첨 한도, items[{id,name,pct,price,stock}]}.
 // 그날은 상품표 대신 이것으로 뽑고, 한 사람이 cap 개를 받으면 그날은 구슬을 더 못 연다(남은 구슬은 다음 날)
 const pcEvt = (cfg) => { const e = cfg.doc.event; return e && e.day === kstDate(Date.now()) && Array.isArray(e.items) && e.items.length ? e : null; };
@@ -1071,6 +1072,13 @@ export default async function handler(req, res) {
         }
         if (body.op === "event") return await pcTeacherAct(res, TOOL, { ...body, action: "pcEventSet" });
         if (body.op === "items") return await pcTeacherAct(res, TOOL, { ...body, action: "pcItemsSet" });
+        if (body.op === "cids") {   // 대상 반 바꾸기 — 있는 반만
+          const want = Array.isArray(body.cids) ? [...new Set(body.cids.map(String))] : [];
+          const have = new Set((await listDocs("classes").catch(() => [])).map((c) => c.id)), bad = want.filter((c) => !have.has(c));
+          if (!want.length || bad.length) { res.status(400).json({ error: "없는 반: " + (bad.join(", ") || "(빈 목록)") }); return; }
+          await patchDoc("appConfig/pieces", { cids: want, at: Date.now() });
+          res.status(200).json({ ok: true, cids: want }); return;
+        }
         if (body.op === "couponAdd") { const r = await pcCouponAdd(body.item, body.img, "tool"); res.status(r.error ? (r.dup ? 409 : 400) : 200).json(r); return; }
         if (body.op === "coupons") { res.status(200).json({ ok: true, list: (((await getDoc(PC_CIDX).catch(() => null)) || {}).list || []) }); return; }
         if (body.op === "resetLedger") {
