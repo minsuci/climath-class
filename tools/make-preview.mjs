@@ -217,17 +217,26 @@ const STUB = `
     var evNow = cfg.event && cfg.event.day === kstDay() && (cfg.event.items || []).length ? cfg.event : null;
     var evWon = function(d){ return evNow && d.evDay === evNow.day ? d.evWins || 0 : 0; };
     var itemOf = function(p){ var l = p.ev ? ((cfg.event || {}).items || []) : (cfg.items || []); return l.filter(function(y){ return y.id === p.id; })[0]; };
+    var lectOf = function(cid){ return (store["hwLect/" + cid] || { b: {} }).b; };
+    if (b.action === "hwLectGet") return ok({ ok: true, lect: lectOf(b.cid) });
+    if (b.action === "hwLectSet") {
+      var lb = lectOf(b.cid), cur = (lb[b.bookId] || []).slice();
+      (b.nums || []).forEach(function(n){ var i = cur.indexOf(n); if (b.on !== false && i < 0) cur.push(n); if (b.on === false && i >= 0) cur.splice(i, 1); });
+      cur.sort(function(x, y){ return x - y; }); if (cur.length) lb[b.bookId] = cur; else delete lb[b.bookId];
+      store["hwLect/" + b.cid] = { b: lb }; return ok({ ok: true, lect: lb });
+    }
     if (b.action === "hwSubmit") {
+      var lset = lectOf(b.cid)[b.bookId] || [];
       var asT = tch || !!rowOf(b.sid).teacher, byN = {}; (book.questions || []).forEach(function(q){ byN[q.n] = q; });
       var qs = (b.nums || []).map(function(n){ var q = byN[n], a = b.answers[n]; a = a == null || a === "" ? null : a;
-        return { n: n, type: q.type, u: q.u, answer: a, auto: a == null ? false : book.free ? true : hwOk(q, a), sec: 20 + (n % 7) * 9 }; });
+        return { n: n, type: q.type, u: q.u, answer: a, auto: a == null ? false : book.free ? true : hwOk(q, a), sec: 20 + (n % 7) * 9, lect: lset.indexOf(n) >= 0 || undefined }; });
       var date = kstDay();
       var log = { rid: b.rid, cid: b.cid, sid: b.sid, name: rowOf(b.sid).name, bookId: b.bookId, title: book.title, date: date, startedAt: b.startedAt, endT: b.endT,
         pausedSec: b.pausedSec || 0, nums: b.nums, questions: qs, ev: b.ev, n: qs.length, correct: qs.filter(function(q){ return q.auto === true; }).length,
         blank: qs.filter(function(q){ return q.answer == null; }).length, pending: qs.filter(function(q){ return q.auto === null; }).length, teacher: asT, time: Date.now() };
       if (!asT && on) {
         var first = 0, st = 0, run = 0;
-        qs.slice().sort(function(x, y){ return x.n - y.n; }).forEach(function(q){ if (q.answer == null || q.auto === null) return; if (q.auto) { first++; if (++run >= PCF.streak) { st++; run = 0; } } else run = 0; });
+        qs.slice().sort(function(x, y){ return x.n - y.n; }).forEach(function(q){ if (q.answer == null || q.auto === null || q.lect) return; if (q.auto) { first++; if (++run >= PCF.streak) { st++; run = 0; } } else run = 0; });
         add(b.sid, first + st, "hw"); log.pieces = { first: first, streaks: st, pts: first + st };
       }
       if (!asT && book.link) { var hk = "classes/" + b.cid + "/homework/" + b.sid, hd = store[hk] || { books: {} }; hd.books = hd.books || {};
@@ -254,7 +263,7 @@ const STUB = `
     if (b.action === "pcMe") {
       if (!on) return ok({ ok: true, on: false });
       var d = ledger(b.cid, b.sid), ta = todayAw(d), sum = 0; (cfg.items || []).forEach(function(x){ sum += x.pct; });
-      return ok({ ok: true, on: true, bal: d.bal, earned: d.earned, opened: d.opened, awayN: ta.n, awayTot: ta.tot, rules: rules(),
+      return ok({ ok: true, on: true, bal: d.bal, earned: d.earned, opened: d.opened, awayN: ta.n, awayTot: ta.tot, rules: rules(), lect: lectOf(b.cid),
         prizes: d.prizes.map(function(p){ var it = p.voucher && !p.given ? itemOf(p) : null; return p.voucher && !p.given ? Object.assign({}, p, { canSwap: !!it && (it.stock == null || it.stock > 0) }) : p; }),
         hasItems: (cfg.items || []).length > 0 || !!evNow,
         event: evNow ? { title: evNow.title, cap: evNow.cap, won: evWon(d), names: evNow.items.map(function(x){ return x.name; }),
@@ -332,7 +341,7 @@ const STUB = `
     if (b.action === "pcItemsSet") { cfg.items = (b.items || []).map(function(x, i){ return Object.assign({}, x, { id: x.id || "n" + Date.now() + i }); }); store["appConfig/pieces"] = cfg; return ok({ ok: true, items: cfg.items }); }
     return ok({ ok: true });
   };
-  var PC_KEEP = { test: function(k){ return k === "appConfig/pieces" || k === "appConfig/pieceCouponIdx" || ["pieces", "days", "homework"].some(function(c){ return k.indexOf("classes/c-reg/" + c + "/") === 0; }); } };
+  var PC_KEEP = { test: function(k){ return k === "appConfig/pieces" || k === "appConfig/pieceCouponIdx" || k.indexOf("hwLect/") === 0 || ["pieces", "days", "homework"].some(function(c){ return k.indexOf("classes/c-reg/" + c + "/") === 0; }); } };
   var pcSave = function(){ try { var o = {}; Object.keys(store).forEach(function(k){ if (PC_KEEP.test(k)) o[k] = store[k]; }); sessionStorage.setItem("__pvPc", JSON.stringify(o)); } catch(e){} };
   window.fetch = function(url, init){
     if (String(url).indexOf("/api/exam") < 0) return _fetch2(url, init);

@@ -489,11 +489,15 @@ async function pcCfg() {
 function hwPieces(questions) {
   let first = 0, streaks = 0, run = 0;
   [...(questions || [])].sort((a, b) => a.n - b.n).forEach((q) => {
-    if (q.answer == null || q.auto === null) return;
+    if (q.answer == null || q.auto === null || q.lect) return;   // lect = 수업에서 풀어 준 번호(10/15) — 조각 없음, 연속도 안 끊음
     if (q.auto === true) { first++; if (++run >= PC.streak) { streaks++; run = 0; } } else run = 0;
   });
   return { first, streaks, pts: first + streaks };
 }
+// 수업에서 풀어 준 번호(10/15 마왕님) — 선생님이 반·교재마다 그때그때 표시한다. hwLect/{cid} {b:{교재id:[번호]}, at, by}.
+// 표시된 뒤에 낸 답만 조각이 없다(낸 때 questions[].lect 로 박아 둔다). 그 전에 낸 것은 예습이라 그대로 — 회수하지 않는다
+const hwLectPath = (cid) => "hwLect/" + cid;
+async function hwLectGet(cid) { return (((await getDoc(hwLectPath(cid)).catch(() => null)) || {}).b) || {}; }
 // 장부 고치기 — 읽고 fn 으로 바꿔 «그 사이 아무도 안 고쳤을 때만» 쓴다. 남이 먼저 썼으면 다시
 async function pcEdit(cid, sid, fn) {
   for (let i = 0; i < 6; i++) {
@@ -610,7 +614,7 @@ async function pcMe(res, claims, b) {
   const d = (await getDoc(pcPath(cid, sid)).catch(() => null)) || {};
   const td = pcToday(d), ev = pcEvt(cfg);
   res.status(200).json({ ok: true, on: true, teacher: !!who.teacher, bal: d.bal || 0, earned: d.earned || 0, opened: d.opened || 0,
-    awayN: td.n, awayTot: td.tot, rules: pcRules(),
+    awayN: td.n, awayTot: td.tot, rules: pcRules(), lect: await hwLectGet(cid),
     prizes: (d.prizes || []).slice(-60).map((p) => (p.voucher && !p.given ? { ...p, canSwap: pcSwapOk(cfg, p) } : p)),
     hasItems: cfg.items.length > 0 || !!ev,   // 확률표는 학생에게 안 보인다(10/12)
     event: ev ? { title: ev.title || "", cap: ev.cap || 1, won: pcEvWon(d, ev), names: ev.items.map((x) => x.name),
@@ -716,6 +720,27 @@ async function pcTeacher(res, claims, cid) {
 }
 async function pcTeacherAct(res, claims, b) {
   const cid = String(b.cid || "");
+  if (b.action === "hwLectGet") {
+    if (!(await pcTeacher(res, claims, cid))) return;
+    res.status(200).json({ ok: true, lect: await hwLectGet(cid) }); return;
+  }
+  if (b.action === "hwLectSet") {   // {cid, bookId, nums:[], on} — 켜기/끄기. 조건부로 겹침 막음
+    if (!(await pcTeacher(res, claims, cid))) return;
+    const bookId = String(b.bookId || ""), on = b.on !== false;
+    const nums = [...new Set((Array.isArray(b.nums) ? b.nums : []).map(Number).filter((n) => Number.isFinite(n)))];
+    if (!cid || !bookId || !nums.length) { res.status(400).json({ error: "반 · 교재 · 번호가 필요해요" }); return; }
+    for (let k = 0; k < 6; k++) {
+      const { doc, v } = await getDocV(hwLectPath(cid));
+      const all = { ...((doc || {}).b || {}) }, cur = new Set((all[bookId] || []).map(Number));
+      nums.forEach((n) => (on ? cur.add(n) : cur.delete(n)));
+      all[bookId] = [...cur].sort((x, y) => x - y);
+      if (!all[bookId].length) delete all[bookId];
+      if (await patchDocIf(hwLectPath(cid), { b: all, at: Date.now(), by: claims.tid || claims.role }, ["b", "at", "by"], v)) {
+        res.status(200).json({ ok: true, lect: all }); return;
+      }
+    }
+    res.status(409).json({ error: "잠깐 뒤에 다시" }); return;
+  }
   if (b.action === "pcItemsGet") {
     if (!(await pcTeacher(res, claims, ""))) return;
     const c = await pcCfg();
@@ -821,10 +846,11 @@ async function hwSubmit(res, claims, b) {
   const endT = Math.max(0, Math.min(HW_MAX_SEC, Number(b.endT) || 0));
   const startedAt = Number(b.startedAt) || Date.now();
   const sec = hwSecs(ev, endT);
+  const lect = new Set(((await hwLectGet(cid))[bookId] || []).map(Number));
   const questions = nums.map((n) => {
     const q = byN[n], mine = hwNorm(q, answers[n]);
     return { n, type: q.type, ...(q.label ? { label: q.label } : {}), ...(q.u != null ? { u: q.u } : {}),
-             answer: mine, auto: mine == null ? false : key.free ? true : autoCorrect(q, mine), sec: r1(sec[n] || 0) };
+             answer: mine, auto: mine == null ? false : key.free ? true : autoCorrect(q, mine), sec: r1(sec[n] || 0), ...(lect.has(n) ? { lect: true } : {}) };
   });
   const date = kstDate(startedAt), now = Date.now();
   const log = {
@@ -885,7 +911,8 @@ async function hwRetry(res, claims, b) {
   if (!changed) { res.status(400).json({ error: "다시 낸 답이 없어요" }); return; }
   const patch = { questions, retried: now, fixed: questions.filter((q) => q.auto === false && q.fin === true).length };
   await patchDoc(path, patch);
-  const newly = patch.fixed - (log.fixed || 0);
+  const fixPc = (rows) => rows.filter((q) => q.auto === false && q.fin === true && !q.lect).length;   // 수업 풀이는 다시 맞혀도 조각 없음
+  const newly = fixPc(questions) - fixPc(log.questions || []);
   let pc = null;
   if (!who.teacher && newly > 0) {
     const cfg = await pcCfg().catch(() => null);
@@ -914,7 +941,8 @@ async function hwSelf(res, claims, b) {
   const patch = { questions, correct: questions.filter((q) => q.auto === true).length, pending: questions.filter((q) => q.auto === null).length };
   await patchDoc(path, patch);
   // 스스로 채점에서 O = 처음 맞힘 → 조각 1 (5연속은 낼 때 건너뛴 것이라 안 센다)
-  const gain = (log.correct != null ? patch.correct - log.correct : 0);
+  const okPc = (rows) => rows.filter((q) => q.auto === true && !q.lect).length;
+  const gain = okPc(questions) - okPc(log.questions || []);
   let pc = null;
   if (!who.teacher && gain > 0) {
     const cfg = await pcCfg().catch(() => null);
@@ -1147,7 +1175,7 @@ export default async function handler(req, res) {
     if (body.action === "pcSwap") return await pcSwap(res, claims, body);
     if (body.action === "pcCoupon") return await pcCoupon(res, claims, body);
     if (body.action === "hwAway") return await hwAway(res, claims, body);
-    if (["pcItemsGet", "pcItemsSet", "pcEventSet", "pcCouponAdd", "pcCouponDel", "pcBoard", "pcGive", "pcAdjust"].includes(body.action)) return await pcTeacherAct(res, claims, body);
+    if (["pcItemsGet", "pcItemsSet", "pcEventSet", "pcCouponAdd", "pcCouponDel", "pcBoard", "pcGive", "pcAdjust", "hwLectGet", "hwLectSet"].includes(body.action)) return await pcTeacherAct(res, claims, body);
     if (body.action === "hkRemove") return await hkRemove(res, claims, body);
     res.status(400).json({ error: "그런 동작이 없어요" });
   } catch (e) {

@@ -662,6 +662,7 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 
 ### 조각 — 과제 보상 (2026-10-12 운영 시작)
 설계·까닭은 볼트 `20 작업/조각 보상 — 과제 집중 설계.md`. 대상 = `appConfig/pieces.cids`(없으면 서버 `PC.cids` = 고1S `s-mongeum` · 자사고 `jasago`). TOP 은 뺐다 → **10/13 TOP(`L9gWXKhXF2TERwEHV5r8`) 더함**(`pieces.mjs --cids …`, pcAdmin op `cids`).
+- **수업 풀이 번호(10/15)**: 선생님 «과제» 판 «수업에서 풀어 준 번호» 카드에서 반·교재마다 번호를 누른다(범위 «12-18, 25» 도). 저장 `hwLect/{cid}` {b:{교재id:[번호]}} — 서버만(규칙 맨 끝 거절). `hwSubmit` 이 **낸 때** 표시돼 있으면 `questions[].lect:true` 를 박고 `hwPieces` 가 건너뛴다(조각 0 · 5연속 안 끊음). 다시 맞힘·스스로 채점 O 도 lect 는 0. **표시 전에 낸 답(예습)은 그대로** — 마왕님 결정, 회수 안 함. 학생은 `pcMe.lect` 로 받아 풀기 화면에 «수업 풀이 — 조각 없음»
 - **10/13 상품표 = 실물 상품 네 칸**(금액권 아님 — 잔액이 남아 귀찮음. SPC 계열 안 삼): 작은 간식 9% · 간식 12% · 음료·초콜릿 7.5% · 투썸 떠먹는 아박 1.5% · 꽝 70%. 칸 안에 여러 상품 사진을 섞어 넣는다. 교환권 이름은 금액이 아니라 칸 이름(«작은 간식 교환권»)
 - **운영 도구 `tools/pieces.mjs`**(toolKey `pcAdmin`): `--get`(설정 · 이벤트 · 반별 장부) · `--event "이름" --stock N [--pct 100 --cap 1 --id …]`(오늘만 이벤트, 같은 id 로 다시 적으면 재고 채움 → 교환권이 바뀜) · `--event-off` · `--items-clear` · `--reset <반ID> [학생ID…]`(먼저 tools/logs 에 받아 둠)
 - **기프티콘 쿠폰 사진**(10/12): `pieceCoupons/{사진 sha256 앞 24자}` {item, img data URL, used} — 클라이언트 규칙으로 못 읽고(맨 끝 «나머지 다 막음») 서버 `pcCoupon` 이 주인 확인 뒤에만 준다. 학생이 «🎫 바코드 보기» 를 처음 누를 때 그 상품의 남은 쿠폰 하나를 조건부로 잡아 붙이고 상품은 `given(app)` 이 된다(선생님이 직접 준 상품은 못 봄). 같은 사진은 해시가 같아 못 들어감. 목록 `appConfig/pieceCouponIdx`(사진 없음). 넣기: 선생님 판 이벤트 칸 «+ 쿠폰 사진 넣기» 또는 `tools/pieces.mjs --coupon <상품id> 사진…`. 평소 상품표 상품용 넣기 화면은 아직 없음(도구로)
