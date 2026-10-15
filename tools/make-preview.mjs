@@ -217,16 +217,21 @@ const STUB = `
     var evNow = cfg.event && cfg.event.day === kstDay() && (cfg.event.items || []).length ? cfg.event : null;
     var evWon = function(d){ return evNow && d.evDay === evNow.day ? d.evWins || 0 : 0; };
     var itemOf = function(p){ var l = p.ev ? ((cfg.event || {}).items || []) : (cfg.items || []); return l.filter(function(y){ return y.id === p.id; })[0]; };
-    var lectOf = function(cid){ return (store["hwLect/" + cid] || { b: {} }).b; };
+    var lectOf = function(cid){ var d = store["hwLect/" + cid] || {}; return { b: d.b || {}, odd: !!d.odd, rel: d.rel || {} }; };
+    var lHas = function(L, bid, n){ return (L.b[bid] || []).indexOf(n) >= 0 || (L.odd && n % 2 === 1 && (L.rel[bid] || []).indexOf(n) < 0); };
     if (b.action === "hwLectGet") return ok({ ok: true, lect: lectOf(b.cid) });
-    if (b.action === "hwLectSet") {
-      var lb = lectOf(b.cid), cur = (lb[b.bookId] || []).slice();
-      (b.nums || []).forEach(function(n){ var i = cur.indexOf(n); if (b.on !== false && i < 0) cur.push(n); if (b.on === false && i >= 0) cur.splice(i, 1); });
-      cur.sort(function(x, y){ return x - y; }); if (cur.length) lb[b.bookId] = cur; else delete lb[b.bookId];
-      store["hwLect/" + b.cid] = { b: lb }; return ok({ ok: true, lect: lb });
+    if (b.action === "hwLectSet") {   // 미리보기 — 지급(hwLectPay)은 안 흉내 냄
+      var L0 = lectOf(b.cid);
+      if (typeof b.odd === "boolean") L0.odd = b.odd;
+      else (b.nums || []).forEach(function(n){
+        var cur = L0.b[b.bookId] || (L0.b[b.bookId] = []), rel = L0.rel[b.bookId] || (L0.rel[b.bookId] = []), od = L0.odd && n % 2 === 1;
+        if (b.on !== false) { if (rel.indexOf(n) >= 0) rel.splice(rel.indexOf(n), 1); if (!od && cur.indexOf(n) < 0) cur.push(n); }
+        else { if (cur.indexOf(n) >= 0) cur.splice(cur.indexOf(n), 1); if (od && rel.indexOf(n) < 0) rel.push(n); }
+      });
+      store["hwLect/" + b.cid] = L0; return ok({ ok: true, lect: L0, paid: [] });
     }
     if (b.action === "hwSubmit") {
-      var lset = lectOf(b.cid)[b.bookId] || [];
+      var LL = lectOf(b.cid), lset = (book.questions || []).map(function(q){ return q.n; }).filter(function(n){ return lHas(LL, b.bookId, n); });
       var asT = tch || !!rowOf(b.sid).teacher, byN = {}; (book.questions || []).forEach(function(q){ byN[q.n] = q; });
       var qs = (b.nums || []).map(function(n){ var q = byN[n], a = b.answers[n]; a = a == null || a === "" ? null : a;
         return { n: n, type: q.type, u: q.u, answer: a, auto: a == null ? false : book.free ? true : hwOk(q, a), sec: 20 + (n % 7) * 9, lect: lset.indexOf(n) >= 0 || undefined }; });

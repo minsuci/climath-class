@@ -496,8 +496,45 @@ function hwPieces(questions) {
 }
 // 수업에서 풀어 준 번호(10/15 마왕님) — 선생님이 반·교재마다 그때그때 표시한다. hwLect/{cid} {b:{교재id:[번호]}, at, by}.
 // 표시된 뒤에 낸 답만 조각이 없다(낸 때 questions[].lect 로 박아 둔다). 그 전에 낸 것은 예습이라 그대로 — 회수하지 않는다
+// 10/15 오후: «홀수 기본 보류»(odd) — 원장님 반(TOP)처럼 무엇을 풀어 줬는지 모를 때, 홀수 번호는 처음부터 수업 풀이로 보고 보류한다.
+// 나중에 «풀기»(rel 에 넣음 · 직접 표시한 번호는 b 에서 뺌) 하면 그 번호를 맞힌 학생에게 그때 지급(hwLectPay) — 회수가 아니라 «나중에 더 받는» 꼴.
+// 장부 held = 보류 중인 조각 수(보여 주기용). 5연속 덤은 낼 때 한 번만 세고, 나중 지급 땐 다시 세지 않는다
 const hwLectPath = (cid) => "hwLect/" + cid;
-async function hwLectGet(cid) { return (((await getDoc(hwLectPath(cid)).catch(() => null)) || {}).b) || {}; }
+const hwLectNorm = (d) => ({ b: (d && d.b) || {}, odd: !!(d && d.odd), rel: (d && d.rel) || {} });
+async function hwLectGet(cid) { return hwLectNorm(await getDoc(hwLectPath(cid)).catch(() => null)); }
+const hwLectHas = (L, bookId, n) => (L.b[bookId] || []).map(Number).includes(n) || (L.odd && n % 2 === 1 && !(L.rel[bookId] || []).map(Number).includes(n));
+// 보류를 푼 번호 — 이 반 기록에서 그 교재·번호가 lect 이고 (처음 맞힘 또는 다시 맞힘) 인 줄을 찾아 1조각씩. 줄의 lect 를 걷어 두 번 안 준다
+async function hwLectPay(cid, bookId, nums) {
+  const want = new Set(nums.map(Number)), per = {};
+  const days = (await listDocs("classes/" + cid + "/days").catch(() => [])).map((d) => d.id);
+  for (const d of days) {
+    const ls = await listDocs("classes/" + cid + "/days/" + d + "/hwLogs").catch(() => []);
+    for (const l0 of ls) {
+      if (l0.bookId !== bookId || l0.teacher || !(l0.questions || []).some((q) => q.lect && want.has(q.n))) continue;
+      const path = "classes/" + cid + "/days/" + d + "/hwLogs/" + (l0.rid || l0.id);
+      for (let k = 0; k < 5; k++) {
+        const { doc: l, v } = await getDocV(path); if (!l) break;
+        let pay = 0;
+        const questions = (l.questions || []).map((q) => {
+          if (!q.lect || !want.has(q.n)) return q;
+          const ok = q.auto === true || (q.auto === false && q.fin === true);
+          if (ok) pay++;
+          const { lect, ...rest } = q;
+          return { ...rest, lectFreed: Date.now(), ...(ok ? { lectPaid: true } : {}) };
+        });
+        if (await patchDocIf(path, { questions }, ["questions"], v)) {
+          if (pay) { const x = per[l.sid] || (per[l.sid] = { name: l.name, pay: 0 }); x.pay += pay; }
+          break;
+        }
+      }
+    }
+  }
+  for (const [sid, x] of Object.entries(per)) {
+    await pcEdit(cid, sid, (L) => ({ name: x.name, bal: (L.bal || 0) + x.pay, earned: (L.earned || 0) + x.pay, held: Math.max(0, (L.held || 0) - x.pay),
+      log: [...(L.log || []), { t: Date.now(), k: "lect", book: bookId, nums: [...want].slice(0, 40), d: x.pay }].slice(-PC_LOG) })).catch((e) => console.error("[lectPay]", e));
+  }
+  return Object.entries(per).map(([sid, x]) => ({ sid, name: x.name, pay: x.pay }));
+}
 // 장부 고치기 — 읽고 fn 으로 바꿔 «그 사이 아무도 안 고쳤을 때만» 쓴다. 남이 먼저 썼으면 다시
 async function pcEdit(cid, sid, fn) {
   for (let i = 0; i < 6; i++) {
@@ -509,10 +546,10 @@ async function pcEdit(cid, sid, fn) {
   }
   throw new Error("조각 장부가 바빠요 — 잠깐 뒤에 다시");
 }
-async function pcAdd(cid, sid, name, pts, rec) {
-  const r = await pcEdit(cid, sid, (d) => ({ name, bal: (d.bal || 0) + pts, earned: (d.earned || 0) + pts,
-    log: [...(d.log || []), { t: Date.now(), ...rec, d: pts }].slice(-PC_LOG) }));
-  return { add: pts, bal: r.next.bal };
+async function pcAdd(cid, sid, name, pts, rec, held) {
+  const r = await pcEdit(cid, sid, (d) => ({ name, bal: (d.bal || 0) + pts, earned: (d.earned || 0) + pts, ...(held ? { held: (d.held || 0) + held } : {}),
+    log: [...(d.log || []), { t: Date.now(), ...rec, d: pts, ...(held ? { held } : {}) }].slice(-PC_LOG) }));
+  return { add: pts, bal: r.next.bal, held: r.next.held };
 }
 const pcToday = (d) => (d.awayDay === kstDate(Date.now()) ? { n: d.awayN || 0, tot: d.awayTot || 0 } : { n: 0, tot: 0 });
 // 재고 없는 상품이 뽑히면 그 값의 교환권(10/12 마왕님) — 이름은 «6,000원 교환권»
@@ -614,7 +651,7 @@ async function pcMe(res, claims, b) {
   const d = (await getDoc(pcPath(cid, sid)).catch(() => null)) || {};
   const td = pcToday(d), ev = pcEvt(cfg);
   res.status(200).json({ ok: true, on: true, teacher: !!who.teacher, bal: d.bal || 0, earned: d.earned || 0, opened: d.opened || 0,
-    awayN: td.n, awayTot: td.tot, rules: pcRules(), lect: await hwLectGet(cid),
+    awayN: td.n, awayTot: td.tot, rules: pcRules(), lect: await hwLectGet(cid), held: d.held || 0,
     prizes: (d.prizes || []).slice(-60).map((p) => (p.voucher && !p.given ? { ...p, canSwap: pcSwapOk(cfg, p) } : p)),
     hasItems: cfg.items.length > 0 || !!ev,   // 확률표는 학생에게 안 보인다(10/12)
     event: ev ? { title: ev.title || "", cap: ev.cap || 1, won: pcEvWon(d, ev), names: ev.items.map((x) => x.name),
@@ -724,19 +761,31 @@ async function pcTeacherAct(res, claims, b) {
     if (!(await pcTeacher(res, claims, cid))) return;
     res.status(200).json({ ok: true, lect: await hwLectGet(cid) }); return;
   }
-  if (b.action === "hwLectSet") {   // {cid, bookId, nums:[], on} — 켜기/끄기. 조건부로 겹침 막음
+  if (b.action === "hwLectSet") {   // {cid, bookId, nums:[], on} 번호 켜기/끄기 · {cid, odd:true|false} 홀수 기본 보류. 조건부로 겹침 막음
     if (!(await pcTeacher(res, claims, cid))) return;
-    const bookId = String(b.bookId || ""), on = b.on !== false;
+    if (!cid) { res.status(400).json({ error: "반이 필요해요" }); return; }
+    const bookId = String(b.bookId || ""), on = b.on !== false, setOdd = typeof b.odd === "boolean";
     const nums = [...new Set((Array.isArray(b.nums) ? b.nums : []).map(Number).filter((n) => Number.isFinite(n)))];
-    if (!cid || !bookId || !nums.length) { res.status(400).json({ error: "반 · 교재 · 번호가 필요해요" }); return; }
+    if (!setOdd && (!bookId || !nums.length)) { res.status(400).json({ error: "교재 · 번호가 필요해요" }); return; }
     for (let k = 0; k < 6; k++) {
       const { doc, v } = await getDocV(hwLectPath(cid));
-      const all = { ...((doc || {}).b || {}) }, cur = new Set((all[bookId] || []).map(Number));
-      nums.forEach((n) => (on ? cur.add(n) : cur.delete(n)));
-      all[bookId] = [...cur].sort((x, y) => x - y);
-      if (!all[bookId].length) delete all[bookId];
-      if (await patchDocIf(hwLectPath(cid), { b: all, at: Date.now(), by: claims.tid || claims.role }, ["b", "at", "by"], v)) {
-        res.status(200).json({ ok: true, lect: all }); return;
+      const L = hwLectNorm(doc), B = { ...L.b }, R = { ...L.rel };
+      const freed = [];
+      if (setOdd) L.odd = b.odd;
+      else {
+        const cur = new Set((B[bookId] || []).map(Number)), rel = new Set((R[bookId] || []).map(Number));
+        nums.forEach((n) => {
+          const was = hwLectHas(L, bookId, n), oddDef = L.odd && n % 2 === 1;
+          if (on) { rel.delete(n); if (!oddDef) cur.add(n); }
+          else { cur.delete(n); if (oddDef) rel.add(n); if (was) freed.push(n); }
+        });
+        B[bookId] = [...cur].sort((x, y) => x - y); if (!B[bookId].length) delete B[bookId];
+        R[bookId] = [...rel].sort((x, y) => x - y); if (!R[bookId].length) delete R[bookId];
+      }
+      const next = { b: B, odd: L.odd, rel: R, at: Date.now(), by: claims.tid || claims.role };
+      if (await patchDocIf(hwLectPath(cid), next, ["b", "odd", "rel", "at", "by"], v)) {
+        const paid = freed.length ? await hwLectPay(cid, bookId, freed) : [];
+        res.status(200).json({ ok: true, lect: hwLectNorm(next), paid }); return;
       }
     }
     res.status(409).json({ error: "잠깐 뒤에 다시" }); return;
@@ -846,11 +895,11 @@ async function hwSubmit(res, claims, b) {
   const endT = Math.max(0, Math.min(HW_MAX_SEC, Number(b.endT) || 0));
   const startedAt = Number(b.startedAt) || Date.now();
   const sec = hwSecs(ev, endT);
-  const lect = new Set(((await hwLectGet(cid))[bookId] || []).map(Number));
+  const LT = await hwLectGet(cid);
   const questions = nums.map((n) => {
     const q = byN[n], mine = hwNorm(q, answers[n]);
     return { n, type: q.type, ...(q.label ? { label: q.label } : {}), ...(q.u != null ? { u: q.u } : {}),
-             answer: mine, auto: mine == null ? false : key.free ? true : autoCorrect(q, mine), sec: r1(sec[n] || 0), ...(lect.has(n) ? { lect: true } : {}) };
+             answer: mine, auto: mine == null ? false : key.free ? true : autoCorrect(q, mine), sec: r1(sec[n] || 0), ...(hwLectHas(LT, bookId, n) ? { lect: true } : {}) };
   });
   const date = kstDate(startedAt), now = Date.now();
   const log = {
@@ -876,12 +925,12 @@ async function hwSubmit(res, claims, b) {
   if (!who.teacher) {
     const cfg = await pcCfg().catch(() => null);
     if (cfg && cfg.cids.includes(cid)) {
-      const p = hwPieces(questions);
-      const pc = p.pts > 0 ? await pcAdd(cid, sid, who.name, p.pts, { k: "hw", rid }).catch((e) => { console.error("[pieces]", e); return null; }) : { add: 0 };
-      if (pc) { pieces = { ...p, add: pc.add, ...(pc.bal != null ? { bal: pc.bal } : {}) }; await patchDoc(base + "/hwLogs/" + rid, { pieces: { first: p.first, streaks: p.streaks, pts: pc.add } }).catch(() => {}); }
+      const p = hwPieces(questions), held = questions.filter((q) => q.lect && q.auto === true).length;   // 보류 — 나중에 풀면 들어올 것
+      const pc = p.pts > 0 || held > 0 ? await pcAdd(cid, sid, who.name, p.pts, { k: "hw", rid }, held).catch((e) => { console.error("[pieces]", e); return null; }) : { add: 0 };
+      if (pc) { pieces = { ...p, add: pc.add, held, ...(pc.bal != null ? { bal: pc.bal } : {}) }; await patchDoc(base + "/hwLogs/" + rid, { pieces: { first: p.first, streaks: p.streaks, pts: pc.add, ...(held ? { held } : {}) } }).catch(() => {}); }
     }
   }
-  res.status(200).json({ ok: true, log: { ...log, ...(marked ? { marked } : {}), ...(pieces ? { pieces: { first: pieces.first, streaks: pieces.streaks, pts: pieces.add } } : {}) }, ...(pieces && pieces.bal != null ? { bal: pieces.bal } : {}) });
+  res.status(200).json({ ok: true, log: { ...log, ...(marked ? { marked } : {}), ...(pieces ? { pieces: { first: pieces.first, streaks: pieces.streaks, pts: pieces.add, ...(pieces.held ? { held: pieces.held } : {}) } } : {}) }, ...(pieces && pieces.bal != null ? { bal: pieces.bal } : {}) });
 }
 
 // 틀린 문항만 다시 푼 것. 첫 시도(auto · answer)는 손대지 않는다
@@ -913,10 +962,12 @@ async function hwRetry(res, claims, b) {
   await patchDoc(path, patch);
   const fixPc = (rows) => rows.filter((q) => q.auto === false && q.fin === true && !q.lect).length;   // 수업 풀이는 다시 맞혀도 조각 없음
   const newly = fixPc(questions) - fixPc(log.questions || []);
+  const fixHeld = (rows) => rows.filter((q) => q.auto === false && q.fin === true && q.lect).length;
+  const heldN = fixHeld(questions) - fixHeld(log.questions || []);
   let pc = null;
-  if (!who.teacher && newly > 0) {
+  if (!who.teacher && (newly > 0 || heldN > 0)) {
     const cfg = await pcCfg().catch(() => null);
-    if (cfg && cfg.cids.includes(cid)) pc = await pcAdd(cid, log.sid, who.name, newly, { k: "retry", rid }).catch(() => null);
+    if (cfg && cfg.cids.includes(cid)) pc = await pcAdd(cid, log.sid, who.name, Math.max(0, newly), { k: "retry", rid }, Math.max(0, heldN)).catch(() => null);
   }
   res.status(200).json({ ok: true, log: { ...log, ...patch }, ...(pc ? { pieces: pc.add, bal: pc.bal } : {}) });
 }
@@ -943,10 +994,12 @@ async function hwSelf(res, claims, b) {
   // 스스로 채점에서 O = 처음 맞힘 → 조각 1 (5연속은 낼 때 건너뛴 것이라 안 센다)
   const okPc = (rows) => rows.filter((q) => q.auto === true && !q.lect).length;
   const gain = okPc(questions) - okPc(log.questions || []);
+  const okHeld = (rows) => rows.filter((q) => q.auto === true && q.lect).length;
+  const heldN = okHeld(questions) - okHeld(log.questions || []);
   let pc = null;
-  if (!who.teacher && gain > 0) {
+  if (!who.teacher && (gain > 0 || heldN > 0)) {
     const cfg = await pcCfg().catch(() => null);
-    if (cfg && cfg.cids.includes(cid)) pc = await pcAdd(cid, log.sid, who.name, gain, { k: "self", rid }).catch(() => null);
+    if (cfg && cfg.cids.includes(cid)) pc = await pcAdd(cid, log.sid, who.name, Math.max(0, gain), { k: "self", rid }, Math.max(0, heldN)).catch(() => null);
   }
   res.status(200).json({ ok: true, log: { ...log, ...patch }, ...(pc ? { pieces: pc.add, bal: pc.bal } : {}) });
 }
@@ -1100,6 +1153,7 @@ export default async function handler(req, res) {
         }
         if (body.op === "event") return await pcTeacherAct(res, TOOL, { ...body, action: "pcEventSet" });
         if (body.op === "items") return await pcTeacherAct(res, TOOL, { ...body, action: "pcItemsSet" });
+        if (body.op === "lect") return await pcTeacherAct(res, TOOL, { ...body, action: body.get ? "hwLectGet" : "hwLectSet" });   // 수업 풀이 · 홀수 기본 보류(10/15)
         if (body.op === "cids") {   // 대상 반 바꾸기 — 있는 반만
           const want = Array.isArray(body.cids) ? [...new Set(body.cids.map(String))] : [];
           const have = new Set((await listDocs("classes").catch(() => [])).map((c) => c.id)), bad = want.filter((c) => !have.has(c));

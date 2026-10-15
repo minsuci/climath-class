@@ -4386,6 +4386,12 @@ function hwSum(logs) {
 // ===== 조각 — 과제 보상 (설계 확정 2026-10-12) =====
 // 볼트 «20 작업/조각 보상 — 과제 집중 설계.md». 조각 · 이탈 · 구슬은 **전부 서버**(api/exam.js PC · hwPieces · hwAway · pcOpen).
 // 처음 맞힘 1 · 다시 맞힘 1 · 번호 순 5연속 +1 · 이탈(5초 넘게) 하루 3번째마다 −10 · 조각 20 = 구슬 1
+// 수업 풀이(보류) 판정 — 서버 hwLectHas 와 같은 셈. L = {b:{교재:[번호]}, odd, rel:{교재:[번호]}}
+function lectHas(L, bookId, n) {
+  if (!L) return false;
+  const inB = ((L.b || {})[bookId] || []).map(Number).includes(n);
+  return inB || (!!L.odd && n % 2 === 1 && !((L.rel || {})[bookId] || []).map(Number).includes(n));
+}
 async function pcApi(body) {
   const u = firebase.auth().currentUser;
   if (!u) throw new Error("로그인이 풀렸어요. 다시 들어와 주세요.");
@@ -4452,7 +4458,7 @@ function PieceCard({ cls, me, ver }) {
       <div className="pc-head">
         <div>
           <div className="pc-big">🧩 조각 <b>{d.bal}</b>개 <span className="pc-sep">·</span> 🔮 구슬 <b>{marbles}</b>개</div>
-          <div className="cm-hint">다음 구슬까지 조각 {R.cost - left}개 · 지금까지 연 구슬 {d.opened}개</div>
+          <div className="cm-hint">다음 구슬까지 조각 {R.cost - left}개 · 지금까지 연 구슬 {d.opened}개{d.held ? <> · <b>보류 {d.held}개</b>(수업 풀이 — 선생님이 풀면 들어와요)</> : null}</div>
         </div>
         <button className="cm-btn cm-btn-primary pc-open" disabled={busy || marbles < 1 || capped} onClick={open}>{capped ? "오늘은 다 받았어요" : "구슬 열기"}<small>{capped ? "남은 구슬은 내일" : "조각 " + R.cost + "개"}</small></button>
       </div>
@@ -4533,7 +4539,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
     if (me.teacher) return;
     pcApi({ action: "pcMe", cid: cls.id, sid: me.id }).then((j) => {
       if (!j.on) { setPc({ on: false }); pcAwaySave(cls.id, me.id, []); return; }
-      const p = { on: true, awayN: j.awayN, rules: j.rules, lect: j.lect || {} };
+      const p = { on: true, awayN: j.awayN, rules: j.rules, lect: j.lect || null };
       setPc(p); pcRef.current = p;
       if (pcAwayQueue(cls.id, me.id).length) sendAways(p);   // 앱이 닫혔다 열린 사이의 이탈 · 못 보낸 것
     }).catch(() => {});
@@ -4685,7 +4691,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
   const blanks = S.questions.filter((x) => !mxAnswered(S, x.n)).map((x) => x.n);
   const answered = S.questions.filter((x) => mxAnswered(S, x.n)).map((x) => x.n);
   const prevSet = new Set(S.all ? prevNums || [] : []);
-  const lectSet = new Set((((pc && pc.on && pc.lect) || {})[S.bookId] || []).map(Number));   // 수업에서 풀어 준 번호 — 조각 없음(10/15)
+  const lectSet = new Set(pc && pc.on && pc.lect ? S.questions.map((x) => x.n).filter((n) => lectHas(pc.lect, S.bookId, n)) : []);   // 수업 풀이(보류) — 지금은 조각 없음(10/15)
   const none = S.questions.every((x) => !mxAnswered(S, x.n));
   const unit = S.units && q.u != null ? S.units[q.u] : "";
   const padKey = (k) => { if (busy.current) return; setBuf((b) => (k === "⌫" ? b.slice(0, -1) : k === "C" ? "" : b.length < 12 ? b + k : b)); };
@@ -4731,7 +4737,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
       {toast && <div className="pc-toast">{toast}</div>}
       <div className="mx-body">
         <div className="mx-q">
-          <div className="mx-num">{q.n}번<small>{q.type === "essay" ? "스스로 채점" : MX_TYPE[q.type]}{unit ? " · " + unit : ""}{lectSet.has(q.n) ? " · 수업 풀이 — 조각 없음" : ""}</small></div>
+          <div className="mx-num">{q.n}번<small>{q.type === "essay" ? "스스로 채점" : MX_TYPE[q.type]}{unit ? " · " + unit : ""}{lectSet.has(q.n) ? " · 수업 풀이 — 조각 보류" : ""}</small></div>
           {S.retry && <div className="mx-note" style={{marginTop: 8}}>처음에 틀린 문제예요. 다시 풀어서 답을 적어요 — 처음 답은 그대로 남아요.</div>}
           {body}
           <div className="mx-foot">
@@ -4855,8 +4861,8 @@ function HwResult({ log: log0, book, onBack, onRetry, canSelf }) {
       {log.pieces && !log.teacher && (
         (() => {   // 낸 때 받은 것 + 다시 맞힘 + 스스로 채점 O — 서버 장부와 같은 셈
           const fx = rows.filter((q) => q.auto === false && q.fin === true && !q.lect).length, sf = rows.filter((q) => q.self && q.auto === true && !q.lect).length;
-          const lc = rows.filter((q) => q.lect && q.answer != null).length;
-          return <div className="pc-line">🧩 조각 <b>+{log.pieces.pts + fx + sf}</b><span> · 처음 맞힘 {log.pieces.first}{log.pieces.streaks ? " · 5연속 " + log.pieces.streaks + "번" : ""}{fx ? " · 다시 맞힘 " + fx : ""}{sf ? " · 스스로 채점 O " + sf : ""}{lc ? " · 수업 풀이 " + lc + "문제는 조각 없음" : ""}{rows.some((q) => hwWrong(q) && !q.lect) ? " · 틀린 문제는 다시 풀어 맞히면 1개씩" : ""}</span></div>;
+          const lc = rows.filter((q) => q.lect && q.answer != null).length, hd = rows.filter((q) => q.lect && (q.auto === true || q.fin === true)).length;
+          return <div className="pc-line">🧩 조각 <b>+{log.pieces.pts + fx + sf}</b><span> · 처음 맞힘 {log.pieces.first}{log.pieces.streaks ? " · 5연속 " + log.pieces.streaks + "번" : ""}{fx ? " · 다시 맞힘 " + fx : ""}{sf ? " · 스스로 채점 O " + sf : ""}{lc ? " · 수업 풀이 " + lc + "문제" + (hd ? " (보류 " + hd + "개 — 선생님이 풀면 들어와요)" : "") : ""}{rows.some((q) => hwWrong(q) && !q.lect) ? " · 틀린 문제는 다시 풀어 맞히면 1개씩" : ""}</span></div>;
         })()
       )}
       {onRetry && wrong.length > 0 && (
@@ -5376,22 +5382,35 @@ function LectBoard({ cls, books }) {
   const [busy, setBusy] = useState(false);
   const [txt, setTxt] = useState("");
   const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
   useEffect(() => {
     let live = true;
-    pcApi({ action: "hwLectGet", cid: cls.id }).then((j) => { if (live) setLect(j.lect || {}); }).catch((e) => { if (live) { setLect({}); setErr(e.message); } });
+    pcApi({ action: "hwLectGet", cid: cls.id }).then((j) => { if (live) setLect(j.lect || null); }).catch((e) => { if (live) { setLect({ b: {}, odd: false, rel: {} }); setErr(e.message); } });
     return () => { live = false; };
   }, [cls.id]);
   const list = (books || []).filter((b) => !b.test);
   const bk = list.find((b) => b.id === bookId) || list[0];
   if (!bk) return null;
-  const on = new Set(((lect || {})[bk.id] || []).map(Number));
+  const L = lect || { b: {}, odd: false, rel: {} };
+  const on = new Set((bk.questions || []).map((q) => q.n).filter((n) => lectHas(L, bk.id, n)));
+  const cnt = (b) => (b.questions || []).filter((q) => lectHas(L, b.id, q.n)).length;
   async function set(nums, val) {
     if (busy || !nums.length) return;
+    if (!val && !confirm(nums.length + "개 번호를 풀까요?\n그 번호를 맞힌 학생에게 보류된 조각이 지금 들어가요.")) return;
+    setBusy(true); setErr(""); setMsg("");
+    try {
+      const j = await pcApi({ action: "hwLectSet", cid: cls.id, bookId: bk.id, nums, on: val });
+      setLect(j.lect);
+      if ((j.paid || []).length) setMsg("조각 지급 — " + j.paid.map((x) => x.name + " +" + x.pay).join(" · "));
+      else if (!val) setMsg("풀었어요 — 지급할 보류 조각은 없었어요");
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
+  async function setOdd(v) {
+    if (busy) return;
+    if (!confirm(v ? "홀수 번호를 기본으로 보류할까요?\n(지금부터 낸 홀수 번호는 조각이 보류되고, 나중에 «풀기» 하면 들어가요)" : "홀수 기본 보류를 끌까요?\n(이미 보류된 조각은 그대로 남아요 — 번호를 «풀기» 해야 들어가요)")) return;
     setBusy(true); setErr("");
-    const before = lect;
-    setLect({ ...(lect || {}), [bk.id]: val ? [...new Set([...on, ...nums])] : [...on].filter((n) => !nums.includes(n)) });   // 먼저 칠해 둔다
-    try { const j = await pcApi({ action: "hwLectSet", cid: cls.id, bookId: bk.id, nums, on: val }); setLect(j.lect || {}); }
-    catch (e) { setLect(before); setErr(e.message); }
+    try { const j = await pcApi({ action: "hwLectSet", cid: cls.id, odd: v }); setLect(j.lect); } catch (e) { setErr(e.message); }
     setBusy(false);
   }
   // «12-18, 25» 같은 범위
@@ -5409,17 +5428,22 @@ function LectBoard({ cls, books }) {
       <h3 className="cm-h3">수업에서 풀어 준 번호 <span className="cm-h-hint">(누른 뒤에 낸 답은 조각 없음 · 채점은 그대로)</span></h3>
       <div style={{display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8}}>
         <select className="cm-input" style={{margin: 0, width: "auto"}} value={bk.id} onChange={(e) => setBookId(e.target.value)}>
-          {list.map((b) => <option key={b.id} value={b.id}>{b.title}{((lect || {})[b.id] || []).length ? " · " + lect[b.id].length + "개" : ""}</option>)}
+          {list.map((b) => <option key={b.id} value={b.id}>{b.title}{cnt(b) ? " · " + cnt(b) + "개" : ""}</option>)}
         </select>
         <input className="cm-input" style={{margin: 0, width: 150}} placeholder="예: 12-18, 25" value={txt} onChange={(e) => setTxt(e.target.value)} />
         <button className="cm-link" disabled={busy || lect === null} onClick={() => { const ns = parse(txt); if (ns.length) { set(ns, true); setTxt(""); } }}>표시</button>
         <button className="cm-link" disabled={busy || lect === null} onClick={() => { const ns = parse(txt); if (ns.length) { set(ns, false); setTxt(""); } }}>풀기</button>
       </div>
+      <label style={{display: "flex", gap: 8, alignItems: "center", fontSize: 14, marginBottom: 8, cursor: "pointer"}}>
+        <input type="checkbox" checked={!!L.odd} disabled={busy || lect === null} onChange={(e) => setOdd(e.target.checked)} />
+        <span><b>홀수 번호는 기본 보류</b> <span className="cm-hint">— 무엇을 풀어 줬는지 모르는 반(원장님 수업 등). 안 풀어 준 홀수는 나중에 «풀기»</span></span>
+      </label>
       <div className="cm-hint" style={{marginBottom: 8, lineHeight: 1.6}}>
-        수업에서 풀어 준 번호를 눌러 두세요(노란 칸). <b>누른 뒤</b> 학생이 낸 그 번호는 조각이 안 나가요 — 5연속도 건너뛰어 셈.
-        미리 풀어 낸 답(예습)은 그대로 둬요. 잘못 눌렀으면 다시 누르면 풀려요. 반마다 따로예요.
+        노란 칸 = 수업 풀이. <b>노란 칸일 때 낸</b> 그 번호는 조각이 <b>보류</b>돼요(채점은 그대로 · 5연속은 건너뛰어 셈). 미리 낸 답(예습)은 그대로.
+        노란 칸을 다시 누르면(풀기) 그 번호를 맞힌 학생에게 보류된 조각이 그때 들어가요. 반마다 따로예요.
       </div>
       {err && <div className="cm-hint" style={{color: "#b3261e"}}>{err}</div>}
+      {msg && <div className="cm-hint" style={{color: "#2f7d4f", fontWeight: 700}}>{msg}</div>}
       {lect === null ? <div className="cm-empty">불러오는 중…</div> : (
         <div className="mx-grid">
           {(bk.questions || []).map((q, i, a) => {
