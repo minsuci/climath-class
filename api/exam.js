@@ -14,7 +14,8 @@
 //
 // 도구 열쇠(team/tools.lessonKey)로 시험지를 넣고 뺀다 — tools/exam-push.py
 //
-// 답 고정(lock) — 푸는 동안은 자유롭게 고치고, **제출한 뒤에는** 학생이 결과(O/X)를 못 고친다.
+// 답 고정(lock) — 푸는 동안은 자유롭게 고치고, **제출한 뒤에는** 학생이 객관식 결과(O/X)를 못 고친다.
+//   10/15~ 주관식(단답·서술)은 학생이 결과 화면에서 직접 O/X (selfOv 에 표시 · 화면 MockExamResult canMarkSub)
 //   고치는 건 선생님만: 결과 화면 O/X 고침 · «답 고치기»(action "fix", 여기서 다시 채점)
 import { verifyIdToken, getDoc, patchDoc, listDocs, deleteDoc, getDocV, patchDocIf } from "./_google.js";
 import { createHash } from "crypto";
@@ -311,8 +312,9 @@ async function fixAnswer(res, claims, b) {
                 fixed: { from: old.answer == null ? null : old.answer, by: (who && who.name) || claims.tid || claims.role, at: Date.now() } };
   const questions = log.questions.map((q, k) => (k === i ? row : q));
   const override = { ...(log.override || {}) }; delete override[n];
+  const selfOv = { ...(log.selfOv || {}) }; delete selfOv[n];   // 학생이 스스로 고친 표시도 푼다
   const t = tally(questions, override);
-  const patch = { questions, override, score: t.score, got: t.got, correct: t.correct, pending: t.pending,
+  const patch = { questions, override, selfOv, score: t.score, got: t.got, correct: t.correct, pending: t.pending,
                   ...(log.overSec > 0 ? { inTime: inTimeOf(questions, override), all: null } : {}) };
   await patchDoc(path, patch);
   if (!log.teacher && !log.voided) {

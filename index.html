@@ -3206,7 +3206,9 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
   );
 }
 
-function MockExamResult({ log, canMark, canVoid, canFix, onBack }) {
+// canMarkSub — 답 고정(lock) 시험에서도 학생이 **주관식(단답·서술)만** O/X 를 직접 고친다(10/15 마왕님).
+//   객관식은 그대로 잠금. 학생이 고친 칸은 selfOv 에 적어 두고 «스스로» 표시 — 선생님이 보고 다시 고칠 수 있다
+function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
   const [L, setL] = useState(log);
   const [saving, setSaving] = useState(false);
   useEffect(() => { setL(log); }, [log]);
@@ -3268,17 +3270,19 @@ function MockExamResult({ log, canMark, canVoid, canFix, onBack }) {
     }
   }
   const A = mxAnalyze(L), T = L.endT || 1, N = L.questions.length;
+  const markable = (q) => canMark || (!!canMarkSub && q.type !== "mc");
 
   // 단답형: 맞음 ↔ 틀림 · 서술형: 채점 전 → 맞음 → 틀림 → 맞음
   async function toggle(n) {
-    if (!canMark || saving || L.voided) return;
     const q = L.questions.find((x) => x.n === n), ov0 = L.override || {};
+    if (!q || !markable(q) || saving || L.voided) return;
     const cur = n in ov0 ? ov0[n] : q.auto;
     const ov = { ...ov0, [n]: cur === true ? false : true };
+    const self = !canMark ? { selfOv: { ...(L.selfOv || {}), [n]: true } } : {};
     // 공식 점수는 낸 답 그대로(시간 넘겨 낸 것도). 시간을 넘긴 기록은 «시간 안» 점수도 참고로 같이 고친다
     const t = mxTally(L.questions, ov), tI = L.overSec ? mxTally(L.questions, ov, true) : null;
     const patch = { override: ov, score: t.score, got: t.got, correct: t.correct, pending: t.pending,
-                    ...(tI ? { inTime: { score: tI.score, got: tI.got, correct: tI.correct, pending: tI.pending }, all: null } : {}) };
+                    ...(tI ? { inTime: { score: tI.score, got: tI.got, correct: tI.correct, pending: tI.pending }, all: null } : {}), ...self };
     const before = L;
     setL({ ...L, ...patch });
     setSaving(true);
@@ -3395,9 +3399,10 @@ function MockExamResult({ log, canMark, canVoid, canFix, onBack }) {
                     {canFix && !L.voided ? <button className="cm-link" style={{display: "block", fontSize: 11, margin: "2px auto 0"}} disabled={saving} onClick={() => fixAns(r.q.n)}>답 고치기</button> : null}
                     {r.q.late ? <div className="mx-latetag" title="시간이 끝난 뒤에 적거나 바꾼 답">시간 뒤{r.q.answerIn != null ? " · 그때 " + shown(r.q, r.q.answerIn) : ""}</div> : null}</td>
                   <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{keyShown(r.q)}</td>
-                  <td>{canMark
+                  <td>{markable(r.q)
                     ? <button className={"mx-mark " + (k === "u" ? "x" : k)} onClick={() => toggle(r.q.n)} title="눌러서 고치기">{txt}</button>
-                    : <span className={"mx-mark " + (k === "u" ? "x" : k)}>{txt}</span>}</td>
+                    : <span className={"mx-mark " + (k === "u" ? "x" : k)}>{txt}</span>}
+                    {(L.selfOv || {})[r.q.n] ? <div className="mx-latetag" title="학생이 직접 O/X 를 고친 문항">스스로</div> : null}</td>
                   <td className={r.sec > avg * 2 ? "mx-long" : ""}>{r.sec ? mxClock(r.sec) : "–"}</td>
                   <td>{r.visits ? r.visits + "번" : "–"}</td>
                   <td>{r.changes > 1 ? (r.changes - 1) + "번" : ""}</td>
@@ -3408,7 +3413,7 @@ function MockExamResult({ log, canMark, canVoid, canFix, onBack }) {
         </table>
       </div>
       <div className="cm-hint" style={{marginTop: 8}}>
-        번호를 누르면 그 문제를 볼 수 있어요. {canMark ? "O/X 는 눌러서 고칠 수 있어요. " : ""}{canFix ? "«답 고치기» 는 학생 답을 바꾸고 다시 채점해요. " : ""}{L.lock && !canFix ? "이 시험은 선생님만 답을 고칠 수 있어요. " : ""}붉은 시간은 한 문제 평균({mxHm(avg)})의 두 배를 넘은 것.
+        번호를 누르면 그 문제를 볼 수 있어요. {canMark ? "O/X 는 눌러서 고칠 수 있어요. " : ""}{canFix ? "«답 고치기» 는 학생 답을 바꾸고 다시 채점해요. " : ""}{L.lock && !canFix ? (canMarkSub ? "객관식은 선생님만 고칠 수 있어요. 단답·서술은 해설을 보고 O/X 를 눌러 직접 채점해요. " : "이 시험은 선생님만 답을 고칠 수 있어요. ") : ""}붉은 시간은 한 문제 평균({mxHm(avg)})의 두 배를 넘은 것.
       </div>
       <div style={{display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12}}>
         {canVoid && !L.voided && <button className="cm-btn cm-btn-ghost mx-voidbtn" disabled={saving} onClick={() => setVoided(true)}>이 제출 취소</button>}
@@ -3508,7 +3513,7 @@ function MockExamTab({ cls, me }) {
       onDone={(log) => { setRunning(false); setView(log); setAgain((x) => x + 1); }}
       onAbandon={() => setRunning(false)} />;
   }
-  if (view) return <MockExamResult log={view} canMark={!view.lock || !!me.teacher} canFix={!!me.teacher}
+  if (view) return <MockExamResult log={view} canMark={!view.lock || !!me.teacher} canMarkSub={!!view.lock && !me.teacher} canFix={!!me.teacher}
     onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
 
   return (<>
@@ -3527,7 +3532,7 @@ function MockExamTab({ cls, me }) {
             onChange={(e) => setMins(e.target.value.replace(/\D/g, ""))} />
           {(exams.find((x) => x.id === pick) || {}).lock && !me.teacher && (
             <div className="mx-locknote" style={{textAlign: "left"}}>푸는 동안에는 답을 자유롭게 고칠 수 있어요. <b>제출하면 더는 못 고쳐요</b> —
-              결과의 O/X 도 선생님만 고쳐요. 제출 전에 꼭 검토해요.</div>
+              객관식 O/X 는 선생님만 고치고, 단답·서술은 제출한 뒤 해설을 보고 직접 O/X 를 눌러 채점해요. 제출 전에 꼭 검토해요.</div>
           )}
           <div className="mx-note">풀고 있는 문제 번호를 눌러 두고 풀어요. 답을 고르면 다음 문제로 저절로 넘어가요.<br />
             연습장 말고 <b>시험지 여백에</b> 풀고, 틀린 풀이는 <b>지우지 말고 줄만 그어요.</b></div>
