@@ -3745,6 +3745,12 @@ const hkSchool = (e) => String(e.title || "").slice(HK_TITLE.length).replace(/\s
 const hkNm = (s) => String(s || "").replace(/\s+/g, "");   // 로그인도 띄어쓰기를 지우고 찾는다
 async function hkAddStudent(cls, name, school) {
   if (!cls.openRoster) throw new Error("이 반에서는 학생을 넣을 수 없어요");
+  return await addStudentToClass(cls, name, school, "", "학결모 등록");
+}
+// 10/15: 학생 명단 «학생 추가» 도 이 길로 — 명단 고치기는 팀체크(ROSTER_RO)지만 **새 학생 넣기만** 여기서 연다(마왕님).
+// 사람(students) 하나 + 반 명단 한 줄. 처음 PIN 은 1234(반 defaultPin 없음) — 들어가면 새 PIN 을 정한다
+async function addStudentToClass(cls, name, school, grade, why) {
+  if (!cls) throw new Error("반을 골라 주세요");
   const nm = hkNm(name);
   if (!nm) throw new Error("이름을 적어 주세요");
   // ⚠ 학생 로그인은 **이름**으로 찾는다. 다른 반(대치)에 같은 이름이 있으면 두 학생이 한 계정이 된다
@@ -3752,17 +3758,62 @@ async function hkAddStudent(cls, name, school) {
   const dup = ps.docs.some((d) => hkNm(d.data().name) === nm)
     || cs.docs.some((d) => (d.data().roster || []).some((r) => r && !r.teacher && hkNm(r.name) === nm));
   if (dup) throw new Error("«" + nm + "» 은 이미 있는 이름이에요.\n학생 로그인이 이름으로 돼서, 같은 이름이면 두 학생이 한 계정이 돼요.\n이름 뒤에 A · B 를 붙여 주세요 (예: " + nm + "B).");
-  const ref = await studentsCol().add({ name: nm, school: school || "", grade: "", homeroom: "", time: Date.now(), updated: Date.now() });
-  logStudentChange("만듦", ref.id, nm, cls.name + " (학결모 등록)");
+  const ref = await studentsCol().add({ name: nm, school: school || "", grade: grade || "", homeroom: "", time: Date.now(), updated: Date.now() });
+  logStudentChange("만듦", ref.id, nm, cls.name + " (" + (why || "학생 추가") + ")");
   // 명단은 **지금 것을 다시 읽어** 얹는다 — 옆 선생님이 방금 넣은 학생이 날아가지 않게
   const cur = await classesCol().doc(cls.id).get();
   const roster = (cur.exists && cur.data().roster) || [];
   const id = "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-  const next = roster.concat([{ id, pid: ref.id, name: nm, school: school || "", grade: "" }]);
+  const next = roster.concat([{ id, pid: ref.id, name: nm, school: school || "", grade: grade || "" }]);
   await saveClassRoster(cls.id, next);
   cls.roster = next;
   logStudentChange("반에 넣음", ref.id, nm, cls.name);
   return { id, pid: ref.id, name: nm };
+}
+function StudentAddCard({ onDone }) {
+  const list = activeClasses().filter((c) => !c.openRoster);
+  const [name, setName] = useState("");
+  const [school, setSchool] = useState("");
+  const [grade, setGrade] = useState("고1");
+  const [cid, setCid] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  async function add() {
+    if (busy) return;
+    setBusy(true); setMsg("");
+    try {
+      const st = await addStudentToClass(findClass(cid), name, school.trim(), grade, "학생 추가");
+      setMsg(st.name + " — " + findClass(cid).name + " 에 넣었어요. 처음 PIN 1234 로 들어가요 ✓");
+      setName(""); setSchool("");
+      try { await loadClasses(); } catch (e) {}
+      onDone && onDone();
+    } catch (e) { alert(e.message || String(e)); }
+    setBusy(false);
+  }
+  return (
+    <div style={{border: "1px solid var(--line, #e5ded3)", borderRadius: 10, padding: "10px 12px", marginBottom: 10}}>
+      <div style={{fontWeight: 700, fontSize: 14, marginBottom: 6}}>+ 학생 추가</div>
+      <div className="hk-add">
+        <input className="cm-input" placeholder="학생 이름" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
+        <input className="cm-input" placeholder="학교 (나중에도 돼요)" value={school} onChange={(e) => setSchool(e.target.value)} disabled={busy} />
+        <div style={{display: "flex", gap: 6}}>
+          <select className="cm-input" style={{flex: "0 0 74px"}} value={grade} onChange={(e) => setGrade(e.target.value)} disabled={busy}>
+            {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <select className="cm-input" style={{flex: 1, minWidth: 0}} value={cid} onChange={(e) => setCid(e.target.value)} disabled={busy}>
+            <option value="">반 고르기</option>
+            {list.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <button className="cm-btn cm-btn-primary" disabled={busy || !hkNm(name) || !cid} onClick={add}>추가</button>
+      </div>
+      <div className="cm-hint" style={{marginTop: 6}}>
+        학생은 이름과 처음 PIN <b>1234</b> 로 들어가고, 들어가면 새 PIN 을 정해요. 같은 이름이 이미 있으면 막혀요 — 이름 뒤에 A · B 를 붙여요.
+        학교·학년·담임 고치기와 반 옮기기는 팀체크에서.
+      </div>
+      {msg && <div className="cm-done" style={{marginTop: 8}}>{msg}</div>}
+    </div>
+  );
 }
 async function hkCall(body) {
   const u = firebase.auth().currentUser;
@@ -6003,10 +6054,11 @@ function StudentDirectory({ me, onBack, initialCls }) {
             <a href={TEAM_ROSTER_URL} target="_blank" rel="noreferrer"
                style={{color: "#a8562c", fontWeight: 700}}>팀체크에서 열기 →</a>
             <div style={{fontSize: 12, marginTop: 3, color: "#a08165"}}>
-              찾아보기·PIN 초기화는 여기서 그대로 됩니다. 이름·학교·학년·담임·반 배정은 팀체크에서 고쳐요.
+              찾아보기·PIN 초기화·새 학생 추가는 여기서 됩니다. 이름·학교·학년·담임·반 배정 고치기는 팀체크에서.
             </div>
           </div>
         )}
+        <StudentAddCard onDone={() => bumpVer((v) => v + 1)} />
         {loadErr && (
           <div style={{background: "#fae3e2", border: "1px solid #eec9c7", borderRadius: 12,
                padding: "12px 14px", marginBottom: 12, color: "#a5322d", fontSize: 13, lineHeight: 1.6}}>
@@ -6099,7 +6151,7 @@ function StudentDirectory({ me, onBack, initialCls }) {
                 {sortTh("grade", "학년", 62)}
                 {sortTh("homeroom", "담임", 92)}
                 {sortTh("cls", "반", 240)}
-                <th style={{width: 52}}></th>
+                <th style={{width: 76}}></th>
                 {/* 남는 자리를 먹는 빈 열 — 없으면 반 칸이 화면 끝까지 늘어난다 */}
                 <th></th>
               </tr>
@@ -6187,10 +6239,11 @@ function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle,
     setBusy(true);
     try {
       const r = await resetStudentPin(person.name);
-      onMsg(person.name + " PIN을 초기화했어요 — 초기 PIN은 " + r.pin + " 이에요. 학생에게 알려주세요 ✓" +
-        (r.noClass ? " (아직 반이 없는 학생이에요)" : ""));
+      const done = person.name + " PIN을 초기화했어요 — 초기 PIN은 " + r.pin + " 이에요. 학생에게 알려주세요 ✓" +
+        (r.noClass ? " (아직 반이 없는 학생이에요)" : "");
+      onMsg(done); alert(done);   // 결과가 명단 맨 위에만 떠서 아래쪽 학생은 «안 먹는» 것처럼 보였다(10/15)
       onChanged && onChanged();
-    } catch (e) { onMsg("초기화하지 못했어요: " + friendlyErr(e)); }
+    } catch (e) { const m = "초기화하지 못했어요: " + friendlyErr(e); onMsg(m); alert(m); }
     setBusy(false);
   }
   async function remove() {
@@ -6247,8 +6300,8 @@ function StudentRow({ person, teachers, schoolOpts, curated, expanded, onToggle,
         </button>
       </td>
       <td style={cellStyle}>
-        <button className="cm-link" style={{padding: 0, marginRight: 8}} disabled={busy}
-          title="PIN을 초기 값으로 되돌려요" onClick={resetPin}>PIN</button>
+        <button className="cm-link" style={{padding: 0, marginRight: 8, whiteSpace: "nowrap"}} disabled={busy}
+          title="PIN을 초기 값으로 되돌려요" onClick={resetPin}>PIN 초기화</button>
         {!ROSTER_RO && (
           <button className="cm-link" style={{color: "#d6453f", padding: 0}} disabled={busy} onClick={remove}>삭제</button>
         )}

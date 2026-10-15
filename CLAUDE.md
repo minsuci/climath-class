@@ -240,6 +240,7 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
   **시도 8회 / 10분 제한**(`authAttempts`). 검사를 서버로 옮기면 4자리 PIN을 전부
   넣어보는 게 가능해지므로 이게 없으면 오히려 전보다 나쁘다.
   **10/15: 학생 로그인·학생 PIN 바꾸기는 잠금을 뺐다**(마왕님 — PIN 몇 번 틀린 학생이 10분 못 들어와 수업이 막혀서). 선생님 로그인(t:)·선생님 PIN 바꾸기(tc:)는 그대로 잠근다(원장·팀장 PIN = 전체 권한). 학생 PIN 을 모르면 선생님이 초기화.
+  **10/15: 학생 명단 «+ 학생 추가» 카드** — 명단 고치기는 팀체크(ROSTER_RO) 그대로, **새 학생 넣기만** 연다(`addStudentToClass`, 학결모 `hkAddStudent` 와 같은 길: 이름 겹침 막기 · 반 명단 다시 읽어 얹기 · 처음 PIN 1234). PIN 초기화 결과는 창(alert)으로도 — 명단 맨 위에만 떠서 «안 먹는다» 소리를 들었다.
 - 환경변수 **`FIREBASE_SERVICE_ACCOUNT`** = 서비스 계정 JSON 전체.
   Vercel 환경변수는 Production/Preview/Development **스코프가 따로**다. 셋 다 켜둘 것.
 
