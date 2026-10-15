@@ -118,12 +118,8 @@ async function loginTeacher(res, { tid, pin }) {
 async function loginStudent(res, { name, pin }) {
   const nm = norm(name);
   if (!nm || !pin) { res.status(400).json({ error: "입력이 부족합니다" }); return; }
-  const key = "s:" + nm;
-  const rate = await checkRate(key);
-  if (!rate.ok) {
-    res.status(429).json({ error: "시도가 너무 많아요. 10분 뒤에 다시 해주세요." });
-    return;
-  }
+  // 10/15: 학생 로그인은 틀려도 잠그지 않는다(마왕님 결정 — 학생이 PIN 몇 번 틀리면 10분 못 들어와 수업이 막힘).
+  //        선생님 로그인(t:)·선생님 PIN 바꾸기(tc:)는 그대로 잠근다 — 원장·팀장 PIN 은 전체 권한이다
 
   const classes = await listDocs("classes");
   const found = [];
@@ -143,7 +139,6 @@ async function loginStudent(res, { name, pin }) {
     person = people.find((p) => norm(p.name) === nm) || null;
   }
   if (!found.length && !person) {
-    await noteFail(key, rate);
     res.status(404).json({ error: "명단에 없는 이름이에요. 띄어쓰기 없이 정확히 입력했는지 확인해주세요." });
     return;
   }
@@ -155,12 +150,9 @@ async function loginStudent(res, { name, pin }) {
   const how = await verifyStudentPin(nm, String(pin), live);
   const ok = !!how;
   if (!ok) {
-    await noteFail(key, rate);
-    const left = MAX_TRIES - (rate.n + 1);
-    res.status(401).json({ error: "PIN이 올바르지 않아요." + (left <= 3 && left > 0 ? " (" + left + "번 남음)" : "") });
+    res.status(401).json({ error: "PIN이 올바르지 않아요. 모르면 선생님께 PIN 초기화를 부탁하세요." });
     return;
   }
-  await clearFails(key);
   const cids = live.map((x) => x.cls.id);
   const token = createCustomToken("s_" + nm, { role: "student", sname: nm, cids });
   // 초기 비번으로 들어왔으면 앱이 비밀번호 변경을 먼저 시킨다.
@@ -302,9 +294,6 @@ async function changePin(res, { name, oldPin, newPin }) {
   if (!nm || !/^\d{4}$/.test(String(newPin || ""))) {
     res.status(400).json({ error: "새 PIN 4자리를 입력해주세요" }); return;
   }
-  const key = "c:" + nm;
-  const rate = await checkRate(key);
-  if (!rate.ok) { res.status(429).json({ error: "시도가 너무 많아요. 10분 뒤에 다시 해주세요." }); return; }
 
   const classes = await listDocs("classes");
   const live = [];
@@ -324,10 +313,8 @@ async function changePin(res, { name, oldPin, newPin }) {
   }
 
   if (!(await verifyStudentPin(nm, String(oldPin || ""), live))) {
-    await noteFail(key, rate);
     res.status(401).json({ error: "지금 쓰는 PIN이 올바르지 않아요" }); return;
   }
-  await clearFails(key);
   await patchDoc("userPins/" + encodeURIComponent(nm), { pin: String(newPin), time: Date.now() });
   res.status(200).json({ ok: true });
 }
