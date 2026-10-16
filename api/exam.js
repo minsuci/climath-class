@@ -1171,7 +1171,27 @@ export default async function handler(req, res) {
           for (const s of sids) await deleteDoc(pcPath(cid, s));
           res.status(200).json({ ok: true, cid, deleted: sids.length }); return;
         }
-        res.status(400).json({ error: "op 는 get · event · items · resetLedger" }); return;
+        // 받은 상품만 되살린다(10/16) — 장부를 지우며 받아 간 기프티콘까지 사라졌던 것. 조각·구슬 칸은 안 건드린다.
+        // {cid, items:[{sid, name, prizes:[…]}]} — 이미 있는 상품(pid 같음)은 건너뛴다
+        if (body.op === "prizesRestore") {
+          const cid = String(body.cid || ""), items = Array.isArray(body.items) ? body.items : [];
+          if (!cid || !items.length) { res.status(400).json({ error: "cid · items 가 필요해요" }); return; }
+          const out = [];
+          for (const it of items) {
+            const sid = String(it.sid || ""), add = (Array.isArray(it.prizes) ? it.prizes : []).filter((x) => x && x.pid);
+            if (!sid || !add.length) continue;
+            let n = 0;
+            await pcEdit(cid, sid, (d) => {
+              const have = new Set((d.prizes || []).map((x) => x.pid)), more = add.filter((x) => !have.has(x.pid));
+              n = more.length; if (!n) return null;
+              return { name: d.name || String(it.name || ""), prizes: [...(d.prizes || []), ...more],
+                       log: [...(d.log || []), { t: Date.now(), k: "restore", d: 0, prize: more.map((x) => x.name).join(", ") }].slice(-PC_LOG) };
+            });
+            out.push({ sid, restored: n });
+          }
+          res.status(200).json({ ok: true, cid, out }); return;
+        }
+        res.status(400).json({ error: "op 는 get · event · items · resetLedger · prizesRestore" }); return;
       }
       if (body.action === "hwLogs") {
         const since = String(body.since || "0000-00-00");
