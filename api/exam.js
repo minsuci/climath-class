@@ -27,6 +27,16 @@ const MAX_EV = 3000;
 // 끝없이 열려 있지 않게 이만큼 지나면 그때 저절로 낸다
 const OVER_MAX = 30 * 60;          // 50분에 문항 25개면 넉넉히 몇 백. 이보다 많으면 무언가 잘못된 것
 
+// 선생님 AI 연결(10/16 · #86) — 선생님 앱에 로그인한 선생님이면 도구 열쇠(lessonKey)를 그대로 받아 간다.
+// 마왕님 결정: 선생님별 열쇠는 복잡해진다 — «선생님 링크로 들어오면 열쇠는 다 줘». 그 열쇠로 클로드 · GPT 가
+// 나스 «클래스앱 도구»를 써서 반 자료를 읽는다. 열쇠가 새면 team/tools.lessonKey 를 바꾸고 다들 다시 받으면 된다
+async function aiKeyGet(res, claims) {
+  if (!(claims.role === "teacher" || claims.role === "owner")) { res.status(403).json({ error: "선생님만 받을 수 있어요" }); return; }
+  const d = await getDoc(TOOLKEY_PATH).catch(() => null);
+  if (!d || !d.lessonKey) { res.status(500).json({ error: "도구 열쇠가 아직 없어요 — 관리자에게 말해 주세요" }); return; }
+  res.status(200).json({ ok: true, key: d.lessonKey });
+}
+
 async function toolOk(k) {
   if (!k) return false;
   const d = await getDoc(TOOLKEY_PATH).catch(() => null);
@@ -1240,6 +1250,7 @@ export default async function handler(req, res) {
 
     const claims = await verifyIdToken(body.idToken);
     if (!claims) { res.status(403).json({ error: "로그인이 풀렸어요. 다시 들어와 주세요." }); return; }
+    if (body.action === "aiKeyGet") return await aiKeyGet(res, claims);
     if (body.action === "submit") return await submit(res, claims, body);
     if (body.action === "fix") return await fixAnswer(res, claims, body);
     if (body.action === "hkExam") return await hkExam(res, claims, body);

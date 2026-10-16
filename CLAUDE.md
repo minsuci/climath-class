@@ -241,6 +241,7 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
   넣어보는 게 가능해지므로 이게 없으면 오히려 전보다 나쁘다.
   **10/15: 학생 로그인·학생 PIN 바꾸기는 잠금을 뺐다**(마왕님 — PIN 몇 번 틀린 학생이 10분 못 들어와 수업이 막혀서). 선생님 로그인(t:)·선생님 PIN 바꾸기(tc:)는 그대로 잠근다(원장·팀장 PIN = 전체 권한). 학생 PIN 을 모르면 선생님이 초기화.
   **10/15: 학생 명단 «+ 학생 추가» 카드** — 명단 고치기는 팀체크(ROSTER_RO) 그대로, **새 학생 넣기만** 연다(`addStudentToClass`, 학결모 `hkAddStudent` 와 같은 길: 이름 겹침 막기 · 반 명단 다시 읽어 얹기 · 처음 PIN 1234). PIN 초기화 결과는 창(alert)으로도 — 명단 맨 위에만 떠서 «안 먹는다» 소리를 들었다.
+- **선생님 AI 열쇠(10/16 · #86)**: 선생님 앱 «내 PIN 변경» 아래 «AI 열쇠 받기» → 서버 `aiKeyGet`(선생님·관리자 로그인만)이 도구 열쇠(team/tools.lessonKey)를 그대로 준다. 마왕님 결정 — 선생님별 열쇠는 복잡해져서 안 함, «선생님 링크로 들어오면 다 줘». 받은 열쇠로 선생님 클로드·GPT 가 나스 «클래스앱 도구»(원본 `Desktop/변형교재/_클래스앱도구`, `sync.py` 로 복사)를 쓴다. 열쇠가 새면 lessonKey 를 바꾸고 `tools/lesson-key.json` 도 같이.
 - **실전 시험 주관식 스스로 채점(10/15)**: 답 고정(lock) 시험에서도 학생이 결과 화면에서 **단답·서술만** O/X 를 누른다(`MockExamResult` canMarkSub). 객관식은 그대로 잠금. 학생이 고친 칸은 `examLogs.selfOv{n:true}` + «스스로» 표시, 점수 칸(scores)도 같이 고침. 선생님 «답 고치기»(fix)는 그 번호 selfOv 를 푼다. lock 은 원래 화면에서만 막던 것(규칙은 학생 쓰기 허용)이라 서버 변경 없음.
 - 환경변수 **`FIREBASE_SERVICE_ACCOUNT`** = 서비스 계정 JSON 전체.
   Vercel 환경변수는 Production/Preview/Development **스코프가 따로**다. 셋 다 켜둘 것.

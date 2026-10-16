@@ -10107,6 +10107,44 @@ function TeacherPinChange({ me, onBack }) {
         <button className="cm-btn cm-btn-primary" disabled={busy} onClick={save}>{busy ? "바꾸는 중..." : "PIN 바꾸기"}</button>
         <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
       </div>
+      <AiKeyCard me={me} />
+    </div>
+  );
+}
+
+// 선생님 AI 연결(10/16 · #86) — 내 클로드·GPT 가 반 자료(명단 · 실전 시험 결과 · 과제 기록)를 읽게.
+// 선생님 앱에 로그인했으면 도구 열쇠를 그대로 준다(마왕님 «선생님 링크로 들어오면 열쇠는 다 줘»)
+function AiKeyCard({ me }) {
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const text = key ? JSON.stringify({ url: location.origin, key }, null, 1) : "";
+  async function make() {
+    if (busy) return;
+    setBusy(true); setMsg("");
+    try { const j = await hkCall({ action: "aiKeyGet" }); setKey(j.key); }
+    catch (e) { setMsg(e.message || String(e)); }
+    setBusy(false);
+  }
+  async function copy() {
+    try { await navigator.clipboard.writeText(text); setMsg("복사했어요 ✓"); } catch (e) { setMsg("복사가 안 돼요 — 칸을 길게 눌러 직접 복사해 주세요"); }
+  }
+  return (
+    <div className="cm-card">
+      <h2 className="cm-h2">AI 열쇠 <span className="cm-h-hint">(클로드 · GPT 가 내 반 자료를 읽게)</span></h2>
+      <div className="cm-hint" style={{marginBottom: 10, lineHeight: 1.6}}>
+        내 AI 가 반 명단 · 실전 시험 결과 · 과제 기록을 읽어 분석지를 만들 수 있게 하는 열쇠예요.
+        만들면 아래 글을 내 PC 의 <code>{"C:\\Users\\(내 이름)\\.climath\\class-key.json"}</code> 에 저장하세요 — AI 에게 «이 글을 그 파일로 저장해 줘» 하면 돼요.
+        쓰는 법은 나스 «클래스앱 도구» 폴더의 README 에 있어요. 열쇠는 다른 사람에게 주지 마세요.
+      </div>
+      {key ? (<>
+        <textarea className="cm-input" readOnly value={text} style={{fontFamily: "monospace", fontSize: 12, height: 70}} onFocus={(e) => e.target.select()} />
+        <button className="cm-btn cm-btn-primary" onClick={copy}>복사</button>
+        <div className="cm-hint" style={{marginTop: 6}}>잃어버리면 여기서 다시 받으면 돼요.</div>
+      </>) : (
+        <button className="cm-btn cm-btn-primary" disabled={busy} onClick={make}>{busy ? "받는 중..." : "AI 열쇠 받기"}</button>
+      )}
+      {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"} style={{marginTop: 8}}>{msg}</div>}
     </div>
   );
 }
