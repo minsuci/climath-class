@@ -700,19 +700,6 @@ function addMonths(baseStr, n) {
   if (d.getDate() < day) d.setDate(0); // 말일 보정 (1/31 +1개월 → 2/28)
   return ymd(d);
 }
-// 최근 n개월 목록 (YYYY-MM). 반드시 1일로 만들어야 한다 —
-// 오늘이 29~31일이면 setMonth가 넘쳐 없는 달이 생긴다
-// (8/29에서 6개월 전은 2/29인데 그런 날이 없어 3/1이 된다 → 2월이 사라지고 3월이 두 번).
-function recentMonths(n) {
-  const y = Number(todayStr.slice(0, 4)), m = Number(todayStr.slice(5, 7));
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    const d = new Date(y, m - 1 - i, 1);
-    out.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
-  }
-  return out;
-}
-
 // 내신 참여표용 달 목록 — 다가올 달도 고를 수 있어야 한다.
 // 9월 시험 준비를 8월에 하므로 지난 달만 주면 정작 필요한 달이 없다.
 function examMonths(back, fwd) {
@@ -744,6 +731,16 @@ function studentDows(cls, st) {
   if (isIndividual(cls)) return (st && st.days) || [];
   const all = cls.classDays || [], only = (st && st.onlyDays) || [];
   return only.length ? all.filter((d) => only.includes(d)) : all;
+}
+// 오늘부터 그 학생이 오는 첫 수업일(YYYY-MM-DD). 3주 안에 없으면 오늘
+function nextClassDay(cls, st) {
+  const dows = studentDows(cls, st);
+  for (let i = 0; i < 21; i++) {
+    const d = new Date(todayStr + "T00:00:00"); d.setDate(d.getDate() + i);
+    const ds = ymd(d);
+    if (dows.includes(d.getDay()) && isActiveOn(st, ds)) return ds;
+  }
+  return todayStr;
 }
 const getStudentBooks = (cls, st) => isIndividual(cls) ? ((st && st.books) || []) : getBooks(cls);
 function getClassAllBooks(cls) {
@@ -1159,37 +1156,12 @@ function listenDm(cid, sid, cb) {
   return dmDoc(cid, sid).onSnapshot((d) => cb(d.exists ? d.data() : null));
 }
 const scoresCol = (cid, date) => dayDoc(cid, date).collection("scores");
-async function addScore(cid, date, s) { await scoresCol(cid, date).add(s); touchDay(cid, date); }
-
 async function listDays(cid) {
   const s = await daysCol(cid).get();
   const arr = [];
   s.forEach((d) => arr.push(d.id));
   if (!arr.includes(todayStr)) arr.push(todayStr);
   return arr.sort().reverse();
-}
-
-// 점수는 날짜마다 흩어져 있다(days/{date}/scores). 추이를 그리려면 모아야 한다.
-// 날짜 하나당 읽기가 한 번 나가므로 **기간을 받아서** 그만큼만 본다.
-// 어차피 날짜별로 전원 것을 읽으므로 반 전체를 돌려준다 — 반 평균을 공짜로 낼 수 있다.
-// 돌려주는 것: { rows, days, truncated }
-const SCORE_MAX_DAYS = 120;
-async function loadScoreHistory(cid, fromDate, toDate) {
-  const snap = await daysCol(cid).get();
-  let dates = [];
-  snap.forEach((d) => dates.push(d.id));
-  dates = dates.filter((d) => (!fromDate || d >= fromDate) && (!toDate || d <= toDate)).sort();
-  const truncated = dates.length > SCORE_MAX_DAYS;
-  const use = truncated ? dates.slice(-SCORE_MAX_DAYS) : dates;
-  const rows = [];
-  await Promise.all(use.map(async (date) => {
-    try {
-      const sc = await scoresCol(cid, date).get();
-      sc.forEach((d) => rows.push({ id: d.id, date, ...d.data() }));
-    } catch (e) { /* 권한 없는 날은 건너뛴다 */ }
-  }));
-  rows.sort((a, b) => a.date.localeCompare(b.date) || (a.time || 0) - (b.time || 0));
-  return { rows, days: use.length, truncated };
 }
 
 // ----- 수업 로그 (개별진도반: 누구와 몇 분을 했는지) -----
@@ -3298,11 +3270,13 @@ function StudentHome({ cls, me, onLogout }) {
   const hwBooks = useHwBooks(cls, me);   // 과제 채점 교재 — «과제» 탭 안에서 «답 내기» 교재가 된다
   // 실전 시험은 출석과 묶지 않는다 — 시간 재는 시험을 «출석부터» 에서 막으면 시작부터 어긋난다
   const hwOpen = !!(hwBooks && hwBooks.length);   // 과제 채점 교재가 걸린 반은 «과제» 를 출석 없이 연다 — 집에서 푼다
-  const noGateTabs = ["notes", "mock", ...(hwOpen ? ["hw"] : [])]; // 출석 없이도 볼 수 있는 탭
+  const noGateTabs = ["q", "notes", "mock", ...(hwOpen ? ["hw"] : [])]; // 출석 없이도 볼 수 있는 탭
   // 출석은 **수업 있는 날만** 뜬다(10/17) — 그 학생이 오는 요일(개진반은 학생 요일 · 정규반은 반 요일 중 나오는 요일) · 수강 기간 안.
   // 다른 날 와서 이미 출석이 찍혔으면(보강 따위) 그날도 보인다
   const classToday = !me.teacher && (!!att || (isActiveOn(me, todayStr) && studentDows(cls, me).includes(new Date(todayStr + "T00:00:00").getDay())));
   const fallback = classToday ? "att" : hwOpen ? "hw" : "mock";
+  // 수업 없는 날 낸 질문은 **다음 수업일** 대기열로 — 선생님은 그날 «날짜별 → 그날» 대기열에서 한꺼번에 본다
+  const qDate = me.teacher || classToday ? todayStr : nextClassDay(cls, me);
   const activeTab = me.teacher ? tab : (att || noGateTabs.includes(tab) ? tab : fallback);
   const showDmBanner = !!(dmNotice && dmNotice.active && dmNotice.text && !dmDismissed);
   const showClassBanner = !!(notice && notice.active && notice.text && !noticeDismissed) && !showDmBanner;
@@ -3315,9 +3289,8 @@ function StudentHome({ cls, me, onLogout }) {
     <Sidebar title={me.name + "님"} active={activeTab} onSelect={setTab}
       items={[
         ...(classToday ? [{ key: "att", ico: "✓", label: "출석" }] : []),
-        { key: "q", ico: "?", label: "질문", disabled: !me.teacher && !att },
+        { key: "q", ico: "?", label: "질문" },
         { key: "hw", ico: "▤", label: "과제", disabled: !me.teacher && !att && !hwOpen },
-        { key: "score", ico: "◈", label: "점수", disabled: !me.teacher && !att },
         { sep: true },
         // 진도계획표 · 안내문 · 내신 · AI 힌트는 지웠다(10/17 마왕님)
         { key: "mock", ico: "⏱", label: "실전 시험" },
@@ -3363,20 +3336,13 @@ function StudentHome({ cls, me, onLogout }) {
           ) : (
             <>
               <button className="cm-btn cm-btn-primary cm-big" onClick={() => checkIn(cls.id, todayStr, me)}>출석하기</button>
-              <div className="cm-hint" style={{ marginTop: 14, textAlign: "center" }}>출석체크를 해야 질문 · 과제를 쓸 수 있어요.</div>
+              <div className="cm-hint" style={{ marginTop: 14, textAlign: "center" }}>수업 오면 출석하기를 눌러 주세요.</div>
             </>
           )}
         </div>
       )}
-      {activeTab === "q" && <QuestionForm cls={cls} me={me} />}
+      {activeTab === "q" && <QuestionForm cls={cls} me={me} qDate={qDate} />}
       {activeTab === "hw" && <StudentHomework cls={cls} me={me} />}
-      {activeTab === "score" && (<>
-        <ScoreForm cls={cls} me={me} />
-        <div className="cm-card">
-          <h3 className="cm-h3">점수 추이 <span className="cm-h-hint">(그동안 본 테스트)</span></h3>
-          <ScoreTrend cls={cls} sid={me.id} />
-        </div>
-      </>)}
       {activeTab === "mock" && <MockExamTab cls={cls} me={me} />}
       {activeTab === "notes" && (
         <div className="cm-card">
@@ -3428,26 +3394,27 @@ function ChangePin({ cls, me, onDone }) {
   );
 }
 
-function QuestionForm({ cls, me }) {
+function QuestionForm({ cls, me, qDate }) {
+  const qd = qDate || todayStr;
   const books = getStudentBooks(cls, me);
   const [book, setBook] = useState(books.length ? books[0].name : "");
   const [num, setNum] = useState("");
   const [memo, setMemo] = useState("");
   const [sent, setSent] = useState([]);
   useEffect(() => {
-    const qcid = questionCid(cls, todayStr);
-    const unsub = qCol(qcid, todayStr).where("sid", "==", me.id).onSnapshot((s) => {
+    const qcid = questionCid(cls, qd);
+    const unsub = qCol(qcid, qd).where("sid", "==", me.id).onSnapshot((s) => {
       const arr = []; s.forEach((d) => arr.push({ qid: d.id, ...d.data() })); arr.sort((a, b) => a.time - b.time); setSent(arr);
     });
     return () => unsub();
-  }, [cls.id, me.id]);
+  }, [cls.id, me.id, qd]);
   async function submit() {
     if (!num.trim()) return;
     const nums = num.trim().split(/[^0-9\-()]+/).map((s) => s.trim()).filter((s) => s.length > 0);
     const now = Date.now();
-    const qcid = questionCid(cls, todayStr);
+    const qcid = questionCid(cls, qd);
     await Promise.all(nums.map((n, i) =>
-      addQuestion(qcid, todayStr, { sid: me.id, name: me.name, book, num: n, memo: memo.trim(), time: now + i, resolved: false, fromCid: cls.id, fromClass: cls.name })
+      addQuestion(qcid, qd, { sid: me.id, name: me.name, book, num: n, memo: memo.trim(), time: now + i, resolved: false, fromCid: cls.id, fromClass: cls.name })
     ));
     const parsedNums = nums.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
     if (parsedNums.length > 0) {
@@ -3458,6 +3425,7 @@ function QuestionForm({ cls, me }) {
   return (
     <div className="cm-card">
       <h3 className="cm-h3">질문하기</h3>
+      {qd !== todayStr && <div className="cm-hint" style={{marginBottom: 8}}>오늘은 수업 없는 날이에요. 보낸 질문은 다음 수업({fmtDate(qd)})에 선생님이 봐요.</div>}
       <label className="cm-label">교재</label>
       <select className="cm-input" value={book} onChange={(e) => setBook(e.target.value)}>{books.map((b) => <option key={b.name}>{b.name}</option>)}</select>
       <label className="cm-label">문항 번호</label>
@@ -6577,229 +6545,6 @@ function MissingChips({ list, onPick }) {
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-// ----- 점수 추이 그래프 -----
-// 외부 차트 라이브러리를 쓰지 않는다. CDN을 하나 더 늘리면 그게 죽을 때 앱이 같이 죽는다
-// (버전 고정 원칙과 같은 이유). 점 몇 개짜리 꺾은선은 SVG로 충분하다.
-function ScoreChart({ rows, classAvg, showClass }) {
-  const [pick, setPick] = useState(null);
-  const H = 175, W = 320;                    // viewBox 기준. 화면에는 폭 100%로 늘린다
-  const PAD = { l: 26, r: 8, t: 10, b: 22 };
-  if (!rows.length) return null;
-  const n = rows.length;
-  const x = (i) => PAD.l + (n === 1 ? (W - PAD.l - PAD.r) / 2 : (i * (W - PAD.l - PAD.r)) / (n - 1));
-  const y = (v) => PAD.t + (100 - Math.max(0, Math.min(100, v))) * (H - PAD.t - PAD.b) / 100;
-  const path = (get) => rows.map((r, i) => {
-    const v = get(r);
-    return v == null ? null : (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1);
-  }).filter(Boolean).join(" ");
-  const mineLine = path((r) => r.score);
-  const clsLine = showClass ? path((r) => (classAvg[r.date] == null ? null : classAvg[r.date])) : "";
-  const avg = Math.round(rows.reduce((a, r) => a + r.score, 0) / n);
-  const sel = pick == null ? null : rows[pick];
-  return (
-    <div>
-      <svg viewBox={"0 0 " + W + " " + H} style={{width: "100%", height: "auto", display: "block", touchAction: "manipulation"}}>
-        {[0, 50, 100].map((g) => (
-          <g key={g}>
-            <line x1={PAD.l} x2={W - PAD.r} y1={y(g)} y2={y(g)} stroke="#e7e0d2" strokeWidth="1" />
-            <text x={PAD.l - 4} y={y(g) + 3} textAnchor="end" fontSize="7" fill="#8a7f72">{g}</text>
-          </g>
-        ))}
-        <line x1={PAD.l} x2={W - PAD.r} y1={y(avg)} y2={y(avg)} stroke="var(--navy)" strokeWidth="1" strokeDasharray="3 3" opacity=".45" />
-        {clsLine && <path d={clsLine} fill="none" stroke="#c2703f" strokeWidth="1.4" strokeDasharray="4 3" opacity=".85" strokeLinejoin="round" />}
-        <path d={mineLine} fill="none" stroke="var(--navy)" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
-        {rows.map((r, i) => (
-          <circle key={i} cx={x(i)} cy={y(r.score)} r={pick === i ? 4.5 : 3}
-            fill={pick === i ? "#c2703f" : "var(--navy)"} stroke="#fff" strokeWidth="1.2"
-            style={{cursor: "pointer"}} onClick={() => setPick(pick === i ? null : i)} />
-        ))}
-        {rows.map((r, i) => (n <= 8 || i === 0 || i === n - 1 || i === pick) && (
-          <text key={"t" + i} x={x(i)} y={H - 6} textAnchor="middle" fontSize="7" fill="#8a7f72">{shortDate(r.date)}</text>
-        ))}
-      </svg>
-      <div style={{fontSize: 11, color: "var(--muted)", display: "flex", gap: 12, flexWrap: "wrap", marginTop: 2}}>
-        <span><b style={{color: "var(--navy)"}}>—</b> 내 점수</span>
-        <span><b style={{color: "var(--navy)", opacity: .5}}>┄</b> 내 평균 {avg}점</span>
-        {clsLine && <span><b style={{color: "#c2703f"}}>┄</b> 반 평균</span>}
-      </div>
-      <div style={{fontSize: 12, color: "var(--muted)", marginTop: 4, minHeight: 18}}>
-        {sel
-          ? <span><b style={{color: "var(--ink)"}}>{sel.score}점</b> · {sel.correct}/{sel.total} · {fmtDate(sel.date)}
-              {sel.label ? " · " + sel.label : ""}
-              {showClass && classAvg[sel.date] != null ? " · 반 평균 " + classAvg[sel.date] + "점" : ""}
-            </span>
-          : <span>점을 누르면 그 회차를 자세히 보여줘요</span>}
-      </div>
-    </div>
-  );
-}
-
-// 기간 고르기
-const SCORE_RANGES = [
-  { key: "3m", label: "3개월", months: 3 },
-  { key: "6m", label: "6개월", months: 6 },
-  { key: "1y", label: "1년", months: 12 },
-  { key: "all", label: "전체", months: 0 },
-];
-function rangeFrom(months) {
-  if (!months) return "";
-  const d = new Date(todayStr + "T00:00:00");
-  d.setMonth(d.getMonth() - months);
-  d.setDate(1);            // 29~31일이면 넘치므로 1일 기준 (recentMonths와 같은 이유)
-  return ymd(d);
-}
-
-// 한 사람의 점수 추이
-function ScoreTrend({ cls, sid }) {
-  const [rangeKey, setRangeKey] = useState("6m");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [custom, setCustom] = useState(false);
-  const [data, setData] = useState(null);
-  const [showClass, setShowClass] = useState(true);
-
-  const f = custom ? from : rangeFrom((SCORE_RANGES.find((r) => r.key === rangeKey) || {}).months);
-  const t = custom ? to : "";
-
-  useEffect(() => {
-    let alive = true;
-    setData(null);
-    loadScoreHistory(cls.id, f, t).then((r) => { if (alive) setData(r); })
-      .catch(() => { if (alive) setData({ rows: [], days: 0, truncated: false }); });
-    return () => { alive = false; };
-  }, [cls.id, sid, f, t]);
-
-  const picker = (
-    <div style={{marginBottom: 12}}>
-      <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
-        {SCORE_RANGES.map((r) => (
-          <button key={r.key} className={"cm-ab-tab" + (!custom && rangeKey === r.key ? " on" : "")}
-            onClick={() => { setCustom(false); setRangeKey(r.key); }}>{r.label}</button>
-        ))}
-        <button className={"cm-ab-tab" + (custom ? " on" : "")} onClick={() => setCustom(true)}>직접 고르기</button>
-      </div>
-      {custom && (
-        <div style={{display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap"}}>
-          <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date"
-            value={from} max={to || todayStr} onChange={(e) => setFrom(e.target.value)} />
-          <span style={{color: "var(--muted)"}}>~</span>
-          <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date"
-            value={to} min={from} max={todayStr} onChange={(e) => setTo(e.target.value)} />
-          {(from || to) && <button className="cm-link" onClick={() => { setFrom(""); setTo(""); }}>지우기</button>}
-        </div>
-      )}
-    </div>
-  );
-
-  if (data === null) return <div>{picker}<div className="cm-empty">불러오는 중…</div></div>;
-
-  const all = data.rows;
-  const rows = sid ? all.filter((r) => r.sid === sid) : [];
-  // 날짜별 반 평균 (그 날 제출한 사람들의 평균)
-  const byDate = {};
-  all.forEach((r) => { (byDate[r.date] = byDate[r.date] || []).push(r.score); });
-  const classAvg = {};
-  Object.keys(byDate).forEach((d) => {
-    classAvg[d] = Math.round(byDate[d].reduce((a, b) => a + b, 0) / byDate[d].length);
-  });
-  const others = all.filter((r) => r.sid !== sid).length;
-
-  if (!rows.length) {
-    return <div>{picker}<div className="cm-empty">이 기간에 제출한 점수가 없어요</div></div>;
-  }
-  const best = rows.reduce((a, r) => (r.score > a.score ? r : a), rows[0]);
-  const last = rows[rows.length - 1];
-  const prev = rows.length > 1 ? rows[rows.length - 2] : null;
-  const diff = prev ? last.score - prev.score : null;
-  const myAvg = Math.round(rows.reduce((a, r) => a + r.score, 0) / rows.length);
-  const clsKeys = Object.keys(classAvg);
-  const clsAvgAll = clsKeys.length ? Math.round(clsKeys.reduce((a, d) => a + classAvg[d], 0) / clsKeys.length) : null;
-
-  return (
-    <div>
-      {picker}
-      {others > 0 && (
-        <label style={{display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)", marginBottom: 8}}>
-          <input type="checkbox" checked={showClass} onChange={(e) => setShowClass(e.target.checked)} />
-          반 평균 같이 보기
-        </label>
-      )}
-      <ScoreChart rows={rows} classAvg={classAvg} showClass={showClass && others > 0} />
-      <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10}}>
-        <span className="cm-chip" style={{background: "#eef1f6", color: "var(--navy)"}}>{rows.length}회 · 내 평균 {myAvg}점</span>
-        <span className="cm-chip" style={{background: "#eef1f6", color: "var(--navy)"}}>최근 {last.score}점</span>
-        {diff !== null && (
-          <span className="cm-chip" style={{background: diff >= 0 ? "#e6f0e9" : "#fae3e2", color: diff >= 0 ? "#3f7d5e" : "#d6453f"}}>
-            지난번보다 {diff >= 0 ? "+" : ""}{diff}점
-          </span>
-        )}
-        <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f"}}>최고 {best.score}점</span>
-        {others > 0 && clsAvgAll != null && (
-          <span className="cm-chip" style={{background: "#f6e7df", color: "#c2703f"}}>반 평균 {clsAvgAll}점</span>
-        )}
-      </div>
-      {data.truncated && (
-        <div className="cm-hint" style={{marginTop: 8}}>
-          기간이 길어 최근 {SCORE_MAX_DAYS}번의 수업만 불러왔어요. 기간을 좁히면 전부 나와요.
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ScoreForm({ cls, me }) {
-  const [correct, setCorrect] = useState("");
-  const [total, setTotal] = useState("");
-  const [label, setLabel] = useState("");
-  const [mine, setMine] = useState([]);
-
-  useEffect(() => {
-    const unsub = scoresCol(cls.id, todayStr).where("sid", "==", me.id).onSnapshot((s) => {
-      const arr = []; s.forEach((d) => arr.push({ id: d.id, ...d.data() })); arr.sort((a, b) => a.time - b.time); setMine(arr);
-    });
-    return () => unsub();
-  }, [cls.id, me.id]);
-
-  const c = parseInt(correct, 10), t = parseInt(total, 10);
-  const valid = !isNaN(c) && !isNaN(t) && t > 0 && c >= 0 && c <= t;
-  const score = valid ? Math.round((c / t) * 100) : null;
-  const over = correct !== "" && total !== "" && !isNaN(c) && !isNaN(t) && (c > t || t === 0);
-
-  async function submit() {
-    if (!valid) return;
-    await addScore(cls.id, todayStr, { sid: me.id, name: me.name, correct: c, total: t, score, label: label.trim(), time: Date.now() });
-    setCorrect(""); setTotal(""); setLabel("");
-  }
-
-  return (
-    <div className="cm-card">
-      <h3 className="cm-h3">테스트 점수</h3>
-      <label className="cm-label">시험 이름 (선택)</label>
-      <input className="cm-input" placeholder="예: 6월 단원평가" value={label} onChange={(e) => setLabel(e.target.value)} />
-      <label className="cm-label">맞은 개수 / 전체 문항 수</label>
-      <div className="cm-rangebar">
-        <input className="cm-input" inputMode="numeric" placeholder="맞은 개수" value={correct} onChange={(e) => setCorrect(e.target.value.replace(/\D/g, ""))} />
-        <span className="cm-tilde">/</span>
-        <input className="cm-input" inputMode="numeric" placeholder="전체" value={total} onChange={(e) => setTotal(e.target.value.replace(/\D/g, ""))} />
-      </div>
-      {score !== null && <div className="cm-scorebig">환산 점수 <b>{score}점</b><span>/ 100점</span></div>}
-      {over && <div className="cm-err">맞은 개수는 전체 문항 수보다 클 수 없어요.</div>}
-      <button className="cm-btn cm-btn-primary" onClick={submit}>제출하기</button>
-      {mine.length > 0 && (
-        <div className="cm-sentlist">
-          <div className="cm-mini-h">내가 제출한 점수</div>
-          {mine.slice().reverse().map((s) => (
-            <div key={s.id} className="cm-sent-item">
-              <span>{s.label ? s.label + " · " : ""}{s.correct}/{s.total}</span>
-              <span className="cm-tag-ok">{s.score}점</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
