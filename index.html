@@ -834,11 +834,6 @@ const noticeDoc = (cid) => classDoc(cid).collection("config").doc("notice");
 function listenNotice(cid, cb) {
   return noticeDoc(cid).onSnapshot((d) => cb(d.exists ? d.data() : null));
 }
-const flyerPubDoc = (cid) => classDoc(cid).collection("config").doc("flyerPub");
-function listenFlyerPub(cid, cb) {
-  return flyerPubDoc(cid).onSnapshot((d) => cb(d.exists ? d.data() : null));
-}
-
 // ----- 안 이어진 반 명단 줄을 "누구인가요?" 로 고른다 -----
 //
 // 이름만으로는 못 고른다. 학교·학년·담임·지금 속한 반을 같이 보여준다.
@@ -1028,7 +1023,6 @@ async function closeExamTerm(term) {
 // merge로 그 열쇠만 쓰면 되고, 다른 선생님이 동시에 딴 학교를 고쳐도 안 부딪친다.
 const schoolTermsDoc = () => db.collection("appConfig").doc("schoolTerms");
 const termKey = (t) => String(t || "").replace(/[^0-9A-Za-z가-힣]+/g, "_");
-const schedKey = (term, school, grade) => termKey(term) + "__" + school + "__" + grade;
 function listenSchoolTerms(cb) {
   return schoolTermsDoc().onSnapshot((d) => cb((d.exists && d.data()) || {}), () => cb({}));
 }
@@ -1109,11 +1103,6 @@ function schoolTermsOf(all, term) {
     .filter((k) => k.indexOf(pre) === 0 && all[k] && all[k].school)
     .map((k) => all[k]);
 }
-function findSchoolTerm(all, term, school, grade) {
-  const v = (all || {})[schedKey(term, school, grade)];
-  return v && v.school && v.start ? v : null;
-}
-
 function dayAfter(d) {
   if (!d) return "";
   const x = new Date(d + "T00:00:00");
@@ -1615,7 +1604,6 @@ async function deleteFileDoc(docRef) {
   for (const d of oldParts.docs) await d.ref.delete();
   await docRef.delete();
 }
-const loadProgressFileB64 = (cid, key, meta) => loadFileB64FromDoc(progressDoc(cid, key), meta);
 // ----- 강의노트 (단원별 파일 게시) -----
 const noteUnitsCol = (cid) => classDoc(cid).collection("noteUnits");
 const noteFilesCol = (cid, uid) => noteUnitsCol(cid).doc(uid).collection("files");
@@ -1678,10 +1666,6 @@ async function saveClassMeta(cid, name, classDays) {
   await classesCol().doc(cid).update({ name, classDays });
   await loadClasses();
 }
-// ----- AI 힌트 로그 -----
-const aiLogsCol = (cid) => classDoc(cid).collection("aiLogs");
-async function addAiLog(cid, log) { await aiLogsCol(cid).add(log); }
-
 // ----- 수업별 코멘트 (classDoc/dailyNotes) -----
 // 문서 id = "{sid}_{date}"
 const noteCol = (cid) => classDoc(cid).collection("dailyNotes");
@@ -2101,103 +2085,6 @@ function StudentView({ cls, onBack }) {
     );
   }
   return <StudentHome cls={cls} me={me} onLogout={() => setMe(null)} />;
-}
-
-function MathText({ text }) {
-  // $...$, $$...$$, \\(...\\), \\[...\\] 안의 LaTeX를 KaTeX로 렌더
-  const html = React.useMemo(() => {
-    if (!text) return "";
-    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    if (typeof katex === "undefined") return esc(text);
-    // 토큰 분리: 디스플레이($$, \[\]) 와 인라인($, \(\))
-    const re = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\$([^\$\n]+?)\$|\\\(([\s\S]+?)\\\)/g;
-    let out = ""; let last = 0; let m;
-    while ((m = re.exec(text)) !== null) {
-      out += esc(text.slice(last, m.index));
-      const display = m[1] !== undefined || m[2] !== undefined;
-      const expr = m[1] || m[2] || m[3] || m[4] || "";
-      try {
-        out += katex.renderToString(expr, { displayMode: display, throwOnError: false });
-      } catch (e) {
-        out += esc(m[0]);
-      }
-      last = m.index + m[0].length;
-    }
-    out += esc(text.slice(last));
-    return out;
-  }, [text]);
-  return <span dangerouslySetInnerHTML={{ __html: html }} />;
-}
-
-function AIChat({ cls, me }) {
-  const [messages, setMessages] = useState([]); // {role, text, img?:{data,mime}}
-  const [input, setInput] = useState("");
-  const [img, setImg] = useState(null); // {data(b64), mime, preview}
-  const [busy, setBusy] = useState(false);
-  const fileRef = React.useRef(null);
-  const scrollRef = React.useRef(null);
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, busy]);
-
-  async function pickImg(e) {
-    const f = e.target.files && e.target.files[0];
-    e.target.value = "";
-    if (!f) return;
-    if (f.size > 4 * 1024 * 1024) { alert("이미지가 너무 커요 (최대 4MB)"); return; }
-    const b64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(f); });
-    setImg({ data: b64, mime: f.type || "image/jpeg", preview: "data:" + (f.type || "image/jpeg") + ";base64," + b64 });
-  }
-
-  async function send() {
-    if (busy || (!input.trim() && !img)) return;
-    const myMsg = { role: "user", text: input.trim(), img };
-    const next = [...messages, myMsg];
-    setMessages(next); setInput(""); setImg(null); setBusy(true);
-    try {
-      const apiMsgs = next.map((m) => {
-        if (m.img) {
-          const parts = [{ type: "image", source: { type: "base64", media_type: m.img.mime, data: m.img.data } }];
-          parts.push({ type: "text", text: m.text || "이 문제 푸는 거 도와줘" });
-          return { role: m.role, content: parts };
-        }
-        return { role: m.role, content: m.text };
-      });
-      const res = await fetch("/api/hint", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: apiMsgs }) });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || "오류");
-      setMessages([...next, { role: "assistant", text: data.text }]);
-      if (!me.teacher) {
-        addAiLog(cls.id, { sid: me.id, name: me.name, q: myMsg.text || "", a: data.text || "", img: !!myMsg.img, time: Date.now() }).catch(() => {});
-      }
-    } catch (e) {
-      setMessages([...next, { role: "assistant", text: "⚠ " + e.message }]);
-    }
-    setBusy(false);
-  }
-
-  return (
-    <div className="cm-card">
-      <h3 className="cm-h3">AI 힌트 <span className="cm-h-hint">(답은 안 알려주고 힌트만 줘요)</span></h3>
-      {!me.teacher && <div className="cm-hint" style={{marginBottom: 8}}>질문 내역은 선생님이 볼 수 있어요.</div>}
-      <div ref={scrollRef} className="cm-ai-scroll">
-        {messages.length === 0 && <div className="cm-empty">막히는 문제를 물어보거나, 문제 사진을 올려보세요.<br/>답을 바로 알려주진 않고 힌트로 도와줄게요.</div>}
-        {messages.map((m, i) => (
-          <div key={i} className={"cm-ai-msg " + (m.role === "user" ? "me" : "ai")}>
-            {m.img && <img src={m.img.preview} className="cm-ai-img" />}
-            {m.text && <div className="cm-ai-bubble">{m.role === "assistant" ? <MathText text={m.text} /> : m.text}</div>}
-          </div>
-        ))}
-        {busy && <div className="cm-ai-msg ai"><div className="cm-ai-bubble cm-ai-typing">생각 중…</div></div>}
-      </div>
-      {img && <div className="cm-ai-preview"><img src={img.preview} /><button className="cm-link" onClick={() => setImg(null)}>✕ 사진 빼기</button></div>}
-      <div className="cm-ai-input">
-        <input ref={fileRef} type="file" accept="image/*" style={{display: "none"}} onChange={pickImg} />
-        <button className="cm-ai-imgbtn" disabled={busy} onClick={() => fileRef.current.click()}>📷</button>
-        <input className="cm-input" style={{margin: 0}} placeholder="질문을 입력하세요" value={input}
-          onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
-        <button className="cm-ai-send" disabled={busy} onClick={send}>전송</button>
-      </div>
-    </div>
-  );
 }
 
 // 반이 아직 없는 학생. 로그인은 됐고 볼 것만 없다.
@@ -3362,7 +3249,7 @@ function MockExamBoard({ cls }) {
 }
 
 function StudentHome({ cls, me, onLogout }) {
-  const [tab, setTab] = useState(me.teacher ? "q" : "att");
+  const [tab, setTab] = useState(me.teacher ? "q" : "hw");
   const [att, setAtt] = useState(null);
   const [showPin, setShowPin] = useState(false);
   const [mustPin, setMustPin] = useState(MUST_CHANGE_PIN);
@@ -3408,17 +3295,15 @@ function StudentHome({ cls, me, onLogout }) {
     setDmDismissed(true);
   }
 
-  // 게시된 안내문이 있을 때만 탭을 띄운다 (빈 탭을 눌러보게 하지 않는다)
-  const [hasFlyer, setHasFlyer] = useState(false);
-  useEffect(() => listenFlyerPub(cls.id, (d) => setHasFlyer(!!(d && d.active))), [cls.id]);
-  // 내신 접수는 선생님이 회차를 연 동안에만 학생에게 보인다
-  const [examTerms, setExamTerms] = useState([]);
-  useEffect(() => listenExamTerms(setExamTerms), []);
   const hwBooks = useHwBooks(cls, me);   // 과제 채점 교재 — «과제» 탭 안에서 «답 내기» 교재가 된다
   // 실전 시험은 출석과 묶지 않는다 — 시간 재는 시험을 «출석부터» 에서 막으면 시작부터 어긋난다
   const hwOpen = !!(hwBooks && hwBooks.length);   // 과제 채점 교재가 걸린 반은 «과제» 를 출석 없이 연다 — 집에서 푼다
-  const noGateTabs = ["prog", "notes", "ai", "flyer", "exam", "mock", ...(hwOpen ? ["hw"] : [])]; // 출석 없이도 볼 수 있는 탭
-  const activeTab = me.teacher ? tab : (att || noGateTabs.includes(tab) ? tab : "att");
+  const noGateTabs = ["notes", "mock", ...(hwOpen ? ["hw"] : [])]; // 출석 없이도 볼 수 있는 탭
+  // 출석은 **수업 있는 날만** 뜬다(10/17) — 그 학생이 오는 요일(개진반은 학생 요일 · 정규반은 반 요일 중 나오는 요일) · 수강 기간 안.
+  // 다른 날 와서 이미 출석이 찍혔으면(보강 따위) 그날도 보인다
+  const classToday = !me.teacher && (!!att || (isActiveOn(me, todayStr) && studentDows(cls, me).includes(new Date(todayStr + "T00:00:00").getDay())));
+  const fallback = classToday ? "att" : hwOpen ? "hw" : "mock";
+  const activeTab = me.teacher ? tab : (att || noGateTabs.includes(tab) ? tab : fallback);
   const showDmBanner = !!(dmNotice && dmNotice.active && dmNotice.text && !dmDismissed);
   const showClassBanner = !!(notice && notice.active && notice.text && !noticeDismissed) && !showDmBanner;
   const showBanner = showDmBanner || showClassBanner;
@@ -3429,17 +3314,14 @@ function StudentHome({ cls, me, onLogout }) {
   return (<>
     <Sidebar title={me.name + "님"} active={activeTab} onSelect={setTab}
       items={[
-        ...(!me.teacher ? [{ key: "att", ico: "✓", label: "출석" }] : []),
+        ...(classToday ? [{ key: "att", ico: "✓", label: "출석" }] : []),
         { key: "q", ico: "?", label: "질문", disabled: !me.teacher && !att },
         { key: "hw", ico: "▤", label: "과제", disabled: !me.teacher && !att && !hwOpen },
         { key: "score", ico: "◈", label: "점수", disabled: !me.teacher && !att },
         { sep: true },
-        { key: "prog", ico: "▦", label: "진도계획표" },
+        // 진도계획표 · 안내문 · 내신 · AI 힌트는 지웠다(10/17 마왕님)
         { key: "mock", ico: "⏱", label: "실전 시험" },
-        ...(hasFlyer ? [{ key: "flyer", ico: "▤", label: "안내문" }] : []),
-        ...(examTerms.length ? [{ key: "exam", ico: "▣", label: "내신" }] : []),
         { key: "notes", ico: "✎", label: "강의노트" },
-        { key: "ai", ico: "✦", label: "AI 힌트" },
       ]} />
     <div className="cm-stack">
       {showBanner && (
@@ -3454,7 +3336,7 @@ function StudentHome({ cls, me, onLogout }) {
       <div className="cm-card cm-welcome">
         <div>
           <div className="cm-welcome-name">{me.name} 님</div>
-          <div className="cm-welcome-sub">{me.teacher ? "선생님 모드" : att ? "출석 완료 · " + hhmm(att.time) : "아직 출석 전이에요"}</div>
+          <div className="cm-welcome-sub">{me.teacher ? "선생님 모드" : att ? "출석 완료 · " + hhmm(att.time) : classToday ? "아직 출석 전이에요" : "오늘은 수업 없는 날"}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
           <button className="cm-link" onClick={() => setShowPin((v) => !v)}>비밀번호 변경</button>
@@ -3495,17 +3377,13 @@ function StudentHome({ cls, me, onLogout }) {
           <ScoreTrend cls={cls} sid={me.id} />
         </div>
       </>)}
-      {activeTab === "prog" && <StudentProgressView cls={cls} me={me} />}
       {activeTab === "mock" && <MockExamTab cls={cls} me={me} />}
-      {activeTab === "flyer" && <FlyerView cls={cls} />}
-      {activeTab === "exam" && <ExamForm cls={cls} me={me} />}
       {activeTab === "notes" && (
         <div className="cm-card">
           <h3 className="cm-h3">강의노트</h3>
           <NotesManager cls={cls} canEdit={false} me={me} />
         </div>
       )}
-      {activeTab === "ai" && <AIChat cls={cls} me={me} />}
     </div>
   </>);
 }
@@ -4838,231 +4716,6 @@ function LectBoard({ cls, books }) {
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-// ----- 내신: 학생 입력 -----
-function ExamForm({ cls, me }) {
-  const [term, setTerm] = useState(null);
-  const [terms, setTerms] = useState([]);
-  const [mine, setMine] = useState(undefined);
-  const [f, setF] = useState({ school: "", grade: "", start: "", end: "", math: "", prep: "", back: "", note: "" });
-  const [msg, setMsg] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [q, setQ] = useState("");
-  const [seen, setSeen] = useState([]);   // 이 반에서 이미 쓴 학교들
-  const [peers, setPeers] = useState([]); // 이번 회차에 낸 다른 학생들
-  const [shared, setShared] = useState([]); // 선생님이 더해둔 학원 공용 목록
-  const [etc, setEtc] = useState(false);    // 기타 = 직접 입력
-  const [etcName, setEtcName] = useState("");
-  const [sched, setSched] = useState({});   // 선생님이 적어둔 학교 일정
-  const autoRef = useRef("");               // 어느 학교로 자동으로 채웠는지
-
-  useEffect(() => listenExamTerms((list) => {
-    setTerms(list);
-    setTerm((t) => (t && list.indexOf(t) >= 0 ? t : (list[0] || "")));
-  }), []);
-  // 회차를 바꾸면 날짜 칸은 비운다 — 다른 회차의 날짜가 남아 그대로 내지면 안 된다. 학교·학년은 둔다.
-  function pickTerm(t) {
-    if (t === term) return;
-    autoRef.current = "";
-    setMine(undefined); setMsg("");
-    setF((p) => ({ school: p.school, grade: p.grade, start: "", end: "", math: "", prep: "", back: "", note: "" }));
-    setTerm(t);
-  }
-  useEffect(() => {
-    if (!term) return;
-    return listenExams(cls.id, term, (m) => {
-      const v = m[me.id];
-      setMine(v || null);
-      if (v) setF({ school: v.school || "", grade: v.grade || "", start: v.start || "", end: v.end || "",
-                    math: v.math || "", prep: v.prep || "", back: v.back || "", note: v.note || "" });
-    });
-  }, [cls.id, term, me.id]);
-
-  // 반 명단에 적힌 학교·학년을 먼저 쓴다 (선생님이 학생 명단에서 정해둔 값)
-  useEffect(() => {
-    if (mine) return;
-    const r = (cls.roster || []).find((x) => x.id === me.id);
-    if (r && (r.school || r.grade)) {
-      setF((p) => (p.school || p.grade ? p : { ...p, school: r.school || "", grade: r.grade || "" }));
-    }
-  }, [mine, cls.id, me.id]);
-
-  // 없으면 지난 회차 것을 그대로 쓴다 (매번 다시 치게 하지 않는다)
-  useEffect(() => {
-    if (mine || !term) return;
-    examCol(cls.id).where("sid", "==", me.id).get().then((s) => {
-      let latest = null;
-      s.forEach((d) => { const v = d.data(); if (!latest || (v.updated || 0) > (latest.updated || 0)) latest = v; });
-      if (latest) setF((p) => (p.school || p.grade ? p : { ...p, school: latest.school || "", grade: latest.grade || "" }));
-    }).catch(() => {});
-  }, [mine, term, cls.id, me.id]);
-
-  useEffect(() => {
-    if (!term) return;
-    return listenExams(cls.id, term, (m) => {
-      const arr = Object.keys(m).map((k) => m[k]);
-      setPeers(arr.filter((v) => v.sid !== me.id));
-    });
-  }, [cls.id, term, me.id]);
-  useEffect(() => {
-    examCol(cls.id).get().then((s2) => {
-      const set2 = {};
-      s2.forEach((d) => { const v = d.data(); if (v.school) set2[v.school] = 1; });
-      setSeen(Object.keys(set2));
-    }).catch(() => {});
-  }, [cls.id]);
-
-  useEffect(() => listenSchools(setShared), []);
-  useEffect(() => listenSchoolTerms(setSched), []);
-
-  // 선생님이 학교 일정을 적어뒀으면 그걸로 채워준다. 학생이 달력을 뒤질 일이 없어지고,
-  // 같은 학교인데 값이 갈리는 일도 애초에 안 생긴다. 이미 낸 사람은 안 건드린다.
-  // 다르면 학생이 고쳐서 내면 된다 — 분반마다 진짜 다를 수 있다.
-  const mySched = (term && f.school && f.grade) ? findSchoolTerm(sched, term, f.school, f.grade) : null;
-  useEffect(() => {
-    if (mine || !mySched) return;
-    const k = f.school + "|" + f.grade;
-    if (autoRef.current === k) return;   // 같은 학교로 두 번 덮지 않는다 (고쳐놓은 걸 되돌리게 된다)
-    autoRef.current = k;
-    setF((prev) => ({ ...prev, start: mySched.start, end: mySched.end, math: mySched.math || "",
-      prep: (prev.prep && prev.prep !== dayBefore(prev.math)) ? prev.prep
-            : (mySched.math ? dayBefore(mySched.math) : "") }));
-  }, [mine, f.school, f.grade, mySched ? examSig(mySched) : ""]);
-
-  const schoolOpts = Array.from(new Set(KNOWN_SCHOOLS.concat(shared).concat(seen)))
-    .sort((a, b) => a.localeCompare(b, "ko"));
-  // 같은 학교·같은 학년 친구가 이미 낸 일정 (있으면 그대로 쓰게 해준다)
-  const sameSchool = (f.school && f.grade)
-    ? peers.find((v) => v.school === f.school && v.grade === f.grade && v.start && v.end) || null
-    : null;
-
-  function set(k, v) {
-    setF((p) => {
-      const n = { ...p, [k]: v };
-      // 수학시험일을 넣으면 직보를 전날로 채워준다 (직접 고친 적 없을 때만)
-      if (k === "math" && (!p.prep || p.prep === dayBefore(p.math))) n.prep = dayBefore(v);
-      return n;
-    });
-  }
-  async function submit() {
-    if (busy) return;
-    if (!f.school.trim()) { setMsg("학교를 입력해주세요"); return; }
-    if (!f.grade) { setMsg("학년을 골라주세요"); return; }
-    if (!f.start || !f.end) { setMsg("내신 기간을 넣어주세요"); return; }
-    if (f.end < f.start) { setMsg("종료일이 시작일보다 빠를 수 없어요"); return; }
-    setBusy(true); setMsg("");
-    try {
-      await saveExam(cls.id, term, me.id, { name: me.name, school: f.school.trim(), grade: f.grade,
-        start: f.start, end: f.end, math: f.math, prep: f.prep, note: f.note.trim() });
-      setMsg("냈어요 ✓ 선생님이 바로 볼 수 있어요");
-    } catch (e) { setMsg("저장 실패: " + e.message); }
-    setBusy(false);
-  }
-
-  if (term === null) return <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>;
-  if (!term) return (
-    <div className="cm-card">
-      <h3 className="cm-h3">내신 참여</h3>
-      <div className="cm-empty">아직 접수 기간이 아니에요. 선생님이 열면 여기에 나와요.</div>
-    </div>
-  );
-  return (
-    <div className="cm-card">
-      <h3 className="cm-h3">내신 참여 <span className="cm-h-hint">({term})</span></h3>
-      {terms.length > 1 && (
-        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
-          {terms.map((t) => (
-            <button key={t} className={"cm-chip" + (t === term ? " on" : "")}
-              style={{border: "1px solid " + (t === term ? "#3f7d5e" : "#e3ddd3"), background: t === term ? "#e6f0e9" : "#fff",
-                      color: t === term ? "#3f7d5e" : "#7c6f5f", cursor: "pointer"}}
-              onClick={() => pickTerm(t)}>{t}</button>
-          ))}
-        </div>
-      )}
-      {mySched && !mine && (
-        <div className="cm-done" style={{marginBottom: 8}}>
-          {f.school} {f.grade} 일정을 선생님이 올려둬서 미리 채워놨어 · {shortDate(mySched.start)}~{shortDate(mySched.end)}
-          {mySched.math ? " · 수학 " + shortDate(mySched.math) : ""}
-          <br/><span style={{fontSize: 12, opacity: .85}}>네 반이랑 다르면 고쳐서 내면 돼.</span>
-        </div>
-      )}
-      <div className="cm-hint" style={{marginBottom: 6}}>
-        내신 기간이 언제인지 알려줘. 정해진 게 바뀌면 다시 내면 돼.
-        <br/><b>복귀 날짜는 선생님이 정해서 알려줄 거야.</b>
-      </div>
-      {mine && <div className="cm-done" style={{marginBottom: 8}}>이미 냈어요 · 고치면 바로 반영돼요</div>}
-
-      <label className="cm-label">학교</label>
-      {f.school ? (
-        <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"}}>
-          <span className="cm-chip" style={{background: "#eef1f6", color: "var(--navy)", fontSize: 14}}>{f.school}</span>
-          <button className="cm-link" onClick={() => { set("school", ""); setQ(""); }}>바꾸기</button>
-        </div>
-      ) : (<>
-        <input className="cm-input" placeholder="학교 이름 일부를 쳐봐 (예: 중동)"
-          value={q} onChange={(e) => setQ(e.target.value)} />
-        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6}}>
-          {schoolOpts.filter((x) => !q.trim() || x.includes(q.trim())).slice(0, 14).map((x) => (
-            <button key={x} className="cm-ab-tab" onClick={() => { setEtc(false); set("school", x); }}>{x}</button>
-          ))}
-          <button className={"cm-ab-tab" + (etc ? " on" : "")}
-            onClick={() => { setEtc(true); setEtcName(q.trim()); }}>기타 (직접 입력)</button>
-        </div>
-        {etc && (
-          <div style={{display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap"}}>
-            <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 150}} autoFocus
-              placeholder="학교 이름을 적어줘 (예: 세화고)"
-              value={etcName} onChange={(e) => setEtcName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && etcName.trim()) { set("school", etcName.trim()); setEtc(false); } }} />
-            <button className="cm-btn cm-btn-ghost" style={{margin: 0, width: "auto", padding: "9px 14px"}}
-              disabled={!etcName.trim()} onClick={() => { set("school", etcName.trim()); setEtc(false); }}>이 학교로</button>
-            <button className="cm-link" onClick={() => setEtc(false)}>취소</button>
-          </div>
-        )}
-      </>)}
-      {sameSchool && (
-        <div className="cm-hint" style={{marginTop: 8, background: "#eef1f6", padding: "9px 11px", borderRadius: 10}}>
-          같은 학교({f.school} {f.grade}) 친구가 낸 일정이 있어.{" "}
-          <b>{shortDate(sameSchool.start)}~{shortDate(sameSchool.end)}</b>
-          {sameSchool.math ? <> · 수학 <b>{shortDate(sameSchool.math)}</b></> : null}
-          <br/>
-          <button className="cm-link" style={{padding: 0}} onClick={() => setF((pr) => ({
-            ...pr, start: sameSchool.start || "", end: sameSchool.end || "",
-            math: sameSchool.math || "", prep: dayBefore(sameSchool.math) }))}>이대로 불러오기</button>
-          {" "}— 다르면 그냥 직접 넣으면 돼.
-        </div>
-      )}
-      <label className="cm-label">학년</label>
-      <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
-        {GRADES.map((g) => (
-          <button key={g} className={"cm-ab-tab" + (f.grade === g ? " on" : "")} onClick={() => set("grade", g)}>{g}</button>
-        ))}
-      </div>
-
-      <label className="cm-label">내신 기간</label>
-      <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap"}}>
-        <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" value={f.start} onChange={(e) => set("start", e.target.value)} />
-        <span style={{color: "var(--muted)"}}>~</span>
-        <input className="cm-input" style={{margin: 0, flex: 1, minWidth: 130}} type="date" value={f.end} min={f.start} onChange={(e) => set("end", e.target.value)} />
-      </div>
-
-      <label className="cm-label">수학 시험 날짜</label>
-      <input className="cm-input" type="date" value={f.math} onChange={(e) => set("math", e.target.value)} />
-      <label className="cm-label">직보 <span className="cm-h-hint">(수학시험 전날 · 자동으로 채워져요)</span></label>
-      <input className="cm-input" type="date" value={f.prep} onChange={(e) => set("prep", e.target.value)} />
-      <label className="cm-label">비고 (선택)</label>
-      <input className="cm-input" placeholder="예: 수행평가로 목요일 결석" value={f.note} onChange={(e) => set("note", e.target.value)} />
-
-      {mine && mine.back && (
-        <div className="cm-hint" style={{marginTop: 10, background: "#e3edf5", color: "#2b5f8a", padding: "9px 11px", borderRadius: 10}}>
-          선생님이 정한 <b>복귀 날짜는 {fmtDate(mine.back)}</b>이야. 그날 보자.
-        </div>
-      )}
-      {msg && <div className={msg.includes("✓") ? "cm-done" : "cm-err"}>{msg}</div>}
-      <button className="cm-btn cm-btn-primary" disabled={busy} onClick={submit}>{busy ? "내는 중..." : (mine ? "고쳐서 다시 내기" : "제출하기")}</button>
     </div>
   );
 }
@@ -7884,10 +7537,6 @@ function FileContentViewer({ meta, loader, height }) {
   </>);
 }
 
-function ProgressFileViewer({ cid, pkey, meta, height }) {
-  return <FileContentViewer meta={meta} loader={() => loadProgressFileB64(cid, pkey, meta)} height={height} />;
-}
-
 function NoteFileRow({ cls, unit, file, canEdit, me }) {
   const [open, setOpen] = useState(false);
   const [views, setViews] = useState(null);
@@ -8030,39 +7679,6 @@ function NoteUnit({ cls, unit, canEdit, me }) {
   );
 }
 
-// 학생·학부모가 보는 게시본. 편집 패널 없이 안내문만 (flyer.html의 view=1)
-function FlyerView({ cls }) {
-  const ref = React.useRef(null);
-  const [pub, setPub] = useState(undefined);
-  const pubRef = React.useRef(null);
-  pubRef.current = pub;
-  useEffect(() => listenFlyerPub(cls.id, (d) => setPub(d && d.active ? d : null)), [cls.id]);
-  useEffect(() => {
-    function onMsg(ev) {
-      const m = ev.data;
-      if (!m || m.src !== "climath-flyer" || m.type !== "ready") return;
-      const w = ref.current && ref.current.contentWindow;
-      if (w) w.postMessage({ src: "climath-app", type: "load", data: (pubRef.current || {}).data || null }, "*");
-    }
-    window.addEventListener("message", onMsg);
-    return () => window.removeEventListener("message", onMsg);
-  }, []);
-  useEffect(() => {
-    const w = ref.current && ref.current.contentWindow;
-    if (w && pub) w.postMessage({ src: "climath-app", type: "load", data: pub.data || null }, "*");
-  }, [pub]);
-  if (pub === undefined) return <div className="cm-empty">불러오는 중…</div>;
-  if (!pub) return <div className="cm-empty">아직 게시된 안내문이 없어요</div>;
-  return (
-    <div className="cm-card">
-      <h3 className="cm-h3">안내문</h3>
-      <iframe ref={ref} src={"/flyer.html?view=1&cid=" + encodeURIComponent(cls.id)} title="안내문"
-        style={{width: "100%", height: Math.max(480, Math.round(window.innerHeight * 0.7)),
-                border: "1px solid var(--line)", borderRadius: 12, background: "#fff"}} />
-    </div>
-  );
-}
-
 function NotesManager({ cls, canEdit, me }) {
   const [units, setUnits] = useState(null);
   useEffect(() => noteUnitsCol(cls.id).orderBy("time").onSnapshot((s) => {
@@ -8086,24 +7702,6 @@ function NotesManager({ cls, canEdit, me }) {
         const t = prompt("새 단원 이름 (예: 1. 다항식의 연산)");
         if (t && t.trim()) addNoteUnit(cls.id, t.trim());
       }}>+ 단원 만들기</button>}
-    </div>
-  );
-}
-
-function StudentProgressView({ cls, me }) {
-  const [meta, setMeta] = useState(undefined);
-  const pkey = isIndividual(cls) ? me.id : "class";
-  useEffect(() => progressDoc(cls.id, pkey).onSnapshot((d) => setMeta(d.exists ? d.data() : null)), [cls.id, pkey]);
-  if (me.teacher && isIndividual(cls)) return <div className="cm-card"><div className="cm-empty">개별진도반 진도표는 선생님 화면(관리자 모드)에서 학생별로 관리해요.</div></div>;
-  return (
-    <div className="cm-card">
-      <h3 className="cm-h3">진도계획표</h3>
-      {meta === undefined && <div className="cm-empty">불러오는 중…</div>}
-      {meta === null && <div className="cm-empty">아직 게시된 진도계획표가 없어요</div>}
-      {meta && (<>
-        <ProgressFileViewer cid={cls.id} pkey={pkey} meta={meta} height={Math.round(window.innerHeight * 0.62)} />
-        <div style={{fontSize: 12, color: "var(--muted)", marginTop: 8}}>{fmtDate(ymd(new Date(meta.time)))} 게시</div>
-      </>)}
     </div>
   );
 }
