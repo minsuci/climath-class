@@ -1793,117 +1793,6 @@ async function previewPlaylist(url, date) {
   return j || {};
 }
 
-// ----- 학습관리 보고서 (reports 컬렉션) -----
-// 문서 id = "{cid}_{sid}_{YYYY-MM}"
-const reportsCol = () => db.collection("reports");
-const reportId = (cid, sid, ym) => cid + "_" + sid + "_" + ym;
-async function getReport(cid, sid, ym) {
-  const d = await reportsCol().doc(reportId(cid, sid, ym)).get();
-  return d.exists ? d.data() : null;
-}
-async function saveReport(cid, sid, ym, data) {
-  await reportsCol().doc(reportId(cid, sid, ym)).set({ cid, sid, ym, ...data, updated: Date.now() }, { merge: true });
-}
-// 이전 달 스냅샷 (진도 증가분 계산용)
-function prevYM(ym) {
-  const [y, m] = ym.split("-").map(Number);
-  const d = new Date(y, m - 2, 1);
-  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
-}
-
-// 한 학생의 월간 보고서 데이터 집계
-async function buildReportData(cls, st, ym) {
-  // 1) 출석: 해당 월 수업일
-  const allDays = await listDays(cls.id);
-  const monthDays = allDays.filter((d) => d.startsWith(ym)).sort();
-  const myDays = monthDays.filter((d) => attendsOn(cls, st, d));
-  let present = 0;
-  const absentDates = [];
-  for (const d of myDays) {
-    const doc = await attCol(cls.id, d).doc(st.id).get();
-    if (doc.exists) present++; else absentDates.push(d);
-  }
-  // 보강 정보
-  const mkSnap = await makeupCol(cls.id).get();
-  const mk = {};
-  mkSnap.forEach((d) => { const v = d.data(); if (v.sid === st.id && (v.date || "").startsWith(ym)) mk[v.date] = v; });
-  const videoDone = absentDates.filter((d) => mk[d] && mk[d].videoDone).length;
-  const planned = absentDates.filter((d) => mk[d] && mk[d].planned).length;
-
-  // 2) 과제 진도 (현재 누적 + 지난달 스냅샷 대비 증가분)
-  const hwDoc = await hwCol(cls.id).doc(st.id).get();
-  const hwNow = hwDoc.exists ? (hwDoc.data().books || {}) : {};
-  const prev = await getReport(cls.id, st.id, prevYM(ym));
-  const prevSnap = (prev && prev.hwSnapshot) || null;
-  const books = getStudentBooks(cls, st).map((b) => {
-    const done = (hwNow[b.name] || []).length;
-    const before = prevSnap && prevSnap[b.name] != null ? prevSnap[b.name] : null;
-    return { name: b.name, total: b.total, done, gained: before != null ? done - before : null,
-             pct: b.total > 0 ? Math.round(done / b.total * 100) : 0 };
-  });
-  const hwSnapshot = {};
-  books.forEach((b) => { hwSnapshot[b.name] = b.done; });
-
-  // 3) 상담 (해당 월)
-  const cs = await consultCol().where("cid", "==", cls.id).get();
-  const consults = [];
-  cs.forEach((d) => {
-    const v = d.data();
-    if (v.sid === st.id && (v.date || "").startsWith(ym)) consults.push(v);
-  });
-  consults.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-
-  // 4) 수업별 코멘트
-  const notes = await getMonthNotes(cls.id, st.id, ym);
-
-  // 5) 테스트 점수. 그날 것을 통째로 읽는다 —
-  //    어차피 한 번 부르는 김에 **반 평균**도 같이 낸다. 내 점수만 있으면
-  //    학부모가 «잘한 건지» 를 알 수가 없다.
-  //    ⚠ 사람이 적으면 평균이 곧 남의 점수가 된다. 셋 미만이면 안 낸다.
-  const scores = [];
-  for (const d of myDays) {
-    const snap = await scoresCol(cls.id, d).get().catch(() => null);
-    if (!snap) continue;
-    const all = [];
-    snap.forEach((x) => all.push(x.data()));
-    if (!all.length) continue;
-    // ⚠ 한 사람이 같은 날 여러 번 내는 일이 있다 (실측: 한 학생이 8/31 에 다섯 번).
-    //    사람마다 **마지막 것만** 본다. 안 그러면 평균이 그 사람 쪽으로 끌리고
-    //    보고서에도 같은 줄이 여러 번 찍힌다.
-    const last = {};
-    all.forEach((v) => { const k = v.sid; if (!last[k] || (v.time || 0) > (last[k].time || 0)) last[k] = v; });
-    const mine = last[st.id];
-    if (!mine) continue;
-    // ⚠ 같은 날 = 같은 시험으로 본다. **시험명으로 묶으면 안 된다** —
-    //    학생이 직접 치는 칸이라 같은 시험이 「가락고」「가락고 2025」「가락고2025」
-    //    「1회모고」「1회차 모의고사」로 갈린다 (2026-08-24 실측).
-    const peers = Object.values(last).filter((x) => x.score != null);
-    const avg = peers.length >= 3
-      ? Math.round(peers.reduce((a, x) => a + Number(x.score || 0), 0) / peers.length)
-      : null;
-    scores.push({ date: d, label: mine.label || "", correct: mine.correct, total: mine.total,
-                  score: Number(mine.score || 0), avg, n: peers.length });
-  }
-  scores.sort((a, b) => a.date.localeCompare(b.date));
-  const scoreAvg = scores.length
-    ? Math.round(scores.reduce((a, x) => a + x.score, 0) / scores.length) : null;
-
-  // 6) 그날 수업 내용 (반 공통). 학생 코멘트가 없는 날에 대신 쓴다 —
-  //    코멘트를 매번 못 쓰니 «그날 무엇을 했는지» 라도 남기려는 것이다.
-  const lessons = {};
-  for (const d of myDays) {
-    const dd = await dayDoc(cls.id, d).get().catch(() => null);
-    const L = dd && dd.exists && dd.data().lesson;
-    if (L && L.line) lessons[d] = L;
-  }
-
-  return {
-    notes, lessons, scores, scoreAvg, sessionDates: myDays,
-    sessions: myDays.length, present, absent: myDays.length - present,
-    videoDone, planned, rate: myDays.length > 0 ? Math.round(present / myDays.length * 100) : null,
-    books, hwSnapshot, consults, hasPrev: !!prevSnap,
-  };
-}
 async function addConsult(rec) { await consultCol().add({ ...rec, time: Date.now() }); }
 async function updateConsult(id, patch) { await consultCol().doc(id).update(patch); }
 async function deleteConsult(id) { await consultCol().doc(id).delete(); }
@@ -1916,176 +1805,6 @@ const RISK_LEVELS = [
   { v: 3, label: "위험", color: "#d6453f", bg: "#fae3e2" },
 ];
 const riskInfo = (v) => RISK_LEVELS.find((r) => r.v === (v || 0)) || RISK_LEVELS[0];
-
-// 날짜(YYYY-MM-DD) → 오늘까지 경과일
-function daysSince(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr + "T00:00:00");
-  if (isNaN(d)) return null;
-  const t = new Date(todayStr + "T00:00:00");
-  return Math.round((t - d) / 86400000);
-}
-
-// 전 반 상담을 훑어 ① 표시된 위험신호 ② 상담 공백(오래됨) 집계
-async function computeRiskData() {
-  // 반별로 나눠 부른다. 상담 전체를 한 번에 긁으면 보안 규칙이 거부한다 —
-  // 규칙이 문서의 cid를 보고 판단하는데, 조건 없는 쿼리는 "안전하다"를 증명할 수 없어서다.
-  // 겸사겸사 담당하지 않는 반의 상담은 애초에 가져오지 않게 된다.
-  const targets = activeClasses();
-  const snaps = await Promise.all(targets.map((c) => consultCol().where("cid", "==", c.id).get().catch(() => null)));
-  const all = [];
-  snaps.forEach((s) => { if (s) s.forEach((d) => all.push({ id: d.id, ...d.data() })); });
-
-  const byStudent = {};
-  all.forEach((c) => {
-    const key = c.cid + ":" + c.sid;
-    (byStudent[key] = byStudent[key] || []).push(c);
-  });
-
-  const flagged = [];
-  const gaps = [];
-
-  // 종강한 반은 위험신호에서 뺀다 — 이제 손쓸 수 있는 학생이 아니다
-  activeClasses().forEach((cls) => {
-    (cls.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => {
-      const key = cls.id + ":" + st.id;
-      const arr = (byStudent[key] || []).sort(
-        (a, b) => (b.date || "").localeCompare(a.date || "") || (b.time || 0) - (a.time || 0)
-      );
-      const pendingFollow = arr.filter((c) => c.needFollow && !c.followDone);
-
-      // ① 위험 표시: 가장 최근 상담 기준 (최근 상담이 "없음"이면 해제된 것)
-      const latest = arr[0];
-      if (latest && (latest.risk || 0) > 0) {
-        flagged.push({
-          cid: cls.id, cname: cls.name, sid: st.id, sname: st.name,
-          risk: latest.risk, cat: latest.cat, withWho: latest.withWho,
-          date: latest.date, content: latest.content, teacher: latest.teacher,
-          ageDays: daysSince(latest.date),
-          pendingFollow: pendingFollow.length,
-          pendingNotes: pendingFollow.map((c) => c.followNote || c.content).slice(0, 3),
-          total: arr.length,
-        });
-      }
-
-      // ② 상담 공백: 마지막 상담일로부터 경과일 (기록 없으면 null)
-      gaps.push({
-        cid: cls.id, cname: cls.name, sid: st.id, sname: st.name,
-        lastDate: latest ? latest.date : null,
-        gapDays: latest ? daysSince(latest.date) : null,
-        total: arr.length,
-        hasRisk: latest ? (latest.risk || 0) > 0 : false,
-      });
-    });
-  });
-
-  flagged.sort((a, b) => b.risk - a.risk || (b.date || "").localeCompare(a.date || ""));
-  // 기록 없는 학생 먼저, 그다음 오래된 순
-  gaps.sort((a, b) => {
-    if (a.gapDays === null && b.gapDays === null) return 0;
-    if (a.gapDays === null) return -1;
-    if (b.gapDays === null) return 1;
-    return b.gapDays - a.gapDays;
-  });
-  return { flagged, gaps };
-}
-
-// ----- 자동 신호: 사람이 적지 않아도 자료가 스스로 올린다 -----
-//
-// 위의 «표시된 신호» 는 선생님이 상담에 체크한 것이다. 체크하지 않으면 아무것도 안 뜬다.
-// 그런데 정작 걱정되는 학생일수록 상담 기록이 없다 — 안 오니까 이야기할 자리가 없다.
-// 그래서 출결과 점수에서 직접 뽑는다. 둘 다 **수업만 하면 저절로 쌓이는** 자료다.
-//
-// 판단하지 않고 «세어서 보여주기만» 한다. 위험 여부는 사람이 정한다.
-const AUTO_DAYS = 8;    // 최근 몇 번의 수업을 보나
-const AUTO_BACK = 70;   // 점수는 며칠치를 보나
-const AUTO_GAP = 15;    // 반 평균보다 이만큼 낮으면 «낮다»
-const AUTO_DROP = 15;   // 이만큼 떨어지면 «하락»
-
-async function computeAutoSignals() {
-  const from = ymd(new Date(Date.now() - AUTO_BACK * 86400000));
-  const out = [];
-
-  await Promise.all(activeClasses().map(async (cls) => {
-    // ① 출결. 날짜마다 «출석한 사람» 을 통째로 읽는다 (학생별로 읽으면 읽기가 곱해진다).
-    //    ⚠ days 문서는 점수·수업내용 때문에도 생긴다. 출석을 한 명도 안 찍은 날을
-    //       수업일로 세면 **그 반 전원이 결석**으로 잡힌다. 빈 날은 버린다.
-    const recent = (await listDays(cls.id)).slice(0, AUTO_DAYS * 2); // listDays 는 최신순
-    const att = {};
-    await Promise.all(recent.map(async (d) => {
-      const snap = await attCol(cls.id, d).get().catch(() => null);
-      if (!snap || snap.empty) return;
-      const set = {};
-      snap.forEach((x) => { set[x.id] = true; });
-      att[d] = set;
-    }));
-    const taught = Object.keys(att).sort().reverse().slice(0, AUTO_DAYS); // 최신순
-
-    // ② 점수. 반 전체를 한 번에 받아 날짜별 평균을 같이 낸다.
-    let byDate = {};
-    try {
-      const { rows } = await loadScoreHistory(cls.id, from);
-      rows.forEach((r) => {
-        // 같은 사람이 같은 날 여러 번 낸 것은 마지막 것만 (실측: 한 학생이 하루 다섯 번)
-        const m = (byDate[r.date] = byDate[r.date] || {});
-        if (!m[r.sid] || (r.time || 0) > (m[r.sid].time || 0)) m[r.sid] = r;
-      });
-    } catch (e) { byDate = {}; }
-    const dayAvg = {};
-    Object.keys(byDate).forEach((d) => {
-      const v = Object.values(byDate[d]).filter((x) => x.score != null);
-      // ⚠ 사람이 적으면 평균이 곧 남의 점수다. 셋 미만이면 안 낸다.
-      dayAvg[d] = v.length >= 3
-        ? Math.round(v.reduce((a, x) => a + Number(x.score || 0), 0) / v.length) : null;
-    });
-
-    (cls.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => {
-      const reasons = [];
-
-      // --- 결석 ---
-      const mine = taught.filter((d) => attendsOn(cls, st, d));
-      const absent = mine.filter((d) => !att[d][st.id]);
-      let run = 0;
-      for (const d of mine) { if (att[d][st.id]) break; run++; }
-      if (run >= 2) {
-        reasons.push({ lv: 3, key: "run", label: "연속 결석 " + run + "회",
-                       detail: absent.slice(0, run).slice().reverse().join(" · ") });
-      } else if (absent.length >= 3) {
-        reasons.push({ lv: 2, key: "many", label: "최근 " + mine.length + "회 중 " + absent.length + "회 결석",
-                       detail: absent.slice(0, 4).slice().reverse().join(" · ") });
-      }
-
-      // --- 점수 ---
-      const hist = Object.keys(byDate).sort()
-        .filter((d) => byDate[d][st.id] && byDate[d][st.id].score != null)
-        .map((d) => ({ date: d, my: Number(byDate[d][st.id].score), avg: dayAvg[d] }));
-      const last3 = hist.slice(-3);
-      const low = last3.filter((x) => x.avg != null && x.avg - x.my >= AUTO_GAP);
-      if (low.length >= 2) {
-        reasons.push({ lv: 2, key: "low", label: "반 평균보다 낮음 " + low.length + "회",
-                       detail: low.map((x) => x.date.slice(5) + " " + x.my + "점(평균 " + x.avg + ")").join(" · ") });
-      }
-      if (hist.length >= 4) {
-        const mean = (a) => a.reduce((x, y) => x + y.my, 0) / a.length;
-        const now = mean(hist.slice(-2)), before = mean(hist.slice(-4, -2));
-        if (before - now >= AUTO_DROP) {
-          reasons.push({ lv: 1, key: "drop", label: "점수 하락 " + Math.round(before - now) + "점",
-                         detail: Math.round(before) + "점 → " + Math.round(now) + "점 (2회 평균)" });
-        }
-      }
-
-      if (!reasons.length) return;
-      out.push({
-        cid: cls.id, cname: cls.name, sid: st.id, sname: st.name,
-        lv: Math.max.apply(null, reasons.map((r) => r.lv)),
-        reasons, absent: absent.length, sessions: mine.length,
-      });
-    });
-  }));
-
-  out.sort((a, b) => b.lv - a.lv || b.reasons.length - a.reasons.length || b.absent - a.absent);
-  return out;
-}
 
 // ----- 합반(질문 공유) -----
 // 합반 요일이면 질문을 "대표 반"(두 id 중 사전순 첫째) 한 곳에 모은다.
@@ -3612,9 +3331,7 @@ function MockExamLive({ cls }) {
   );
 }
 
-// 맡은 반 전체의 실전 시험 결과를 한 번에 — 지점(서초·평촌) 담당 선생님이 분석지 스킬에 넣을 파일을 받는다.
-// 결과 파일(JSON)은 반 화면의 «결과 파일 (전원 한 파일)» 과 같은 꼴이라 스킬이 그대로 읽는다.
-// 문항별 시간표(CSV)는 학생 × 문항 한 줄 — 정답·적은 답·O/X·걸린 시간을 엑셀로 바로 본다.
+// 문항별 시간표(CSV) — 학생 × 문항 한 줄. 정답·적은 답·O/X·걸린 시간을 엑셀로 바로 본다 (반 «실전 시험» 탭 «반 결과 받기»)
 function mxTimeCsv(logs, cname) {
   const cell = (v) => { const t = v == null ? "" : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
   const ans = (q, v) => v == null || v === "" ? "" : q.type === "mc" ? MX_CIRC[v] || v : v;
@@ -3628,77 +3345,6 @@ function mxTimeCsv(logs, cname) {
   });
   return "﻿" + [head].concat(rows).map((r) => r.map(cell).join(",")).join("\r\n");
 }
-function MockExamExport({ onBack }) {
-  // 관리자는 모든 반을 고를 수 있고, 처음엔 담당 반만 켜 둔다(관리자는 담당이 없으면 아무것도 안 켜짐)
-  const pool = (canSeeOtherClasses() ? allClasses() : activeClasses()).filter((c) => !isClassEnded(c))
-    .sort((a, b) => String(a.name).localeCompare(String(b.name), "ko"));
-  const [pick, setPick] = useState(() => pool.filter((c) => inScope(c) && MY_SCOPE && MY_SCOPE.length).map((c) => c.id));
-  const [days, setDays] = useState("30");
-  const [logs, setLogs] = useState(null);
-  const [busy, setBusy] = useState("");
-  const cname = (cid) => (CLASSES.find((c) => c.id === cid) || {}).name || cid;
-  async function load() {
-    setBusy("불러오는 중…"); setLogs(null);
-    const cut = ymd(new Date(Date.now() - Number(days) * 86400e3)), out = [];
-    try {
-      for (const cid of pick) {
-        setBusy(cname(cid) + " 불러오는 중…");
-        const ds = (await listDays(cid)).filter((d) => d >= cut);
-        await Promise.all(ds.map(async (d) => {
-          try { (await examLogCol(cid, d).get()).forEach((x) => out.push(x.data())); } catch (e) { /* 권한 없는 날은 건너뛴다 */ }
-        }));
-      }
-    } catch (e) { alert("불러오지 못했어요.\n" + e.message); }
-    // 취소한 제출 · 선생님 모드로 본 것은 뺀다 (반 화면의 «한 번에 저장» 과 같게)
-    setLogs(out.filter((l) => !l.voided && !l.teacher)
-      .sort((a, b) => (a.date + a.title + a.name).localeCompare(b.date + b.title + b.name, "ko")));
-    setBusy("");
-  }
-  const groups = {};
-  (logs || []).forEach((l) => { const k = cname(l.cid) + " · " + l.title; groups[k] = (groups[k] || 0) + 1; });
-  const fileBase = ymd(new Date()) + "_실전시험_" + (pick.length === 1 ? cname(pick[0]) : pick.length + "개 반");
-  return (<>
-    <div className="cm-card">
-      <div className="cm-admin-top" style={{marginBottom: 10}}>
-        <h2 className="cm-h2" style={{margin: 0}}>실전 시험 결과 모아 받기</h2>
-        <button className="cm-link" onClick={onBack}>← 돌아가기</button>
-      </div>
-      <div className="cm-hint" style={{marginBottom: 10}}>고른 반에서 학생들이 본 실전 시험을 전부 한 파일로 받아요. 반마다 시험지마다 따로 저장할 필요가 없어요.</div>
-      <label className="cm-label">반</label>
-      {!pool.length ? <div className="cm-empty">담당 반이 없어요. 관리자에게 담당 반 지정을 부탁해 주세요.</div> : (
-        <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10}}>
-          {pool.map((c) => {
-            const on = pick.indexOf(c.id) >= 0;
-            return <button key={c.id} className={"cm-btn " + (on ? "cm-btn-primary" : "cm-btn-ghost")} style={{width: "auto", margin: 0, padding: "6px 12px"}}
-              onClick={() => { setPick(on ? pick.filter((x) => x !== c.id) : pick.concat(c.id)); setLogs(null); }}>{c.name}</button>;
-          })}
-        </div>
-      )}
-      <label className="cm-label">기간</label>
-      <select className="cm-input" style={{margin: "0 0 10px", maxWidth: 200}} value={days} onChange={(e) => { setDays(e.target.value); setLogs(null); }}>
-        <option value="7">최근 7일</option><option value="30">최근 30일</option><option value="90">최근 90일</option><option value="365">최근 1년</option>
-      </select>
-      <button className="cm-btn cm-btn-primary" disabled={!pick.length || !!busy} onClick={load}>{busy || "불러오기"}</button>
-    </div>
-    {logs && (
-      <div className="cm-card">
-        <h3 className="cm-h3">{logs.length}건</h3>
-        {!logs.length ? <div className="cm-empty">이 기간에 본 시험이 없어요.</div> : (<>
-          <div className="cm-hint" style={{marginBottom: 10}}>{Object.keys(groups).map((k) => k + " " + groups[k] + "명").join(" · ")}</div>
-          <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
-            <button className="cm-btn cm-btn-primary" onClick={() => mxDownload(fileBase + "_결과 " + logs.length + "건.json", logs)}>결과 파일 (분석지용 · JSON)</button>
-            <button className="cm-btn cm-btn-ghost" onClick={() => mxDownloadText(fileBase + "_문항별 시간.csv", mxTimeCsv(logs, cname))}>문항별 시간표 (엑셀)</button>
-          </div>
-          <div className="cm-hint" style={{marginTop: 8}}>
-            결과 파일에는 학생마다 정답·적은 답·채점·문항을 오간 기록(몇 초에 몇 번으로 갔는지)이 다 들어 있어요 — 분석지 스킬의 <b>응답</b> 폴더에 그대로 넣으면 돼요.<br />
-            문항별 시간표는 학생 × 문항 한 줄씩 — 정답, 적은 답, O/X, 그 문항에 머문 시간(초), 들른 횟수, 답 바꾼 횟수. 취소한 제출과 선생님 모드로 본 것은 빠져요.
-          </div>
-        </>)}
-      </div>
-    )}
-  </>);
-}
-
 // 선생님 — 이 반 학생마다 어떤 시험지가 걸려 있나. 시험지 목록(appConfig/examList)에는 이름이 없고
 // 학생 자리 ID(sids)만 있으니 반 명단으로 이름을 붙인다. 낸 것은 점수를 달고 누르면 결과로 간다
 function MockExamAssigned({ cls, logs, onOpen }) {
@@ -3983,34 +3629,40 @@ function MockExamBoard({ cls }) {
     return () => { live = false; };
   }, [cls.id, again]);
   if (view) return <MockExamResult log={view} canMark canVoid canFix onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
-  // 한 번에 저장 — 같은 날 같은 시험지를 본 학생 전원. 취소한 제출 · 선생님 모드로 본 것은 뺀다
+  // 반 결과 받기 — 시험지마다(본 날이 달라도 한데) 학생 전원. 맨 위 «이 반 전부» 는 90일치 모든 시험지.
+  // 취소한 제출 · 선생님 모드로 본 것은 뺀다. (10/17 — 전엔 «같은 날 · 같은 시험지» 로만 묶어서 날이 갈린 학생이 따로 나왔다)
+  const real = (logs || []).filter((l) => !l.voided && !l.teacher);
   const groups = [];
-  (logs || []).forEach((l) => {
-    if (l.voided || l.teacher) return;
-    const k = l.date + "|" + l.examId;
-    let g = groups.find((x) => x.k === k);
-    if (!g) { g = { k, date: l.date, title: l.title, logs: [] }; groups.push(g); }
+  real.forEach((l) => {
+    let g = groups.find((x) => x.k === l.examId);
+    if (!g) { g = { k: l.examId, date: l.date, title: l.title, logs: [] }; groups.push(g); }
     g.logs.push(l);
+    if (l.date > g.date) g.date = l.date;
   });
-  groups.forEach((g) => g.logs.sort((a, b) => String(a.name).localeCompare(String(b.name), "ko")));
+  groups.forEach((g) => g.logs.sort((a, b) => String(a.name).localeCompare(String(b.name), "ko") || String(a.date).localeCompare(String(b.date))));
+  groups.sort((a, b) => b.date.localeCompare(a.date));
+  if (groups.length > 1) groups.unshift({ k: "*", date: todayStr, title: "이 반 전부", all: true,
+    logs: real.slice().sort((a, b) => (a.date + a.title + a.name).localeCompare(b.date + b.title + b.name, "ko")) });
   const g0 = groups.find((g) => g.k === bulk) || groups[0];
-  const fileBase = g0 ? g0.date + "_" + cls.name + "_" + g0.title : "";
+  const fileBase = g0 ? todayStr + "_" + cls.name + "_" + (g0.all ? "실전시험 전부" : g0.title) : "";
+  const cname = (cid) => (CLASSES.find((c) => c.id === cid) || {}).name || cid;
   return (<>
     <HkRegisterCard cls={cls} onChanged={() => setAgain((x) => x + 1)} />
     <MockExamLive cls={cls} />
     <MockExamAssigned cls={cls} logs={logs} onOpen={setView} />
     {g0 && (
       <div className="cm-card">
-        <h3 className="cm-h3">반 전체 결과 한 번에 저장</h3>
+        <h3 className="cm-h3">반 결과 받기 <span className="cm-h-hint">(최근 90일)</span></h3>
         <select className="cm-input" style={{margin: "0 0 10px"}} value={g0.k} onChange={(e) => setBulk(e.target.value)}>
-          {groups.map((g) => <option key={g.k} value={g.k}>{g.date.slice(5).replace("-", "/")} · {g.title} · {g.logs.length}명</option>)}
+          {groups.map((g) => <option key={g.k} value={g.k}>{g.all ? "이 반 전부 · 시험지 " + (groups.length - 1) + "개 · " + g.logs.length + "건" : g.title + " · " + g.logs.length + "건 · 마지막 " + g.date.slice(5).replace("-", "/")}</option>)}
         </select>
-        <div className="cm-hint" style={{marginBottom: 10}}>{g0.logs.map((l) => l.name + " " + l.score).join(" · ")}</div>
+        {!g0.all && <div className="cm-hint" style={{marginBottom: 10}}>{g0.logs.map((l) => l.name + " " + l.score).join(" · ")}</div>}
         <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
-          <button className="cm-btn cm-btn-primary" onClick={() => mxDownloadText(fileBase + "_점수표.csv", mxCsv(g0.logs))}>점수표 (엑셀)</button>
-          <button className="cm-btn cm-btn-ghost" onClick={() => mxDownload(fileBase + "_결과 " + g0.logs.length + "명.json", g0.logs)}>결과 파일 (전원 한 파일)</button>
+          <button className="cm-btn cm-btn-primary" onClick={() => mxDownload(fileBase + "_결과 " + g0.logs.length + "건.json", g0.logs)}>결과 파일 (JSON · 분석용)</button>
+          {!g0.all && <button className="cm-btn cm-btn-ghost" onClick={() => mxDownloadText(fileBase + "_점수표.csv", mxCsv(g0.logs))}>점수표 (엑셀)</button>}
+          <button className="cm-btn cm-btn-ghost" onClick={() => mxDownloadText(fileBase + "_문항별 시간.csv", mxTimeCsv(g0.logs.map((l) => ({ ...l, cid: l.cid || cls.id })), cname))}>문항별 시간표 (엑셀)</button>
         </div>
-        <div className="cm-hint" style={{marginTop: 8}}>점수표는 학생마다 한 줄 — 문항별로 «적은 답 O/X». 결과 파일은 학생 한 명씩 «결과 파일로 저장» 한 것을 모두 모은 것(분석용). 취소한 제출과 선생님 모드로 본 것은 빠져요.</div>
+        <div className="cm-hint" style={{marginTop: 8}}>결과 파일은 학생마다 정답·적은 답·채점·문항을 오간 기록이 다 든 한 파일 — AI 에게 그대로 주면 분석지를 만들어요. 점수표는 학생마다 한 줄, 문항별 시간표는 학생 × 문항 한 줄. 취소한 제출과 선생님 모드로 본 것은 빠져요.</div>
       </div>
     )}
     <div className="cm-card">
@@ -7925,375 +7577,6 @@ function PlaylistSetting({ cls, canEdit }) {
   );
 }
 
-function ReportNoteEdit({ note, cid, onChanged, placeholder }) {
-  const [editing, setEditing] = useState(false);
-  const [text, setText] = useState(note.text);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => { setText(note.text); }, [note.text]);
-
-  async function save() {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await saveDailyNote(cid, note.sid, note.sname, note.date, text, note.teacher);
-      setEditing(false);
-      onChanged && onChanged(note.date, text.trim());
-    } catch (e) { alert("저장 실패: " + e.message); }
-    setBusy(false);
-  }
-  async function remove() {
-    if (!confirm(note.date + " 수업 기록을 삭제할까요?")) return;
-    setBusy(true);
-    try { await saveDailyNote(cid, note.sid, note.sname, note.date, "", note.teacher); onChanged && onChanged(note.date, ""); }
-    catch (e) { alert("삭제 실패: " + e.message); }
-    setBusy(false);
-  }
-
-  if (!editing) {
-    if (note.text) return <div style={{cursor: "pointer"}} onClick={() => setEditing(true)}>{note.text}</div>;
-    // 코멘트가 없어도 그날 수업 내용이 있으면 그것을 보여준다. 눌러서 덧쓸 수 있다 —
-    // 빈칸을 마주하는 것보다 «이날 이걸 했다» 를 보고 한 줄 얹는 편이 손이 덜 간다.
-    if (placeholder) {
-      return (
-        <div style={{cursor: "pointer", color: "#4b5563"}} onClick={() => setEditing(true)}>
-          {placeholder}
-          <span className="rp-noprint" style={{marginLeft: 6, color: "#b3a89a", fontSize: 12}}>· 눌러서 이 학생 이야기 덧쓰기</span>
-        </div>
-      );
-    }
-    return <div className="rp-noprint" style={{cursor: "pointer", color: "#b3a89a", fontSize: 12.5}} onClick={() => setEditing(true)}>+ 기록 추가</div>;
-  }
-  return (
-    <div className="rp-noprint">
-      {placeholder && !text && (
-        <div style={{fontSize: 12, color: "#8a7f72", marginBottom: 4}}>
-          이날 수업: {placeholder}
-          <button className="cm-link" style={{padding: 0, marginLeft: 6, fontSize: 12}}
-            onClick={() => setText(placeholder)}>그대로 쓰기</button>
-        </div>
-      )}
-      <textarea className="cm-input" style={{margin: "2px 0 6px", fontSize: 13, minHeight: 62, resize: "vertical"}}
-        placeholder={placeholder ? "이 학생 이야기를 적으면 위 수업 내용 대신 실려요" : ""}
-        value={text} onChange={(e) => setText(e.target.value)} autoFocus />
-      <div style={{display: "flex", gap: 8, alignItems: "center"}}>
-        <button className="cm-btn cm-btn-primary" style={{margin: 0, padding: "6px 14px", fontSize: 13}} disabled={busy} onClick={save}>저장</button>
-        <button className="cm-btn cm-btn-ghost" style={{margin: 0, padding: "6px 14px", fontSize: 13}} onClick={() => { setText(note.text); setEditing(false); }}>취소</button>
-        {note.text && <button className="cm-link" style={{color: "#d6453f", marginLeft: "auto"}} disabled={busy} onClick={remove}>삭제</button>}
-      </div>
-    </div>
-  );
-}
-
-function ReportSheet({ cls, st, ym, data, comment, editable, onNoteChange }) {
-  const ci = (k) => catInfo(k);
-  const [y, m] = ym.split("-");
-  return (
-    <div className="rp-sheet">
-      <div className="rp-head">
-        <div>
-          <div className="rp-logo">CLIMATH</div>
-          <div className="rp-title">{y}년 {Number(m)}월 학습관리 보고서</div>
-        </div>
-        <div className="rp-who">
-          <b>{st.name}</b>
-          <div style={{fontSize: 11, color: "#6b7280", marginTop: 2}}>{cls.name}</div>
-        </div>
-      </div>
-
-      <div className="rp-sec">
-        <div className="rp-sec-h">출결 현황</div>
-        <div className="rp-stats">
-          <div className="rp-stat"><b>{data.sessions}</b><span>수업일</span></div>
-          <div className="rp-stat"><b>{data.present}</b><span>출석</span></div>
-          <div className="rp-stat"><b>{data.absent}</b><span>결석</span></div>
-          <div className="rp-stat"><b>{data.rate == null ? "-" : data.rate + "%"}</b><span>출석률</span></div>
-        </div>
-        {data.videoDone > 0 && (
-          <div style={{fontSize: 12, color: "#4b5563", marginTop: 8}}>
-            결석 {data.absent}회 중 <b>{data.videoDone}회</b>는 동영상 보강을 완료했습니다.
-          </div>
-        )}
-      </div>
-
-      {(() => {
-        const noteBy = {};
-        (data.notes || []).forEach((n) => { noteBy[n.date] = n; });
-        // 편집 중엔 그달 수업일 전체를 보여줘 빠진 날도 채울 수 있게
-        const dates = editable
-          ? Array.from(new Set([...(data.sessionDates || []), ...Object.keys(noteBy)])).sort()
-          : (data.notes || []).map((n) => n.date);
-        if (dates.length === 0) return null;
-        return (
-          <div className="rp-sec">
-            <div className="rp-sec-h">수업 기록</div>
-            {dates.map((d) => {
-              const n = noteBy[d] || { sid: st.id, sname: st.name, date: d, text: "", teacher: "" };
-              // 학생 코멘트가 없으면 그날 수업 내용을 대신 싣는다.
-              // ⚠ 반 공통이라 그 학생 이야기가 아니다. «무엇을 했는지» 로만 읽히게
-              //    표시를 붙인다 — 안 붙이면 선생님이 써준 평으로 오해한다.
-              const L = (data.lessons || {})[d];
-              const show = n.text || (L && L.line);
-              return (
-                <div key={d} className={"rp-consult" + (show ? "" : " rp-noprint")}>
-                  <div style={{fontSize: 11, color: "#6b7280", marginBottom: 3}}>
-                    {d}
-                    {!n.text && L && <span style={{marginLeft: 6, color: "#8a7f72"}}>· 수업 내용</span>}
-                    {editable && n.text && <span className="rp-noprint" style={{marginLeft: 6, color: "#b3a89a"}}>· 눌러서 수정</span>}
-                  </div>
-                  {editable
-                    ? <ReportNoteEdit note={n} cid={cls.id} onChanged={onNoteChange}
-                        placeholder={L && L.line ? L.line : ""} />
-                    : <div>{n.text || (L && L.line) || ""}</div>}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
-
-      {(data.books || []).length > 0 && (
-        <div className="rp-sec">
-          <div className="rp-sec-h">교재 완성도</div>
-          <div className="rp-books">
-            {data.books.map((b, i) => (
-              <div key={i} className="rp-book">
-                <div className="rp-book-n">{b.name}</div>
-                <div className="rp-book-v">
-                  {b.done}{b.total ? " / " + b.total : ""}
-                  {b.total ? <b style={{marginLeft: 6}}>{b.pct}%</b> : null}
-                  {/* 지난달 스냅샷이 있어야 이번 달 분량을 안다. 첫 달에는 안 나온다. */}
-                  {b.gained != null && b.gained > 0 && <span className="rp-gain"> · 이번 달 +{b.gained}</span>}
-                </div>
-                <div className="rp-bar"><i style={{width: Math.min(100, b.pct || 0) + "%"}} /></div>
-              </div>
-            ))}
-          </div>
-          {!data.hasPrev && (
-            <div style={{fontSize: 11, color: "#9ca3af", marginTop: 6}}>
-              이번 달 진행 분량은 다음 달 보고서부터 나와요 (이번 달 진도를 기준으로 삼아요).
-            </div>
-          )}
-        </div>
-      )}
-
-      {(data.scores || []).length > 0 && (
-        <div className="rp-sec">
-          <div className="rp-sec-h">테스트 점수</div>
-          <table className="rp-scores">
-            <thead><tr><th>날짜</th><th>시험</th><th>점수</th><th>반 평균</th></tr></thead>
-            <tbody>
-              {data.scores.map((x, i) => (
-                <tr key={i}>
-                  <td>{x.date.slice(5).replace("-", "/")}</td>
-                  <td>{x.label || "테스트"}</td>
-                  <td><b>{x.score}점</b>
-                    {x.correct != null && x.total ? <span className="rp-dim"> ({x.correct}/{x.total})</span> : null}</td>
-                  {/* 사람이 적으면 평균을 안 낸다 — 그게 곧 남의 점수가 된다 */}
-                  <td className="rp-dim">{x.avg == null ? "-" : x.avg + "점"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {data.scores.length > 1 && (
-            <div style={{fontSize: 12, color: "#4b5563", marginTop: 6}}>
-              이 달 평균 <b>{data.scoreAvg}점</b> · {data.scores.length}회
-            </div>
-          )}
-        </div>
-      )}
-
-      {data.consults.length > 0 && (
-        <div className="rp-sec">
-          <div className="rp-sec-h">상담 내용</div>
-          {data.consults.map((c, i) => (
-            <div key={i} className="rp-consult">
-              <div style={{fontSize: 11, color: "#6b7280", marginBottom: 3}}>
-                {c.date} · {c.withWho === "parent" ? "학부모 상담" : "학생 면담"} · {ci(c.cat).label}
-              </div>
-              <div>{c.content}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="rp-sec">
-        <div className="rp-sec-h">담당 선생님 코멘트</div>
-        <div className="rp-note">{comment || "(작성 전)"}</div>
-      </div>
-
-      <div className="rp-foot">
-        <span>CLIMATH 수학전문학원</span>
-        <span>발행일 {fmtDate(todayStr)}</span>
-      </div>
-    </div>
-  );
-}
-
-function ReportCenter({ onBack }) {
-  const [picked, setPicked] = useState(null); // { cls, st }
-  const [ym, setYm] = useState(todayStr.slice(0, 7));
-  const [data, setData] = useState(null);
-  const [comment, setComment] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [q, setQ] = useState("");
-  const [clsF, setClsF] = useState("all");   // "all" | 반id
-  const [done, setDone] = useState({});      // 이번 달 코멘트를 쓴 사람 { 반|학생: true }
-  const backRef = useSwipeBack(onBack);
-  const backRef2 = useSwipeBack(() => setPicked(null));
-
-  const norm = (s) => (s || "").replace(/\s+/g, "");
-  const everyone = [];
-  // 종강한 반도 남긴다 — 지난 학기 보고서를 뽑을 일이 있다. 다만 목록 아래로 내리고 표시를 붙인다
-  CLASSES.forEach((c) => (c.roster || []).filter((r) => !r.teacher && !isEnded(r)).forEach((st) => everyone.push({ cls: c, st })));
-  everyone.sort((a, b) =>
-    (isClassEnded(a.cls) ? 1 : 0) - (isClassEnded(b.cls) ? 1 : 0)
-    || a.st.name.localeCompare(b.st.name, "ko") || a.cls.name.localeCompare(b.cls.name, "ko"));
-  // 반으로 거른다. 반을 고르면 **그 반 명단 순서**를 지킨다 —
-  // 출석부에서 보던 순서와 달라지면 같은 반을 훑을 때 눈이 계속 헤맨다.
-  const inCls = (x) => clsF === "all" || x.cls.id === clsF;
-  const clsCount = (cid) => everyone.filter((x) => x.cls.id === cid).length;
-  let filtered = everyone.filter(inCls);
-  if (q) filtered = filtered.filter((x) => norm(x.st.name).includes(norm(q)));
-  if (clsF !== "all") {
-    const order = {};
-    ((findClass(clsF) || {}).roster || []).filter((r) => !r.teacher && !isEnded(r))
-      .forEach((r, i) => { order[r.id] = i; });
-    filtered = filtered.slice().sort((a, b) => {
-      const x = order[a.st.id], y = order[b.st.id];
-      if (x == null && y == null) return a.st.name.localeCompare(b.st.name, "ko");
-      if (x == null) return 1;
-      if (y == null) return -1;
-      return x - y;
-    });
-  }
-  // 이번 달 코멘트를 이미 쓴 사람. **누가 아직 안 됐는지**가 이 화면의 쓸모다.
-  useEffect(() => {
-    let live = true;
-    reportsCol().where("ym", "==", ym).get().then((sn) => {
-      if (!live) return;
-      const m = {};
-      sn.forEach((d) => { const v = d.data(); if ((v.comment || "").trim()) m[v.cid + "|" + v.sid] = true; });
-      setDone(m);
-    }).catch(() => setDone({}));
-    return () => { live = false; };
-  }, [ym, picked]);
-
-  const monthOpts = recentMonths(12);
-
-  async function load(cls, st, m) {
-    setData(null); setSaved(false); setBusy(true);
-    try {
-      const d = await buildReportData(cls, st, m);
-      const existing = await getReport(cls.id, st.id, m);
-      setData(d);
-      setComment(existing && existing.comment ? existing.comment : "");
-    } catch (e) { alert("불러오기 실패: " + e.message); }
-    setBusy(false);
-  }
-
-  async function save() {
-    if (!picked || !data) return;
-    setBusy(true);
-    try {
-      await saveReport(picked.cls.id, picked.st.id, ym, { comment, hwSnapshot: data.hwSnapshot, sname: picked.st.name, cname: picked.cls.name });
-      setSaved(true);
-    } catch (e) { alert("저장 실패: " + e.message); }
-    setBusy(false);
-  }
-
-  if (picked) {
-    return (
-      <div key="rp-detail" ref={backRef2} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
-        <div className="cm-card rp-noprint">
-          <div className="cm-admin-top" style={{marginBottom: 10}}>
-            <h2 className="cm-h2" style={{margin: 0}}>{picked.st.name}</h2>
-            <button className="cm-link" onClick={() => setPicked(null)}>← 목록</button>
-          </div>
-          <div style={{fontSize: 13, color: "var(--muted)"}}>{picked.cls.name}</div>
-          <label className="cm-label">보고서 기준 월</label>
-          <select className="cm-input" value={ym} onChange={(e) => { setYm(e.target.value); load(picked.cls, picked.st, e.target.value); }}>
-            {monthOpts.map((m) => <option key={m} value={m}>{m.split("-")[0]}년 {Number(m.split("-")[1])}월</option>)}
-          </select>
-          <label className="cm-label">담당 선생님 코멘트</label>
-          <textarea className="cm-input cm-notice-ta" rows={4} placeholder="한 달간 학습 태도, 강점, 보완할 점 등을 적어주세요"
-            value={comment} onChange={(e) => { setComment(e.target.value); setSaved(false); }} />
-          <div style={{display: "flex", gap: 10, flexWrap: "wrap"}}>
-            <button className="cm-btn cm-btn-primary" style={{margin: 0}} disabled={busy || !data} onClick={save}>
-              {busy ? "처리 중..." : saved ? "저장됨 ✓" : "코멘트 저장"}
-            </button>
-            <button className="cm-btn cm-btn-ghost" style={{margin: 0}} disabled={!data} onClick={() => window.print()}>인쇄 / PDF 저장</button>
-          </div>
-          <div className="cm-hint" style={{marginTop: 8}}>아래 미리보기에서 <b>수업 기록을 눌러 수정하거나 빠진 날을 채워 넣을</b> 수 있어요. 비어 있는 날은 인쇄에 나오지 않아요. 인쇄 창에서 <b>대상을 "PDF로 저장"</b>으로 바꾸면 파일로 받을 수 있어요. 저장하면 이번 달 진도가 기록돼서 다음 달 보고서에 <b>한 달간 진행 분량</b>이 표시돼요.</div>
-        </div>
-
-        {busy && !data && <div className="cm-card rp-noprint"><div className="cm-empty">집계하는 중…</div></div>}
-        {data && <ReportSheet cls={picked.cls} st={picked.st} ym={ym} data={data} comment={comment}
-          editable onNoteChange={(date, text) => {
-            setData((d) => {
-              let notes = d.notes || [];
-              if (!text) notes = notes.filter((n) => n.date !== date);
-              else if (notes.some((n) => n.date === date)) notes = notes.map((n) => (n.date === date ? { ...n, text } : n));
-              else notes = [...notes, { sid: picked.st.id, sname: picked.st.name, date, text }].sort((a, b) => a.date.localeCompare(b.date));
-              return { ...d, notes };
-            });
-          }} />}
-      </div>
-    );
-  }
-
-  return (
-    <div key="rp-list" ref={backRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
-      <div className="cm-card">
-        <div className="cm-admin-top" style={{marginBottom: 12}}>
-          <h2 className="cm-h2" style={{margin: 0}}>학습관리 보고서</h2>
-          <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
-        </div>
-        <input className="cm-input" style={{margin: 0}} placeholder="학생 이름 검색" value={q} onChange={(e) => setQ(e.target.value)} />
-        <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 10}}>
-          <span style={{fontSize: 11, color: "var(--muted)", marginRight: 2}}>반</span>
-          <button className={"cm-ab-tab" + (clsF === "all" ? " on" : "")}
-            onClick={() => setClsF("all")}>전체 {everyone.length}</button>
-          {activeClasses().map((c) => (
-            <button key={c.id} className={"cm-ab-tab" + (clsF === c.id ? " on" : "")}
-              onClick={() => setClsF(c.id)}>{c.name} {clsCount(c.id)}</button>
-          ))}
-        </div>
-        <label className="cm-label">기준 월</label>
-        <select className="cm-input" style={{margin: 0, maxWidth: 200}} value={ym}
-          onChange={(e) => setYm(e.target.value)}>
-          {monthOpts.map((m) => <option key={m} value={m}>{m.split("-")[0]}년 {Number(m.split("-")[1])}월</option>)}
-        </select>
-        <div className="cm-hint" style={{marginTop: 8}}>학생을 고르면 출결·점수·수업내용·상담이 자동으로 집계돼요. 코멘트만 쓰고 인쇄하면 됩니다.
-          <br/>이름 옆 <b>✓</b> 는 그 달 코멘트를 이미 쓴 학생이에요.</div>
-      </div>
-      <div className="cm-card">
-        <h3 className="cm-h3">
-          {clsF === "all" ? "학생" : (findClass(clsF) || {}).name} {filtered.length}명
-          {(() => {
-            const n = filtered.filter((x) => done[x.cls.id + "|" + x.st.id]).length;
-            return <span className="cm-h-hint">{ym.split("-")[1].replace(/^0/, "")}월 코멘트 {n}/{filtered.length}</span>;
-          })()}
-        </h3>
-        {filtered.length === 0 && <div className="cm-empty">검색 결과가 없어요</div>}
-        {filtered.map(({ cls, st }) => (
-          <button key={cls.id + st.id} className="cm-day" style={isClassEnded(cls) ? {opacity: .62} : undefined}
-            onClick={() => { setPicked({ cls, st }); load(cls, st, ym); }}>
-            <div className="cm-day-left">
-              <span className="cm-day-date">
-                {st.name}
-                {done[cls.id + "|" + st.id] && <span style={{color: "#3f7d5e", marginLeft: 6}}>✓</span>}
-              </span>
-              <span className="cm-day-sub">{cls.name}{isClassEnded(cls) ? " · " + cls.endDate + " 종강" : ""}</span>
-            </div>
-            <span className="cm-day-arrow">›</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function MakeupCenter({ onBack }) {
   const [picked, setPicked] = useState(null); // { name, entries:[{cls,st}] }
   const [pickedDate, setPickedDate] = useState(null);
@@ -8577,164 +7860,6 @@ function MakeupCenter({ onBack }) {
   );
 }
 
-function RiskDashboard({ onBack }) {
-  const [data, setData] = useState(null);
-  const [auto, setAuto] = useState(null);
-  // 처음 열면 «자동» 이 먼저다. 아무도 아무것도 안 적어도 차 있는 쪽이라서.
-  const [tab, setTab] = useState("auto"); // auto | flag | gap
-  const [gapDays, setGapDays] = useState(60);
-  function reload() {
-    setData(null); setAuto(null);
-    computeRiskData().then(setData).catch((e) => { console.error(e); setData({ flagged: [], gaps: [] }); });
-    computeAutoSignals().then(setAuto).catch((e) => { console.error(e); setAuto([]); });
-  }
-  useEffect(() => { reload(); }, []);
-
-  const flagged = data ? data.flagged : [];
-  const overdue = data ? data.gaps.filter((g) => g.gapDays === null || g.gapDays >= gapDays) : [];
-  const counts = { 3: flagged.filter((x) => x.risk === 3).length, 2: flagged.filter((x) => x.risk === 2).length, 1: flagged.filter((x) => x.risk === 1).length };
-  const gapText = (g) => g.gapDays === null ? "상담 기록 없음" : g.gapDays + "일째";
-  // 이미 상담에 표시해 둔 학생은 자동 신호 쪽에서도 알려준다 — 아는 얘기를 두 번 읽지 않게
-  const marked = {};
-  flagged.forEach((x) => { marked[x.cid + ":" + x.sid] = x.risk; });
-  const riskBackRef = useSwipeBack(onBack);
-
-  return (
-    <div ref={riskBackRef} className="cm-stack cm-slide-in" style={{willChange: "transform"}}>
-      <div className="cm-card">
-        <div className="cm-admin-top" style={{marginBottom: 12}}>
-          <h2 className="cm-h2" style={{margin: 0}}>위험신호</h2>
-          <button className="cm-link cm-home-back" onClick={onBack}>← 돌아가기</button>
-        </div>
-        <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
-          <button className={"cm-ab-tab" + (tab === "auto" ? " on" : "")} onClick={() => setTab("auto")}>자동 신호 {auto ? auto.length : "…"}</button>
-          <button className={"cm-ab-tab" + (tab === "flag" ? " on" : "")} onClick={() => setTab("flag")}>표시된 신호 {flagged.length}</button>
-          <button className={"cm-ab-tab" + (tab === "gap" ? " on" : "")} onClick={() => setTab("gap")}>상담 공백 {overdue.length}</button>
-          <button className="cm-link" style={{marginLeft: "auto"}} onClick={reload}>새로고침</button>
-        </div>
-      </div>
-
-      {data === null && tab !== "auto" && <div className="cm-card"><div className="cm-empty">불러오는 중…</div></div>}
-
-      {/* ---- 자동 신호 ---- */}
-      {tab === "auto" && (<>
-        <div className="cm-card">
-          <div className="cm-hint">출결과 테스트 점수에서 <b>저절로</b> 뽑은 목록이에요. 최근 {AUTO_DAYS}회 수업과 {AUTO_BACK}일치 점수를 봅니다.
-            <br/>위험하다고 판단한 게 아니라 <b>눈에 띄는 것을 세어둔</b> 거예요. 확인하고 상담에 남기면 «표시된 신호» 로 올라가요.</div>
-        </div>
-
-        {auto === null && <div className="cm-card"><div className="cm-empty">세는 중…</div></div>}
-        {auto !== null && auto.length === 0 && <div className="cm-card"><div className="cm-empty">눈에 띄는 게 없어요 👍</div></div>}
-
-        {(auto || []).map((x) => {
-          const ri = riskInfo(x.lv);
-          return (
-            <div key={x.cid + ":" + x.sid} className="cm-card" style={{borderLeft: "4px solid " + ri.color, padding: "13px 16px"}}>
-              <div style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap"}}>
-                <strong style={{fontSize: 15}}>{x.sname}</strong>
-                <span className="cm-day-sub">{x.cname}</span>
-                {marked[x.cid + ":" + x.sid] > 0 && (
-                  <span className="cm-chip" style={{background: riskInfo(marked[x.cid + ":" + x.sid]).bg, color: riskInfo(marked[x.cid + ":" + x.sid]).color}}>상담에 표시됨</span>
-                )}
-              </div>
-              {x.reasons.map((r, i) => (
-                <div key={i} style={{display: "flex", gap: 8, alignItems: "baseline", marginTop: 7}}>
-                  <span className="cm-chip" style={{background: riskInfo(r.lv).bg, color: riskInfo(r.lv).color, fontWeight: 700, flexShrink: 0}}>{r.label}</span>
-                  <span style={{fontSize: 12, color: "var(--muted)"}}>{r.detail}</span>
-                </div>
-              ))}
-            </div>
-          );
-        })}
-      </>)}
-
-      {/* ---- 표시된 신호 ---- */}
-      {data !== null && tab === "flag" && (<>
-        <div className="cm-card">
-          <div style={{display: "flex", gap: 10}}>
-            {[3, 2, 1].map((v) => {
-              const ri = riskInfo(v);
-              return (
-                <div key={v} style={{flex: 1, background: ri.bg, borderRadius: 12, padding: "11px 8px", textAlign: "center"}}>
-                  <div style={{fontSize: 22, fontWeight: 700, color: ri.color, fontFamily: "'Fraunces',serif"}}>{counts[v] || 0}</div>
-                  <div style={{fontSize: 12, color: ri.color}}>{ri.label}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="cm-hint" style={{marginTop: 10}}>상담에 표시한 신호예요. 학생마다 <b>가장 최근 상담</b> 기준이고, 나아지면 다음 상담에서 "없음"으로 기록하면 내려가요.</div>
-        </div>
-
-        {flagged.length === 0 && <div className="cm-card"><div className="cm-empty">표시된 위험 신호가 없어요 👍</div></div>}
-
-        {flagged.map((x) => {
-          const ri = riskInfo(x.risk);
-          const ci = catInfo(x.cat);
-          const stale = x.ageDays !== null && x.ageDays >= 45;
-          return (
-            <div key={x.cid + ":" + x.sid} className="cm-card" style={{borderLeft: "4px solid " + ri.color, padding: "14px 16px"}}>
-              <div style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap"}}>
-                <strong style={{fontSize: 16}}>{x.sname}</strong>
-                <span className="cm-day-sub">{x.cname}</span>
-                <span className="cm-chip" style={{background: ci.bg, color: ci.color}}>{ci.label}</span>
-                <span style={{marginLeft: "auto", fontSize: 12, fontWeight: 700, color: ri.color}}>⚠ {ri.label}</span>
-              </div>
-              <div style={{fontSize: 14, lineHeight: 1.6, marginTop: 8, whiteSpace: "pre-wrap"}}>{x.content}</div>
-              {x.pendingFollow > 0 && (
-                <div style={{background: "#f6e7df", borderRadius: 10, padding: "9px 12px", marginTop: 10}}>
-                  <div style={{fontSize: 12, fontWeight: 700, color: "#c2703f", marginBottom: 3}}>후속 조치 대기 {x.pendingFollow}건</div>
-                  {x.pendingNotes.map((n, i) => <div key={i} style={{fontSize: 13, marginTop: 2}}>· {n}</div>)}
-                </div>
-              )}
-              {stale && (
-                <div style={{background: "#f0ece5", borderRadius: 10, padding: "8px 12px", marginTop: 10, fontSize: 12, color: "#7c6f5f"}}>
-                  이 신호가 표시된 지 {x.ageDays}일 됐어요. 지금도 유효한지 확인이 필요해요.
-                </div>
-              )}
-              <div style={{fontSize: 11, color: "var(--muted)", marginTop: 9}}>
-                {x.date}{x.ageDays !== null && " (" + (x.ageDays === 0 ? "오늘" : x.ageDays + "일 전") + ")"} · {x.withWho === "parent" ? "학부모 상담" : "학생 상담"}{x.teacher ? " · " + x.teacher + " 선생님" : ""} · 누적 {x.total}회
-              </div>
-            </div>
-          );
-        })}
-      </>)}
-
-      {/* ---- 상담 공백 ---- */}
-      {data !== null && tab === "gap" && (<>
-        <div className="cm-card">
-          <div style={{display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center"}}>
-            <span style={{fontSize: 13, color: "var(--muted)"}}>기준</span>
-            {[30, 60, 90].map((v) => (
-              <button key={v} className={"cm-ab-tab" + (gapDays === v ? " on" : "")} onClick={() => setGapDays(v)}>{v}일 이상</button>
-            ))}
-          </div>
-          <div className="cm-hint" style={{marginTop: 10}}>마지막 상담으로부터 오래된 순이에요. 위험 여부를 판단한 게 아니라, <b>한동안 이야기 나눈 적 없는 학생</b>을 알려주는 목록이에요.</div>
-        </div>
-
-        {overdue.length === 0 && <div className="cm-card"><div className="cm-empty">모든 학생을 최근에 만났어요 👍</div></div>}
-
-        {overdue.map((g) => {
-          const never = g.gapDays === null;
-          const hot = never || g.gapDays >= 90;
-          return (
-            <div key={g.cid + ":" + g.sid} className="cm-card" style={{borderLeft: "4px solid " + (hot ? "#c2703f" : "#c9bfae"), padding: "13px 16px"}}>
-              <div style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap"}}>
-                <strong style={{fontSize: 15}}>{g.sname}</strong>
-                <span className="cm-day-sub">{g.cname}</span>
-                {g.hasRisk && <span className="cm-chip" style={{background: "#fae3e2", color: "#d6453f"}}>위험 표시됨</span>}
-                <span style={{marginLeft: "auto", fontSize: 13, fontWeight: 700, color: hot ? "#c2703f" : "var(--muted)"}}>{gapText(g)}</span>
-              </div>
-              <div style={{fontSize: 11, color: "var(--muted)", marginTop: 6}}>
-                {never ? "아직 상담 기록이 없어요" : "마지막 상담 " + g.lastDate + " · 누적 " + g.total + "회"}
-              </div>
-            </div>
-          );
-        })}
-      </>)}
-    </div>
-  );
-}
-
 function AdminView() {
   const [teachers, setTeachers] = useState(null); // null=로딩중
   const [me, setMe] = useState(null);
@@ -8857,13 +7982,9 @@ function AdminView() {
       items={[
         { key: "classes", ico: "▤", label: "내 수업" },
         { sep: true },
-        { key: "makeup", ico: "▷", label: "보강 관리" },
-        { key: "risk", ico: "⚠", label: "위험신호" },
-        { key: "report", ico: "▣", label: "학습관리 보고서" },
-        { key: "exams", ico: "▤", label: "내신 참여표" },
+        // 10/17 마왕님: 보강 관리(클로드로 함) · 내신 참여표 · 운영DB 보내기는 숨김 — 화면 코드는 남아 있어 이 줄에 다시 넣으면 살아난다.
+        //   위험신호 · 학습관리 보고서 · 실전 시험 모아 받기는 지웠다(«여기서 안 한다»). 반 결과 파일은 반 «실전 시험» 탭에서 받는다
         { key: "roster", ico: "☰", label: "학생 명단" },
-        { key: "opsdb", ico: "↗", label: "운영DB 보내기" },
-        { key: "mockexport", ico: "⏱", label: "실전 시험 모아 받기" },
         ...(cls ? [
           { sep: true },
           { group: cls.name + (isClassEnded(cls) ? " (종강)" : "") },
@@ -8921,12 +8042,9 @@ function AdminView() {
 
   // ---- 위험신호 / 보강 / 보고서 ----
   if (mode === "mypin") return <>{homeSide}<TeacherPinChange me={me} onBack={() => setMode("login")} /></>;
-  if (mode === "risk") return <>{homeSide}<RiskDashboard onBack={() => setMode("login")} /></>;
   if (mode === "makeup") return <>{homeSide}<MakeupCenter onBack={() => setMode("login")} /></>;
-  if (mode === "report") return <>{homeSide}<ReportCenter onBack={() => setMode("login")} /></>;
   if (mode === "exams") return <>{homeSide}<ExamBoard onBack={() => setMode("login")} /></>;
   if (mode === "opsdb") return <>{homeSide}<OpsSend onBack={() => setMode("login")} /></>;
-  if (mode === "mockexport") return <>{homeSide}<MockExamExport onBack={() => setMode("login")} /></>;
   if (mode === "roster") return <>{homeSide}<StudentDirectory key={"dir" + (rosterCid || "")} me={me}
     initialCls={rosterCid} onBack={() => { setRosterCid(""); setMode("login"); }} /></>;
 
