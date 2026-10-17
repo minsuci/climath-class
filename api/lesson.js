@@ -317,6 +317,16 @@ export default async function handler(req, res) {
       if (body.action === "todo") return await capTodo(res, body.days);
       if (body.action === "put") return await capPut(res, body);
       if (body.action === "noteClasses") return await noteClasses(res);
+      // 반 재생목록 주소 바꾸기 (10/17) — 앱 반 설정 «걸어두기» 와 같은 칸. 강의노트 준비(prep_lesson)도 이 칸을 읽는다
+      if (body.action === "classPlaylist") {
+        const cid = String(body.cid || ""), id = listId(body.playlist);
+        if (!cid || !id) { res.status(400).json({ error: "cid 와 재생목록 주소가 필요해요" }); return; }
+        const c = await getDoc("classes/" + cid).catch(() => null);
+        if (!c) { res.status(404).json({ error: "그 반이 없어요: " + cid }); return; }
+        const url = "https://www.youtube.com/playlist?list=" + id;
+        await patchDoc("classes/" + cid, { playlist: url });
+        res.status(200).json({ ok: true, cid, from: c.playlist || "", to: url }); return;
+      }
       if (body.action === "noteFiles") return await noteFiles(res, body);
       if (body.action === "noteDelete") return await noteDelete(res, body);
       if (body.action === "noteUnitDelete") return await noteUnitDelete(res, body);
