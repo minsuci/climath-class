@@ -3230,11 +3230,21 @@ function StudentHome({ cls, me, onLogout }) {
   const [dmNotice, setDmNotice] = useState(null);
   const [dmDismissed, setDmDismissed] = useState(false);
 
+  // 오늘이 이 학생 수업 날인가 — 오는 요일(개진반 학생 요일 · 정규반 반 요일 중 나오는 요일) · 수강 기간
+  const scheduledToday = !me.teacher && isActiveOn(me, todayStr) && studentDows(cls, me).includes(new Date(todayStr + "T00:00:00").getDay());
+  const [attLoaded, setAttLoaded] = useState(false);
+  const autoAttRef = useRef(false);
   useEffect(() => {
     if (me.teacher) return;
-    const unsub = attCol(cls.id, todayStr).doc(me.id).onSnapshot((d) => setAtt(d.exists ? d.data() : null));
+    const unsub = attCol(cls.id, todayStr).doc(me.id).onSnapshot((d) => { setAtt(d.exists ? d.data() : null); setAttLoaded(true); });
     return () => unsub();
   }, [cls.id, me.id]);
+  // 수업 날 들어오면 저절로 출석(10/19). 한 번만 시도하고, 실패하면 다음에 들어올 때 다시
+  useEffect(() => {
+    if (!attLoaded || att || !scheduledToday || autoAttRef.current) return;
+    autoAttRef.current = true;
+    checkIn(cls.id, todayStr, me).catch(() => { autoAttRef.current = false; });
+  }, [attLoaded, att, scheduledToday, cls.id, me.id]);
 
   useEffect(() => {
     const unsub = listenNotice(cls.id, (n) => setNotice(n));
@@ -3271,10 +3281,9 @@ function StudentHome({ cls, me, onLogout }) {
   // 실전 시험은 출석과 묶지 않는다 — 시간 재는 시험을 «출석부터» 에서 막으면 시작부터 어긋난다
   const hwOpen = !!(hwBooks && hwBooks.length);   // 과제 채점 교재가 걸린 반은 «과제» 를 출석 없이 연다 — 집에서 푼다
   const noGateTabs = ["q", "notes", "mock", ...(hwOpen ? ["hw"] : [])]; // 출석 없이도 볼 수 있는 탭
-  // 출석은 **수업 있는 날만** 뜬다(10/17) — 그 학생이 오는 요일(개진반은 학생 요일 · 정규반은 반 요일 중 나오는 요일) · 수강 기간 안.
-  // 다른 날 와서 이미 출석이 찍혔으면(보강 따위) 그날도 보인다
-  const classToday = !me.teacher && (!!att || (isActiveOn(me, todayStr) && studentDows(cls, me).includes(new Date(todayStr + "T00:00:00").getDay())));
-  const fallback = classToday ? "att" : hwOpen ? "hw" : "mock";
+  // 출석 탭은 없다(10/19) — 수업 날 들어오면 위에서 저절로 출석. 다른 날 이미 출석이 찍혔으면(보강 따위) 그날도 수업 날로 본다
+  const classToday = !me.teacher && (!!att || scheduledToday);
+  const fallback = hwOpen ? "hw" : "mock";
   // 수업 없는 날 낸 질문은 **다음 수업일** 대기열로 — 선생님은 그날 «날짜별 → 그날» 대기열에서 한꺼번에 본다
   const qDate = me.teacher || classToday ? todayStr : nextClassDay(cls, me);
   const activeTab = me.teacher ? tab : (att || noGateTabs.includes(tab) ? tab : fallback);
@@ -3288,7 +3297,6 @@ function StudentHome({ cls, me, onLogout }) {
   return (<>
     <Sidebar title={me.name + "님"} active={activeTab} onSelect={setTab}
       items={[
-        ...(classToday ? [{ key: "att", ico: "✓", label: "출석" }] : []),
         { key: "q", ico: "?", label: "질문" },
         { key: "hw", ico: "▤", label: "과제", disabled: !me.teacher && !att && !hwOpen },
         { sep: true },
@@ -3309,7 +3317,7 @@ function StudentHome({ cls, me, onLogout }) {
       <div className="cm-card cm-welcome">
         <div>
           <div className="cm-welcome-name">{me.name} 님</div>
-          <div className="cm-welcome-sub">{me.teacher ? "선생님 모드" : att ? "출석 완료 · " + hhmm(att.time) : classToday ? "아직 출석 전이에요" : "오늘은 수업 없는 날"}</div>
+          <div className="cm-welcome-sub">{me.teacher ? "선생님 모드" : att ? "출석 · " + hhmm(att.time) : classToday ? "출석 기록 중…" : "오늘은 수업 없는 날"}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
           <button className="cm-link" onClick={() => setShowPin((v) => !v)}>비밀번호 변경</button>
@@ -3328,19 +3336,6 @@ function StudentHome({ cls, me, onLogout }) {
       )}
 
 
-      {activeTab === "att" && (
-        <div className="cm-card">
-          <h3 className="cm-h3">출석체크</h3>
-          {att ? (
-            <div className="cm-done">✓ {hhmm(att.time)}에 출석했어요</div>
-          ) : (
-            <>
-              <button className="cm-btn cm-btn-primary cm-big" onClick={() => checkIn(cls.id, todayStr, me)}>출석하기</button>
-              <div className="cm-hint" style={{ marginTop: 14, textAlign: "center" }}>수업 오면 출석하기를 눌러 주세요.</div>
-            </>
-          )}
-        </div>
-      )}
       {activeTab === "q" && <QuestionForm cls={cls} me={me} qDate={qDate} />}
       {activeTab === "hw" && <StudentHomework cls={cls} me={me} />}
       {activeTab === "mock" && <MockExamTab cls={cls} me={me} />}
