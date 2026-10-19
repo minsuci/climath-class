@@ -63,10 +63,21 @@ async function main() {
       const kq = {}; (k.questions || []).forEach((q) => { kq[q.n] = q; });
       for (const q of l.questions || []) {
         const ov = l.override && q.n in l.override ? l.override[q.n] : q.auto, tg = t[q.n] || t[String(q.n)] || {};
-        rows.push({ kind: "시험", date: l.date, cid: c.id, cls: c.name, sid: l.sid, name: l.name, src: l.examId, srcName: l.title, rid: l.rid, n: q.n, type: q.type,
+        const base = { kind: "시험", date: l.date, cid: c.id, cls: c.name, sid: l.sid, name: l.name, src: l.examId, srcName: l.title, rid: l.rid, n: q.n, type: q.type,
           unit: tg.unit || (kq[q.n] && kq[q.n].label) || null, also: tg.also || [], concept: tg.concept || null, lv: tg.lv || null,
-          pt: q.pt != null ? q.pt : null, answer: q.answer, key: q.key != null ? q.key : null, first: ox(ov), final: ox(ov), retries: 0,
-          sec: Math.round((sec[q.n] || 0) * 10) / 10, late: !!q.late, score: l.score });
+          sec: Math.round((sec[q.n] || 0) * 10) / 10, late: !!q.late, score: l.score };
+        // 꼬리문제(10/19~)는 칸마다 한 줄 — 단원 꼬리표는 그 번호 것을 그대로. 시간은 번호 단위라 칸마다 같은 값
+        if (Array.isArray(q.parts) && q.parts.length) {
+          const all = q.parts.every((p) => typeof p.pt === "number" && p.pt > 0), sum = all ? q.parts.reduce((a, p) => a + p.pt, 0) : 0;
+          q.parts.forEach((p, i) => {
+            const k = q.n + "." + (i + 1), o = l.override && k in l.override ? l.override[k] : !!(q.pa || [])[i];
+            const w = all ? p.pt / sum : 1 / q.parts.length;
+            rows.push({ ...base, part: p.label, pt: q.pt != null ? Math.round(q.pt * w * 100) / 100 : null,
+              answer: Array.isArray(q.answer) ? (q.answer[i] || null) : null, key: p.key != null ? p.key : null, first: ox(o), final: ox(o), retries: 0 });
+          });
+          continue;
+        }
+        rows.push({ ...base, pt: q.pt != null ? q.pt : null, answer: q.answer, key: q.key != null ? q.key : null, first: ox(ov), final: ox(ov), retries: 0 });
       }
     }
     for (const l of hl) {
@@ -87,13 +98,13 @@ async function main() {
   fs.writeFileSync(path.join(OUT, "raw", today, "raw.json"), JSON.stringify(raw));
   // 쌓기 — 지우지 않는다. 같은 (종류·반·rid·번호)는 새 값으로
   const F = path.join(OUT, "학습기록.jsonl"), all = new Map();
-  const id = (r) => [r.kind, r.cid, r.rid, r.n].join("|");
+  const id = (r) => [r.kind, r.cid, r.rid, r.n].join("|") + (r.part ? "|" + r.part : "");
   if (fs.existsSync(F)) fs.readFileSync(F, "utf8").split("\n").filter(Boolean).forEach((s) => { const r = JSON.parse(s); all.set(id(r), r); });
   const before = all.size;
   rows.forEach((r) => all.set(id(r), r));
   const list = [...all.values()].sort((a, b) => (a.date + a.name + a.src + String(a.n).padStart(4, "0")).localeCompare(b.date + b.name + b.src + String(b.n).padStart(4, "0")));
   fs.writeFileSync(F + ".tmp", list.map((r) => JSON.stringify(r)).join("\n") + "\n"); fs.renameSync(F + ".tmp", F);
-  const cols = ["kind", "date", "cls", "name", "srcName", "n", "type", "unit", "concept", "lv", "first", "final", "retries", "sec", "late", "answer", "key", "pt", "score", "src", "cid", "sid", "rid"];
+  const cols = ["kind", "date", "cls", "name", "srcName", "n", "part", "type", "unit", "concept", "lv", "first", "final", "retries", "sec", "late", "answer", "key", "pt", "score", "src", "cid", "sid", "rid"];
   const esc = (v) => { const s = v == null ? "" : Array.isArray(v) ? v.join("/") : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   fs.writeFileSync(path.join(OUT, "학습기록.csv"), "﻿" + cols.join(",") + "\n" + list.map((r) => cols.map((c) => esc(r[c])).join(",")).join("\n") + "\n");
   const students = new Set(list.map((r) => r.name)).size;

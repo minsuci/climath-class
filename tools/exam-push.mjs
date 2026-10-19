@@ -10,6 +10,8 @@
 // 분기 시작에 기출백서 답지로 이 파일을 한 번에 만들고, 이 도구로 한 번에 올린다.
 //
 //   { id, title, minutes, questions: [{ n, type: "mc"|"short"|"essay", ans, pt }],
+//     꼬리문제(10/19~): { n, type: "short", pt, parts: [{ label: "(1)", ans }, { label: "(2)", ans }], any?: true(칸 순서 무관) }
+//     모두 고르기: { n, type: "mc", ans: [2, 5] } — 고른 것이 똑같아야 맞음
 //     cids?: [반ID…]  (없으면 모든 반)
 //     names?: [학생 이름…]  (그 학생만 본다. cids 필요. 명단 표기 그대로 — 동명이인은 A·B·C 까지)
 //     test?: true      (선생님 모드에서만 보인다 — 올려서 확인할 때)
@@ -66,6 +68,7 @@ function summary(e) {
   if (e.kind === "hw") return `${e.id}  「${e.title}」 과제 교재 · ${qs.length}문항 (객관식 ${kind("mc")} · 단답 ${kind("short")} · 서술 ${kind("essay")})`
     + ` · 단원 ${(e.units || []).length}개` + (e.test ? "  [시험용 — 선생님만]" : "") + ((e.cids || []).length ? `  [반 ${e.cids.length}곳만]` : "  [모든 반]");
   return `${e.id}  「${e.title}」 ${e.minutes}분 · ${qs.length}문항 (객관식 ${kind("mc")} · 단답 ${kind("short")} · 서술 ${kind("essay")})`
+    + (qs.some((q) => q.parts) ? ` · 꼬리문제 ${qs.filter((q) => q.parts).length}` : "") + (qs.some((q) => Array.isArray(q.ans) && q.type === "mc") ? ` · 모두고르기 ${qs.filter((q) => Array.isArray(q.ans) && q.type === "mc").length}` : "")
     + (pt != null ? ` · 배점합 ${Math.round(pt * 10) / 10}` : " · 배점 없음(개수로 셈)")
     + (e.test ? "  [시험용 — 선생님만]" : "") + (e.lock ? "  [답 고정 — 선생님만 고침]" : "") + ((e.cids || []).length ? `  [반 ${e.cids.length}곳만]` : "")
     + ((e.names || []).length ? `  [학생: ${e.names.join(", ")}]` : "");

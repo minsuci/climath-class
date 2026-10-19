@@ -65,16 +65,54 @@ function autoCorrect(q, mine) {
   if (q.type === "mc") return Number(mine) === Number(q.ans);
   return [].concat(q.ans).some((k) => sameShort(mine, k));
 }
+// 꼬리문제(parts) — 한 번호에 답 칸이 (1)(2)… 여럿. 칸마다 채점하고 배점을 나눠 준다(10/19 마왕님).
+//   key: {n, type:"short", pt, parts:[{label:"(1)", ans, pt?, g?}], any?}  any = 칸 순서 상관없음(«30 또는 −22» 같은 두 값)
+//   g = 묶음 이름 — 같은 g 칸끼리만 순서 상관없음(«a,b,c 와 t=2 또는 6» 처럼 일부만 순서가 없을 때)
+//   기록 줄: answer = 칸별 답 배열 · pa = 칸별 O/X 배열 · auto = 다 맞았나 · O/X 고침은 override["19.1"] 처럼 «번호.칸»
+// 모두 고르기(multi) — 객관식인데 ans 가 배열. 고른 것이 정답 묶음과 **똑같아야** 맞음
+const isMulti = (q) => q.type === "mc" && Array.isArray(q.ans);
+const hasParts = (q) => Array.isArray(q.parts) && q.parts.length > 0;
+function gradeParts(q, arr) {
+  const ks = q.parts.map((p) => [].concat(p.ans != null ? p.ans : p.key));
+  const a = arr || [];
+  const grp = (i) => (q.any ? "*" : q.parts[i].g != null ? "g" + q.parts[i].g : "i" + i);
+  const used = new Set();
+  return ks.map((_, i) => {
+    if (!a[i]) return false;
+    const j = ks.findIndex((k, j) => !used.has(j) && grp(j) === grp(i) && k.some((x) => sameShort(a[i], x)));
+    if (j < 0) return false;
+    used.add(j); return true;
+  });
+}
+function gradeQ(q, mine) {
+  if (hasParts(q)) { const pa = gradeParts(q, mine); return { auto: pa.every(Boolean), pa }; }
+  if (isMulti(q)) return { auto: mine != null && JSON.stringify(mine) === JSON.stringify([...q.ans].map(Number).sort()) };
+  return { auto: autoCorrect(q, mine) };
+}
+// 칸마다 배점 비율(합 1). 칸 배점이 다 있으면 그 비율, 없으면 똑같이
+function partW(q) {
+  const ps = q.parts, all = ps.every((p) => typeof p.pt === "number" && p.pt > 0);
+  const sum = all ? ps.reduce((a, p) => a + p.pt, 0) : 0;
+  return ps.map((p) => (all ? p.pt / sum : 1 / ps.length));
+}
+// 칸별 O/X (고침 반영). inTime 이고 시간 뒤에 바뀐 문항이면 끝난 순간의 답으로
+function partOks(q, override, inTime) {
+  if (inTime && q.late) return q.parts.map((_, i) => !!(q.paIn || [])[i]);
+  return q.parts.map((_, i) => { const k = q.n + "." + (i + 1); return override && k in override ? override[k] : !!(q.pa || [])[i]; });
+}
 // 점수는 **100점 기준**으로 낸다. 점수 칸의 다른 줄(학생이 «17/22» 로 적는 것)이
 // round(맞은/전체×100) 이라, 같은 날 반 평균에 섞여도 뜻이 맞아야 한다.
 // inTime: 시간 안 점수 — 시간이 끝난 뒤 답이 바뀐 문항(late)은 끝난 순간의 답(autoIn)으로 센다
 // ⚠ 공식 점수는 **낸 답 그대로**다(inTime 없이). 시간 안 점수는 참고(코칭)로만 log.inTime 에 남긴다.
 //   2026-10-02 마왕님: «시간 지나도 낸 건 낸 거야» — 전엔 시간 안 점수가 공식이었다
+// 꼬리문제는 맞은 칸 비율만큼 점수 · «맞은 문제» 는 칸이 다 맞아야 하나로 센다
 function tally(qs, override, inTime) {
-  const ok = (q) => (inTime && q.late ? q.autoIn : override && q.n in override ? override[q.n] : q.auto);
+  const one = (q) => (inTime && q.late ? q.autoIn : override && q.n in override ? override[q.n] : q.auto);
+  const ok = (q) => (hasParts(q) ? partOks(q, override, inTime).every(Boolean) : one(q));
+  const frac = (q) => { if (!hasParts(q)) return one(q) ? 1 : 0; const w = partW(q); return partOks(q, override, inTime).reduce((a, o, i) => a + (o ? w[i] : 0), 0); };
   const hasPt = qs.every((q) => typeof q.pt === "number" && q.pt > 0);
   const totalPt = hasPt ? qs.reduce((a, q) => a + q.pt, 0) : qs.length;
-  const got = qs.reduce((a, q) => a + (ok(q) ? (hasPt ? q.pt : 1) : 0), 0);
+  const got = qs.reduce((a, q) => a + frac(q) * (hasPt ? q.pt : 1), 0);
   return {
     got: Math.round(got * 10) / 10, totalPt: Math.round(totalPt * 10) / 10,
     correct: qs.filter((q) => ok(q)).length, n: qs.length,
@@ -118,8 +156,26 @@ function checkExam(e) {
     if (seen[q.n]) return q.n + "번이 두 번 있어요";
     seen[q.n] = 1;
     if (!["mc", "short", "essay"].includes(q.type)) return q.n + "번 종류가 이상해요: " + q.type;
-    if (q.type === "mc" && !(Number.isInteger(q.ans) && q.ans >= 1 && q.ans <= 5)) return q.n + "번 객관식 답은 1~5";
-    if (q.type === "short") {
+    const c15 = (x) => Number.isInteger(x) && x >= 1 && x <= 5;
+    if (q.type === "mc" && Array.isArray(q.ans)) {   // 모두 고르기
+      if (hw) return q.n + "번 — 과제 교재엔 «모두 고르기» 를 못 써요";
+      if (q.ans.length < 2 || !q.ans.every(c15) || new Set(q.ans).size !== q.ans.length) return q.n + "번 모두 고르기 답은 1~5 중 둘 이상(겹침 없이)";
+    } else if (q.type === "mc" && !c15(q.ans)) return q.n + "번 객관식 답은 1~5";
+    if (q.parts != null) {   // 꼬리문제
+      if (hw) return q.n + "번 — 과제 교재엔 꼬리문제(parts)를 못 써요";
+      if (q.type !== "short") return q.n + "번 꼬리문제는 type short 로";
+      if (q.ans != null) return q.n + "번 꼬리문제는 ans 대신 parts 안에 답을 적어요";
+      if (!Array.isArray(q.parts) || q.parts.length < 2 || q.parts.length > 6) return q.n + "번 parts 는 칸 2~6개";
+      for (const p of q.parts) {
+        if (!p || !(typeof p.label === "string" && p.label.trim() && p.label.length <= 8)) return q.n + "번 칸 이름(label, 8자 안)이 이상해요";
+        const ks = [].concat(p.ans);
+        if (!ks.length || ks.some((k) => !String(k == null ? "" : k).trim())) return q.n + "번 " + p.label + " 답이 없어요";
+        if (p.pt != null && !(typeof p.pt === "number" && p.pt > 0)) return q.n + "번 " + p.label + " 배점이 이상해요";
+        if (p.g != null && !(typeof p.g === "string" && p.g.trim() && p.g.length <= 8)) return q.n + "번 " + p.label + " 묶음(g)은 8자 안 글자";
+      }
+      if (q.any != null && typeof q.any !== "boolean") return q.n + "번 any 는 true/false";
+    } else if (q.any != null) return q.n + "번 any 는 꼬리문제에만";
+    if (q.type === "short" && q.parts == null) {
       const ks = [].concat(q.ans);
       if (!ks.length || ks.some((k) => !String(k == null ? "" : k).trim())) return q.n + "번 단답형 답이 없어요";
     }
@@ -164,24 +220,45 @@ async function rebuildList() {
     cids: e.cids || [], sids: e.sids || [], test: !!e.test, lock: !!e.lock, order: e.order || 0,
     ...(e.kind === "hw" ? { kind: "hw", units: e.units || [], link: e.link || "", ...(e.free ? { free: true } : {}) } : {}),
     questions: (e.questions || []).map((q) => ({ n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}),
-                                                 ...(q.label ? { label: q.label } : {}), ...(q.u != null ? { u: q.u } : {}) })),
+                                                 ...(q.label ? { label: q.label } : {}), ...(q.u != null ? { u: q.u } : {}),
+                                                 ...(hasParts(q) ? { parts: q.parts.map((p) => ({ label: p.label, ...(p.g != null ? { g: p.g } : {}) })), ...(q.any ? { any: true } : {}) } : {}),
+                                                 ...(isMulti(q) ? { multi: true } : {}) })),
   })).sort((a, b) => (a.order - b.order) || String(a.title).localeCompare(String(b.title), "ko"));
   await patchDoc(LIST_PATH, { exams, updated: Date.now() });
   return exams.length;
 }
 
 // ───────────── 문항별 채점 줄 — 제출(submit)과 옮기기(examMove)가 같이 쓴다 ─────────────
+// 학생 답 다듬기 — 꼬리문제는 칸 수만큼의 글자 배열(빈 칸 ""), 모두 고르기는 고른 번호 배열(오름차순)
+function normAns(q, raw) {
+  if (raw == null || raw === "") return null;
+  if (hasParts(q)) {
+    const a = [].concat(raw);
+    const out = q.parts.map((_, i) => (a[i] == null ? "" : String(a[i]).trim().slice(0, 20)));
+    return out.some(Boolean) ? out : null;
+  }
+  if (isMulti(q)) {
+    const a = typeof raw === "string" ? raw.split(/[^0-9]+/) : [].concat(raw);
+    const s = [...new Set(a.map(Number).filter((x) => Number.isInteger(x) && x >= 1 && x <= 5))].sort((x, y) => x - y);
+    return s.length ? s : null;
+  }
+  return q.type === "mc" ? Number(raw) : String(raw).slice(0, 20);
+}
 function gradeRows(key, answers, ev, limitSec, overSec) {
   const inAns = overSec > 0 ? answersAt(ev, limitSec) : null;
-  const norm = (q, raw) => (raw == null || raw === "" ? null : (q.type === "mc" ? Number(raw) : String(raw).slice(0, 20)));
   return key.questions.map((q) => {
-    const mine = norm(q, answers[q.n]);
+    const mine = normAns(q, answers[q.n]), g = gradeQ(q, mine);
     const row = { n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}), ...(q.label ? { label: q.label } : {}),
-                  key: q.type === "essay" ? null : q.ans, answer: mine, auto: autoCorrect(q, mine) };
+                  key: q.type === "essay" || hasParts(q) ? null : q.ans, answer: mine, auto: g.auto,
+                  ...(hasParts(q) ? { parts: q.parts.map((p) => ({ label: p.label, key: p.ans, ...(p.pt != null ? { pt: p.pt } : {}), ...(p.g != null ? { g: p.g } : {}) })), pa: g.pa, ...(q.any ? { any: true } : {}) } : {}),
+                  ...(isMulti(q) ? { multi: true } : {}) };
     // 시간이 끝난 뒤 답이 바뀌었으면 끝난 순간의 답을 따로 둔다. 그때 비어 있었으면 시간 안에는 틀림
     if (inAns) {
-      const was = norm(q, inAns[q.n]);
-      if (String(was) !== String(mine)) Object.assign(row, { late: true, answerIn: was, autoIn: was == null ? false : autoCorrect(q, was) });
+      const was = normAns(q, inAns[q.n]);
+      if (String(was) !== String(mine)) {
+        const gi = was == null ? { auto: false, pa: hasParts(q) ? q.parts.map(() => false) : undefined } : gradeQ(q, was);
+        Object.assign(row, { late: true, answerIn: was, autoIn: gi.auto, ...(hasParts(q) ? { paIn: gi.pa } : {}) });
+      }
     }
     return row;
   });
@@ -262,7 +339,7 @@ async function submit(res, claims, b) {
   const answers = b.answers && typeof b.answers === "object" ? b.answers : {};
   const ev = Array.isArray(b.ev) ? b.ev.slice(0, MAX_EV).map((e) => ({
     t: Number(e.t) || 0, k: e.k === "ans" ? "ans" : "go", q: Number(e.q) || 0,
-    ...(e.k === "ans" ? { v: e.v == null ? null : String(e.v).slice(0, 20) } : {}),
+    ...(e.k === "ans" ? { v: e.v == null ? null : Array.isArray(e.v) ? e.v.slice(0, 6).map((x) => (x == null ? "" : String(x).slice(0, 20))) : String(e.v).slice(0, 20) } : {}),
   })) : [];
   const limitSec = Math.max(60, Math.min(6 * 3600, Number(b.limitSec) || key.minutes * 60));
   const endT = Math.max(0, Math.min(limitSec + OVER_MAX, Number(b.endT) || 0));
@@ -312,17 +389,21 @@ async function fixAnswer(res, claims, b) {
   const kq = key && (key.questions || []).find((q) => q.n === n);
   const i = (log.questions || []).findIndex((q) => q.n === n);
   if (!kq || i < 0) { res.status(404).json({ error: n + "번 정답을 찾지 못했어요" }); return; }
-  const raw = b.value == null ? "" : String(b.value).trim().slice(0, 20);
-  const mine = raw === "" ? null : (kq.type === "mc" ? Number(raw) : raw);
-  if (kq.type === "mc" && mine != null && !(Number.isInteger(mine) && mine >= 1 && mine <= 5)) { res.status(400).json({ error: "객관식은 1~5" }); return; }
+  // 꼬리문제는 칸별 배열(value: ["30","-22"]) · 모두 고르기는 «2,5» 나 [2,5]
+  const raw = Array.isArray(b.value) ? b.value : b.value == null ? "" : String(b.value).trim().slice(0, 20);
+  const mine = hasParts(kq) || isMulti(kq) ? normAns(kq, raw) : raw === "" ? null : (kq.type === "mc" ? Number(raw) : raw);
+  if (kq.type === "mc" && !isMulti(kq) && mine != null && !(Number.isInteger(mine) && mine >= 1 && mine <= 5)) { res.status(400).json({ error: "객관식은 1~5" }); return; }
   const old = log.questions[i];
   const who = claims.tid ? await getDoc("teachers/" + claims.tid).catch(() => null) : null;
-  const { late: _l, answerIn: _a, autoIn: _x, ...rest } = old;   // 선생님이 정한 답은 시간 안 답으로 본다
-  const row = { ...rest, answer: mine, auto: autoCorrect(kq, mine),
+  const { late: _l, answerIn: _a, autoIn: _x, paIn: _p, ...rest } = old;   // 선생님이 정한 답은 시간 안 답으로 본다
+  const g = gradeQ(kq, mine);
+  const row = { ...rest, answer: mine, auto: g.auto, ...(g.pa ? { pa: g.pa } : {}),
                 fixed: { from: old.answer == null ? null : old.answer, by: (who && who.name) || claims.tid || claims.role, at: Date.now() } };
   const questions = log.questions.map((q, k) => (k === i ? row : q));
-  const override = { ...(log.override || {}) }; delete override[n];
-  const selfOv = { ...(log.selfOv || {}) }; delete selfOv[n];   // 학생이 스스로 고친 표시도 푼다
+  // 그 번호의 O/X 고침은 푼다 — 꼬리문제면 «번호.칸» 도 전부
+  const mineKey = (k) => k === String(n) || k.startsWith(n + ".");
+  const override = { ...(log.override || {}) }; Object.keys(override).filter(mineKey).forEach((k) => delete override[k]);
+  const selfOv = { ...(log.selfOv || {}) }; Object.keys(selfOv).filter(mineKey).forEach((k) => delete selfOv[k]);   // 학생이 스스로 고친 표시도 푼다
   const t = tally(questions, override);
   const patch = { questions, override, selfOv, score: t.score, got: t.got, correct: t.correct, pending: t.pending,
                   ...(log.overSec > 0 ? { inTime: inTimeOf(questions, override), all: null } : {}) };
@@ -1041,7 +1122,9 @@ export default async function handler(req, res) {
           questions: e.questions.map((q) => ({ n: q.n, type: q.type, ...(q.ans != null ? { ans: q.ans } : {}),
                                                ...(q.label ? { label: String(q.label).trim() } : {}),
                                                ...(q.pt != null ? { pt: q.pt } : {}),
-                                               ...(q.u != null ? { u: q.u } : {}), ...(q.p != null ? { p: q.p } : {}) })),
+                                               ...(q.u != null ? { u: q.u } : {}), ...(q.p != null ? { p: q.p } : {}),
+                                               ...(q.parts ? { parts: q.parts.map((p) => ({ label: String(p.label).trim(), ans: p.ans, ...(p.pt != null ? { pt: p.pt } : {}), ...(p.g != null ? { g: String(p.g) } : {}) })) } : {}),
+                                               ...(q.any ? { any: true } : {}) })),
           cids: Array.isArray(e.cids) ? e.cids.map(String) : [], sids, names, test: !!e.test, lock: !!e.lock, free: !!e.free,   // free = 시험용 과제 교재 — 답을 적으면 다 정답(조각 흐름 시험, 10/12) hkEmpty: !!e.hkEmpty,   // hkEmpty = 학결모 «걸어 둘 학생 없이 숨겨 둔» 시험지 (학생을 걸면 열린다)
           order: Number(e.order) || 0, updated: Date.now(),
         });

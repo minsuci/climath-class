@@ -244,6 +244,18 @@ html,body{margin:0; padding:0;}
 .mx-choice.on{background:var(--navy); border-color:var(--navy); color:#fff;}
 .mx-disp{margin:26px 0 12px; border:2px solid var(--line); border-radius:12px; padding:12px 16px; font-size:34px; font-weight:700; min-height:68px; text-align:right; background:#fff; font-variant-numeric:tabular-nums;}
 .mx-disp.saved{border-color:var(--navy);}
+.mx-parts{display:flex; gap:8px; flex-wrap:wrap; margin:22px 0 12px;}
+.mx-part{flex:1 1 130px; border:2px solid var(--line); border-radius:12px; background:#fff; padding:6px 12px; text-align:right; cursor:pointer; font-family:inherit; color:var(--ink); min-height:72px;}
+.mx-part small{display:block; text-align:left; font-size:13px; font-weight:800; color:var(--muted);}
+.mx-part b{display:block; font-size:28px; font-weight:700; min-height:34px; font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.mx-part.saved{border-color:var(--navy);}
+.mx-part.on{border-color:var(--navy); box-shadow:0 0 0 3px #dfe6f3; background:#f7f9fd;}
+.mx-part.on small{color:var(--navy);}
+.mx-multi{margin-top:12px; text-align:center; font-size:14px; font-weight:700; color:var(--navy);}
+.mx-pmarks{display:flex; flex-direction:column; gap:4px; align-items:center;}
+.mx-pmarks small{font-size:11px; color:var(--muted); margin-right:3px;}
+.mx-plines{display:flex; flex-direction:column; gap:2px; font-size:13.5px; white-space:nowrap;}
+.mx-plines small{color:var(--muted); margin-right:4px;}
 .mx-pad{display:grid; grid-template-columns:repeat(5,1fr); gap:8px;}
 .mx-pad button{padding:14px 0; font-size:23px; font-weight:700; border:1px solid var(--line); border-radius:10px; background:#fff; cursor:pointer; font-family:inherit; color:var(--ink);}
 .mx-pad .ok{grid-column:4 / span 2; background:var(--navy); border-color:var(--navy); color:#fff; font-size:19px;}
@@ -2118,7 +2130,11 @@ function mxLoad(k) { try { return JSON.parse(localStorage.getItem(k) || "null");
 function mxSave(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 function mxClock(sec) { sec = Math.max(0, Math.round(sec)); return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0"); }
 function mxHm(sec) { sec = Math.round(sec); const m = Math.floor(sec / 60), x = sec % 60; return m ? (x ? m + "분 " + x + "초" : m + "분") : x + "초"; }
-const mxAnswered = (S, n) => S.answers[n] != null && S.answers[n] !== "";
+// 꼬리문제(parts)는 칸이 다 차야 «답함». 모두 고르기(multi)는 하나라도 고르면 «답함»
+const mxAnswered = (S, n) => { const v = S.answers[n]; return Array.isArray(v) ? v.length > 0 && v.every((x) => x != null && x !== "") : v != null && v !== ""; };
+const mxHas = (S, n) => { const v = S.answers[n]; return Array.isArray(v) ? v.some((x) => x != null && x !== "") : v != null && v !== ""; };
+const mxFirstEmpty = (v, k) => { const a = Array.isArray(v) ? v : []; for (let i = 0; i < k; i++) if (!a[i]) return i; return 0; };
+const mxBufFor = (q, v, i) => (!q || q.type !== "short" ? "" : q.parts ? String((Array.isArray(v) ? v : [])[i] || "") : v == null || v === "" ? "" : String(v));
 
 // ev: {t, k:"go", q} 문항 전환 · {t, k:"ans", q, v} 답 기록(v=null 이면 지움). t 는 시작부터 초
 function mxSegments(ev, endT) {
@@ -2137,11 +2153,26 @@ const MX_OVER = 30 * 60;
 const mxQName = (q) => q.n + "번" + (q.label ? " · " + q.label : "");
 const mxShort = (lb) => String(lb || "").replace("서술형", "서").replace("서답형", "서").replace("단답형", "단");
 // inTime: 시간 안 점수 — 시간 뒤에 답이 바뀐 문항(late)은 끝난 순간의 답으로 센다 (서버 tally 와 같게)
+// 꼬리문제 — 칸별 O/X 는 pa, 고침은 override["19.1"](번호.칸). 칸 배점이 다 있으면 그 비율, 없으면 똑같이 (api/exam.js partW · partOks 와 같게)
+const mxHasParts = (q) => Array.isArray(q.parts) && q.parts.length > 0;
+function mxPartW(q) {
+  const ps = q.parts, all = ps.every((p) => typeof p.pt === "number" && p.pt > 0);
+  const sum = all ? ps.reduce((a, p) => a + p.pt, 0) : 0;
+  return ps.map((p) => (all ? p.pt / sum : 1 / ps.length));
+}
+function mxPartOks(q, override, inTime) {
+  if (inTime && q.late) return q.parts.map((_, i) => !!(q.paIn || [])[i]);
+  return q.parts.map((_, i) => { const k = q.n + "." + (i + 1); return override && k in override ? override[k] : !!(q.pa || [])[i]; });
+}
+// 한 문항 O/X — 꼬리문제는 칸이 다 맞아야 O
+const mxQOk = (q, ov) => (mxHasParts(q) ? mxPartOks(q, ov).every(Boolean) : ov && q.n in ov ? ov[q.n] : q.auto);
 function mxTally(qs, override, inTime) {
-  const ok = (q) => (inTime && q.late ? q.autoIn : override && q.n in override ? override[q.n] : q.auto);
+  const one = (q) => (inTime && q.late ? q.autoIn : override && q.n in override ? override[q.n] : q.auto);
+  const ok = (q) => (mxHasParts(q) ? mxPartOks(q, override, inTime).every(Boolean) : one(q));
+  const frac = (q) => { if (!mxHasParts(q)) return one(q) ? 1 : 0; const w = mxPartW(q); return mxPartOks(q, override, inTime).reduce((a, o, i) => a + (o ? w[i] : 0), 0); };
   const hasPt = qs.every((q) => typeof q.pt === "number" && q.pt > 0);
   const totalPt = hasPt ? qs.reduce((a, q) => a + q.pt, 0) : qs.length;
-  const got = qs.reduce((a, q) => a + (ok(q) ? (hasPt ? q.pt : 1) : 0), 0);
+  const got = qs.reduce((a, q) => a + frac(q) * (hasPt ? q.pt : 1), 0);
   return {
     got: Math.round(got * 10) / 10, totalPt: Math.round(totalPt * 10) / 10,
     correct: qs.filter((q) => ok(q)).length, n: qs.length,
@@ -2154,7 +2185,7 @@ function mxAnalyze(log) {
   const rows = log.questions.map((q) => {
     const my = segs.filter((x) => x.q === q.n);
     return {
-      q, ok: q.n in ov ? ov[q.n] : q.auto,
+      q, ok: mxQOk(q, ov),
       sec: my.reduce((a, x) => a + x.to - x.from, 0), visits: my.length,
       // 답 기록 횟수. 같은 답을 다시 누른 것은 기록 자체가 안 남으므로 «바꿈» 으로 안 센다
       changes: (log.ev || []).filter((e) => e.k === "ans" && e.q === q.n).length,
@@ -2165,6 +2196,20 @@ function mxAnalyze(log) {
   return { rows, segs, ...mxTally(log.questions, ov), inTime: log.overSec ? mxTally(log.questions, ov, true) : null,
            blank: rows.filter((r) => r.q.answer == null || r.q.answer === "").length };
 }
+// 답·정답을 글자로 — 꼬리문제는 «(1) 8  (2) 1:1:√2», 모두 고르기는 «②⑤»
+function mxAnsText(q, v) {
+  if (v == null || v === "") return "–";
+  if (Array.isArray(v)) return mxHasParts(q) ? q.parts.map((p, i) => p.label + " " + (v[i] == null || v[i] === "" ? "–" : v[i])).join("  ") : v.map((c) => MX_CIRC[c] || c).join("");
+  return q.type === "mc" ? MX_CIRC[v] || v : q.type === "essay" ? "✓" : String(v);
+}
+function mxKeyText(q) {
+  if (mxHasParts(q)) return q.parts.map((p) => p.label + " " + [].concat(p.key).join("/")).join("  ") + (q.any || q.parts.some((p) => p.g != null) ? " (순서 무관 칸 있음)" : "");
+  if (q.type === "essay") return "–";
+  if (q.type === "mc") return [].concat(q.key).map((c) => MX_CIRC[c] || c).join("");
+  return [].concat(q.key).join(" / ");
+}
+// O/X 글자 — 꼬리문제는 칸마다(«OX»)
+const mxOxText = (q, ov) => (mxHasParts(q) ? mxPartOks(q, ov).map((o) => (o ? "O" : "X")).join("") : (() => { const ok = mxQOk(q, ov); return ok === null ? "?" : ok ? "O" : "X"; })());
 // 답을 적으면 다음 «안 푼» 문제로 — 앞에서부터 차례로 풀면 n+1 과 같다.
 // 앞 문제로 돌아가 답을 고쳤으면 그 바로 뒤가 아니라 **아직 안 푼 곳**으로 간다.
 function mxNextOpen(S, n) {
@@ -2192,11 +2237,7 @@ function mxCsv(logs) {
   const rows = logs.map((l) => {
     const ov = l.override || {};
     return [l.name, l.score, l.correct, l.n, mxClock(l.endT || 0), l.overSec ? "+" + mxClock(l.overSec) : "", l.date + " " + hhmm(l.startedAt)]
-      .concat(l.questions.map((q) => {
-        const ok = q.n in ov ? ov[q.n] : q.auto;
-        const a = q.answer == null || q.answer === "" ? "–" : q.type === "mc" ? MX_CIRC[q.answer] || q.answer : q.answer;
-        return a + " " + (ok === null ? "?" : ok ? "O" : "X");
-      }));
+      .concat(l.questions.map((q) => mxAnsText(q, q.answer) + " " + mxOxText(q, ov)));
   });
   return "\ufeff" + [head].concat(rows).map((r) => r.map(cell).join(",")).join("\r\n");
 }
@@ -2220,10 +2261,18 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
     return s0;
   });
   const sRef = useRef(S);
+  // 꼬리문제에서 지금 적는 칸(0부터)
+  const [pi, setPi0] = useState(() => {
+    const s0 = sRef.current; if (!s0) return 0;
+    const q = s0.questions.find((x) => x.n === s0.cur);
+    return q && q.parts ? mxFirstEmpty(s0.answers[s0.cur], q.parts.length) : 0;
+  });
+  const piRef = useRef(pi);
+  const setPi = (v) => { piRef.current = v; setPi0(v); };
   const [buf, setBuf0] = useState(() => {
     const s0 = sRef.current; if (!s0) return "";
     const q = s0.questions.find((x) => x.n === s0.cur);
-    return q && q.type === "short" && mxAnswered(s0, s0.cur) ? String(s0.answers[s0.cur]) : "";
+    return mxBufFor(q, s0.answers[s0.cur], piRef.current);
   });
   // 칸의 글자는 ref 에도 둔다 — 빠르게 누르면 «답 적기»가 다시 그려지기 전의 옛 글자를 읽는다
   const bufRef = useRef(buf);
@@ -2260,15 +2309,22 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
     const x = sRef.current; if (!x || x.endT != null || n === x.cur) return;
     const q = x.questions.find((y) => y.n === n); if (!q) return;
     put({ ...x, cur: n, ev: [...x.ev, { t: nowT(x), k: "go", q: n }] });
-    setBuf(q.type === "short" && mxAnswered(x, n) ? String(x.answers[n]) : "");
+    const i = q.parts ? mxFirstEmpty(x.answers[n], q.parts.length) : 0;
+    setPi(i);
+    setBuf(mxBufFor(q, x.answers[n], i));
   }
-  function setAnswer(n, v) {
-    if (busy.current) return;
-    let x = sRef.current; if (!x || x.endT != null) return;
-    if (x.answers[n] !== v) {       // 같은 답을 다시 누르면 기록하지 않고 넘어가기만
+  // 답만 적고 그 자리에 둔다 (꼬리문제 칸 하나 · 모두 고르기 하나 누름)
+  function record(n, v) {
+    let x = sRef.current; if (!x || x.endT != null) return null;
+    if (JSON.stringify(x.answers[n]) !== JSON.stringify(v)) {       // 같은 답을 다시 누르면 기록하지 않는다
       x = { ...x, answers: { ...x.answers, [n]: v }, ev: [...x.ev, { t: nowT(x), k: "ans", q: n, v }] };
       put(x);
     }
+    return x;
+  }
+  function setAnswer(n, v) {
+    if (busy.current) return;
+    const x = record(n, v); if (!x) return;
     const nx = mxNextOpen(x, n);
     if (nx == null) return;          // 다 풀었으면 그 자리에 둔다
     busy.current = true;             // 누른 게 보이게 잠깐 두었다가 넘어간다
@@ -2281,10 +2337,18 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
     }, 380);
   }
   function clearAnswer(n) {
-    const x = sRef.current; if (!x || x.endT != null || !mxAnswered(x, n)) return;
+    const x = sRef.current; if (!x || x.endT != null || !mxHas(x, n)) return;
     const a = { ...x.answers }; delete a[n];
     put({ ...x, answers: a, ev: [...x.ev, { t: nowT(x), k: "ans", q: n, v: null }] });
-    setBuf("");
+    setBuf(""); setPi(0);
+  }
+  // 모두 고르기 — 누를 때마다 넣고 뺀다. 다음 문제로 저절로 안 넘어간다(더 고를 수 있으니)
+  function toggleMulti(n, c) {
+    if (busy.current) return;
+    const x = sRef.current; if (!x || x.endT != null) return;
+    const a = Array.isArray(x.answers[n]) ? x.answers[n] : [];
+    const nx = a.includes(c) ? a.filter((y) => y !== c) : [...a, c].sort((p, q) => p - q);
+    if (!nx.length) clearAnswer(n); else record(n, nx);
   }
   async function submit(reason) {
     const x = sRef.current; if (!x || x.sending) return;
@@ -2354,10 +2418,60 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
   // 넘어가는 0.4초 동안은 번호판을 안 받는다. 받으면 숫자는 들어가는데 «답 적기» 는
   // 막혀 있어서, 다음 문제 칸에 앞 문제에서 친 숫자가 붙어 있게 된다 (-3 뒤에 0.5 → «-30.5»)
   const padKey = (k) => { if (busy.current) return; setBuf((b) => (k === "⌫" ? b.slice(0, -1) : k === "C" ? "" : b.length < 12 ? b + k : b)); };
-  const padOk = () => { const v = bufRef.current.trim(); if (!v) clearAnswer(q.n); else setAnswer(q.n, v); };
+  // 꼬리문제 칸 배열(칸 수만큼, 빈 칸 "")
+  const partArr = () => { const v = (sRef.current || S).answers[q.n], a = Array.isArray(v) ? v : []; return q.parts.map((_, j) => String(a[j] || "")); };
+  const padOk = () => {
+    if (busy.current) return;
+    const v = bufRef.current.trim();
+    if (!q.parts) { if (!v) clearAnswer(q.n); else setAnswer(q.n, v); return; }
+    // 꼬리문제 — 이 칸에 적고 다음 빈 칸으로. 칸이 다 차면 다음 문제로
+    const k = q.parts.length, i = piRef.current, a = partArr();
+    a[i] = v;
+    if (a.every((x) => !x)) { clearAnswer(q.n); return; }
+    let nxt = -1;
+    for (let d = 1; d < k; d++) { const j = (i + d) % k; if (!a[j]) { nxt = j; break; } }
+    if (nxt >= 0) { record(q.n, a); setPi(nxt); setBuf(""); }
+    else setAnswer(q.n, a);
+  };
+  // 칸을 눌러 옮긴다. 적던 글자가 있으면 그 칸에 먼저 적어 둔다
+  const pickPart = (j) => {
+    if (busy.current || frozen || j === piRef.current) return;
+    const a = partArr(), v = bufRef.current.trim();
+    if (v && v !== a[piRef.current]) { a[piRef.current] = v; record(q.n, a); }
+    setPi(j); setBuf(a[j] || "");
+  };
 
   let body;
-  if (q.type === "mc") {
+  if (q.type === "mc" && q.multi) {
+    const sel = Array.isArray(mine) ? mine : [];
+    body = (<>
+      <div className="mx-choices">
+        {[1, 2, 3, 4, 5].map((c) => (
+          <button key={c} className={"mx-choice" + (sel.includes(c) ? " on" : "")} onClick={() => toggleMulti(q.n, c)}>{MX_CIRC[c]}</button>
+        ))}
+      </div>
+      <div className="mx-multi">답을 <b>모두</b> 골라요 · 다시 누르면 빠져요{sel.length ? " — 고른 것 " + sel.map((c) => MX_CIRC[c]).join("") : ""}</div>
+    </>);
+  } else if (q.type === "short" && q.parts) {
+    const a = Array.isArray(mine) ? mine : [];
+    body = (<>
+      <div className="mx-parts">
+        {q.parts.map((p, j) => (
+          <button key={j} className={"mx-part" + (j === pi ? " on" : "") + (a[j] && (j !== pi || buf === a[j]) ? " saved" : "")} onClick={() => pickPart(j)}>
+            <small>{p.label}</small><b>{(j === pi ? buf : a[j]) || "\u00a0"}</b>
+          </button>
+        ))}
+      </div>
+      {q.any ? <div className="cm-hint" style={{marginBottom: 6}}>칸 순서는 상관없어요.</div>
+        : q.parts.some((p) => p.g != null) ? <div className="cm-hint" style={{marginBottom: 6}}>{[...new Set(q.parts.filter((p) => p.g != null).map((p) => p.g))].map((g) => q.parts.filter((p) => p.g === g).map((p) => p.label).join(" · ")).join(" / ")} 칸끼리는 순서 상관없어요.</div> : null}
+      <div className="mx-pad">
+        {["7", "8", "9", "-", "⌫", "4", "5", "6", "/", "C", "1", "2", "3", ".", "0"].map((k) => (
+          <button key={k} onClick={() => padKey(k)}>{k}</button>
+        ))}
+        <button className="ok" onClick={padOk}>{q.parts.some((_, j) => j !== pi && !a[j]) ? q.parts[pi].label + " 적기" : "답 적기"}</button>
+      </div>
+    </>);
+  } else if (q.type === "mc") {
     body = (
       <div className="mx-choices">
         {[1, 2, 3, 4, 5].map((c) => (
@@ -2393,7 +2507,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
       </div>
       <div className="mx-body">
         <div className="mx-q">
-          <div className="mx-num">{q.n}번{q.label && <span className="mx-lb">{q.label}</span>}<small>{MX_TYPE[q.type]}{q.pt ? " · " + q.pt + "점" : ""}</small></div>
+          <div className="mx-num">{q.n}번{q.label && <span className="mx-lb">{q.label}</span>}<small>{q.multi ? "객관식 · 모두 고르기" : q.parts ? "단답형 · 칸 " + q.parts.length + "개" : MX_TYPE[q.type]}{q.pt ? " · " + q.pt + "점" : ""}</small></div>
           {left < 0 && !frozen && (
             <div className="mx-overnote">시간이 끝났어요 <b>(+{mxClock(-left)})</b>. 계속 풀어도 되지만, 지금부터 적거나 바꾼 답은 <b>«시간 초과»</b> 로 따로 채점돼요.
               {left < -(MX_OVER - 300) && " 5분 안에 저절로 제출돼요."}</div>
@@ -2402,7 +2516,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
           {allDone && <div className="mx-note">모든 문제에 답했어요. 검토할 번호를 눌러 보거나 제출하세요.</div>}
           <div className="mx-foot">
             <button className="mx-btn" disabled={!prev} onClick={() => prev && go(prev.n)}>◀ 이전</button>
-            {mxAnswered(S, q.n) && <button className="mx-btn" onClick={() => clearAnswer(q.n)}>답 지우기</button>}
+            {mxHas(S, q.n) && <button className="mx-btn" onClick={() => clearAnswer(q.n)}>답 지우기</button>}
             <span style={{flex: 1}} />
             <button className="mx-btn" disabled={!next} onClick={() => next && go(next.n)}>넘기기 ▶</button>
           </div>
@@ -2411,7 +2525,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
           <div className="mx-grid">
             {S.questions.map((x) => {
               const v = S.answers[x.n];
-              const show = v == null || v === "" ? "" : x.type === "mc" ? MX_CIRC[v] : String(v);
+              const show = v == null || v === "" ? "" : Array.isArray(v) ? (x.parts ? v.filter(Boolean).length + "/" + x.parts.length : v.map((c) => MX_CIRC[c]).join("")) : x.type === "mc" ? MX_CIRC[v] : String(v);
               return (
                 <button key={x.n} className={"mx-chip" + (mxAnswered(S, x.n) ? " done" : "") + (x.n === S.cur ? " cur" : "")}
                   onClick={() => go(x.n)}>{x.label ? <u>{mxShort(x.label)}</u> : null}<b>{x.n}</b><i>{show}</i></button>
@@ -2523,12 +2637,14 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
   const markable = (q) => canMark || (!!canMarkSub && q.type !== "mc");
 
   // 단답형: 맞음 ↔ 틀림 · 서술형: 채점 전 → 맞음 → 틀림 → 맞음
-  async function toggle(n) {
+  // 꼬리문제는 칸마다(pi = 칸 0부터) — 고침 칸 이름은 «번호.칸»(19.1)
+  async function toggle(n, pi) {
     const q = L.questions.find((x) => x.n === n), ov0 = L.override || {};
     if (!q || !markable(q) || saving || L.voided) return;
-    const cur = n in ov0 ? ov0[n] : q.auto;
-    const ov = { ...ov0, [n]: cur === true ? false : true };
-    const self = !canMark ? { selfOv: { ...(L.selfOv || {}), [n]: true } } : {};
+    const key = pi != null ? n + "." + (pi + 1) : n;
+    const cur = pi != null ? mxPartOks(q, ov0)[pi] : n in ov0 ? ov0[n] : q.auto;
+    const ov = { ...ov0, [key]: cur === true ? false : true };
+    const self = !canMark ? { selfOv: { ...(L.selfOv || {}), [key]: true } } : {};
     // 공식 점수는 낸 답 그대로(시간 넘겨 낸 것도). 시간을 넘긴 기록은 «시간 안» 점수도 참고로 같이 고친다
     const t = mxTally(L.questions, ov), tI = L.overSec ? mxTally(L.questions, ov, true) : null;
     const patch = { override: ov, score: t.score, got: t.got, correct: t.correct, pending: t.pending,
@@ -2552,16 +2668,30 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
   async function fixAns(n) {
     if (!canFix || saving || L.voided) return;
     const q = L.questions.find((x) => x.n === n);
-    const cur = q.answer == null ? "" : String(q.answer);
-    const v = window.prompt(L.name + " · " + mxQName(q) + " 답 고치기\n" + (q.type === "mc" ? "객관식 번호 1~5" : "숫자") + " (비우면 «안 씀»)", cur);
-    if (v == null || v.trim() === cur) return;
+    let value;
+    if (mxHasParts(q)) {   // 꼬리문제 — 칸마다 묻는다
+      const was = Array.isArray(q.answer) ? q.answer : [];
+      const nx = [];
+      for (let j = 0; j < q.parts.length; j++) {
+        const w = window.prompt(L.name + " · " + mxQName(q) + " " + q.parts[j].label + " 답 고치기 (비우면 «안 씀»)", String(was[j] || ""));
+        if (w == null) return;
+        nx.push(w.trim());
+      }
+      if (JSON.stringify(nx) === JSON.stringify(q.parts.map((_, j) => String(was[j] || "")))) return;
+      value = nx;
+    } else {
+      const cur = q.answer == null ? "" : Array.isArray(q.answer) ? q.answer.join(",") : String(q.answer);
+      const v = window.prompt(L.name + " · " + mxQName(q) + " 답 고치기\n" + (q.multi ? "고른 번호를 쉼표로 (예: 2,5)" : q.type === "mc" ? "객관식 번호 1~5" : "숫자") + " (비우면 «안 씀»)", cur);
+      if (v == null || v.trim() === cur) return;
+      value = v.trim();
+    }
     setSaving(true);
     try {
       const u = firebase.auth().currentUser;
       if (!u) throw new Error("로그인이 풀렸어요");
       const r = await fetch("/api/exam", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken: await u.getIdToken(), action: "fix", cid: L.cid, date: L.date, rid: L.rid, n, value: v.trim() }),
+        body: JSON.stringify({ idToken: await u.getIdToken(), action: "fix", cid: L.cid, date: L.date, rid: L.rid, n, value }),
       });
       let j = null; try { j = await r.json(); } catch (e) {}
       if (!r.ok) throw new Error((j && j.error) || "고치지 못했어요 (" + r.status + ")");
@@ -2580,8 +2710,11 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
   const slow = A.rows.filter((r) => r.sec > 0).sort((a, b) => b.sec - a.sec).slice(0, 3);
   const half = Math.ceil(N / 2);
   const firstHalf = A.rows.slice(0, half).reduce((a, r) => a + r.sec, 0);
-  const shown = (q, v) => (v == null || v === "" ? "–" : q.type === "mc" ? MX_CIRC[v] : q.type === "essay" ? "✓" : String(v));
-  const keyShown = (q) => (q.type === "essay" ? "–" : q.type === "mc" ? MX_CIRC[q.key] : [].concat(q.key).join(" / "));
+  const shown = mxAnsText;
+  const keyShown = mxKeyText;
+  // 꼬리문제 칸을 한 줄씩
+  const lines = (q, f) => <div className="mx-plines">{q.parts.map((p, j) => <span key={j}><small>{p.label}</small>{f(j)}</span>)}</div>;
+  const at = (v, j) => { const x = Array.isArray(v) ? v[j] : null; return x == null || x === "" ? "–" : x; };
 
   return (<>
     <div className="cm-card">
@@ -2644,15 +2777,22 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
               return (
                 <tr key={r.q.n}>
                   <td><button className="mx-qno" onClick={() => openQ(r.q.n)} title="문제 보기">{r.q.n}{r.q.label ? <small>{r.q.label}</small> : null}</button></td>
-                  <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{shown(r.q, r.q.answer)}
+                  <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{mxHasParts(r.q) ? lines(r.q, (j) => at(r.q.answer, j)) : shown(r.q, r.q.answer)}
                     {r.q.fixed ? <span className="mx-fixtag" title={"고친 선생님: " + (r.q.fixed.by || "")}>선생님 고침 · 원래 {shown(r.q, r.q.fixed.from)}</span> : null}
                     {canFix && !L.voided ? <button className="cm-link" style={{display: "block", fontSize: 11, margin: "2px auto 0"}} disabled={saving} onClick={() => fixAns(r.q.n)}>답 고치기</button> : null}
                     {r.q.late ? <div className="mx-latetag" title="시간이 끝난 뒤에 적거나 바꾼 답">시간 뒤{r.q.answerIn != null ? " · 그때 " + shown(r.q, r.q.answerIn) : ""}</div> : null}</td>
-                  <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{keyShown(r.q)}</td>
-                  <td>{markable(r.q)
+                  <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{mxHasParts(r.q) ? <>{lines(r.q, (j) => [].concat(r.q.parts[j].key).join(" / "))}{r.q.any || r.q.parts.some((p) => p.g != null) ? <div className="cm-hint" style={{fontSize: 11}}>{r.q.any ? "순서 무관" : "묶음 안 순서 무관"}</div> : null}</> : keyShown(r.q)}</td>
+                  <td>{mxHasParts(r.q) ? (
+                    <div className="mx-pmarks">{mxPartOks(r.q, L.override || {}).map((o, j) => {
+                      const c = o ? "o" : "x", t = o ? "O" : "X";
+                      return <span key={j}><small>{r.q.parts[j].label}</small>{markable(r.q)
+                        ? <button className={"mx-mark " + c} onClick={() => toggle(r.q.n, j)} title="눌러서 고치기">{t}</button>
+                        : <span className={"mx-mark " + c}>{t}</span>}</span>;
+                    })}</div>
+                  ) : markable(r.q)
                     ? <button className={"mx-mark " + (k === "u" ? "x" : k)} onClick={() => toggle(r.q.n)} title="눌러서 고치기">{txt}</button>
                     : <span className={"mx-mark " + (k === "u" ? "x" : k)}>{txt}</span>}
-                    {(L.selfOv || {})[r.q.n] ? <div className="mx-latetag" title="학생이 직접 O/X 를 고친 문항">스스로</div> : null}</td>
+                    {Object.keys(L.selfOv || {}).some((x) => x === String(r.q.n) || x.startsWith(r.q.n + ".")) ? <div className="mx-latetag" title="학생이 직접 O/X 를 고친 문항">스스로</div> : null}</td>
                   <td className={r.sec > avg * 2 ? "mx-long" : ""}>{r.sec ? mxClock(r.sec) : "–"}</td>
                   <td>{r.visits ? r.visits + "번" : "–"}</td>
                   <td>{r.changes > 1 ? (r.changes - 1) + "번" : ""}</td>
@@ -2865,14 +3005,14 @@ function MockExamLive({ cls }) {
 // 문항별 시간표(CSV) — 학생 × 문항 한 줄. 정답·적은 답·O/X·걸린 시간을 엑셀로 바로 본다 (반 «실전 시험» 탭 «반 결과 받기»)
 function mxTimeCsv(logs, cname) {
   const cell = (v) => { const t = v == null ? "" : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
-  const ans = (q, v) => v == null || v === "" ? "" : q.type === "mc" ? MX_CIRC[v] || v : v;
+  const ans = (q, v) => v == null || v === "" ? "" : mxAnsText(q, v);
   const head = ["날짜", "반", "시험지", "이름", "점수", "쓴 시간(초)", "번호", "학교 번호", "배점", "정답", "적은 답", "O/X", "걸린 시간(초)", "들른 횟수", "답 바꾼 횟수"];
   const rows = [];
   logs.forEach((l) => {
     const A = mxAnalyze(l);
     A.rows.forEach((r) => rows.push([l.date, cname(l.cid), l.title, l.name, l.score, Math.round(l.endT || 0),
-      r.q.n, r.q.label || "", r.q.pt == null ? "" : r.q.pt, ans(r.q, r.q.key), ans(r.q, r.q.answer),
-      r.ok === null ? "?" : r.ok ? "O" : "X", Math.round(r.sec), r.visits, r.changes]));
+      r.q.n, r.q.label || "", r.q.pt == null ? "" : r.q.pt, mxKeyText(r.q), ans(r.q, r.q.answer),
+      mxOxText(r.q, l.override || {}), Math.round(r.sec), r.visits, r.changes]));
   });
   return "﻿" + [head].concat(rows).map((r) => r.map(cell).join(",")).join("\r\n");
 }
