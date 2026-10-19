@@ -3513,6 +3513,10 @@ function StudentHomework({ cls, me }) {
 const hwLogCol = (cid, date) => dayDoc(cid, date).collection("hwLogs");
 const hwKey = (cid, sid) => "climath_hw_" + cid + "_" + sid;
 const HW_AWAY = 5 * 60;      // 화면을 이만큼(초) 안 봤으면 «그동안 풀고 있었나» 묻는다
+// 화면 자동 꺼짐 — 손대지 않은 채 이만큼(초) 지나서 화면이 숨으면 «꺼짐»으로 보고 이탈로 안 센다(10/19 마왕님).
+// 폰의 가장 짧은 자동 잠금이 안드로이드 15초 · 아이폰 30초라 그보다 조금 짧게. 화면 켜 두기(wakeLock)를 잡고 있던 때는
+// 저절로 꺼질 수 없으니 이 셈을 안 한다(그때 숨은 건 진짜 떠난 것)
+const HW_IDLE_OFF = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) ? 28 : 14;
 const HW_ONCE = 400;         // 한 번에 낼 수 있는 문항 (서버 HW_MAX_Q 와 같게)
 const HW_T = { teacher: true };
 const isHwBook = (e) => !!e && e.kind === "hw";
@@ -3699,7 +3703,7 @@ function PieceCard({ cls, me, ver }) {
           : <span key={p.pid} className="pc-chip" title={p.voucher ? "재고가 채워지면 여기서 바꿀 수 있어요" : ""}>{p.name}</span>))} <span className="cm-hint">{waitV.some((p) => !p.canSwap) ? "교환권은 재고가 채워지면 «바꾸기» 가 떠요" : ""}</span></div>}
       <div className="cm-hint" style={{lineHeight: 1.7, marginTop: 8}}>
         처음에 맞히면 조각 <b>1개</b> · 틀린 문제를 다시 풀어 맞혀도 <b>1개</b> · 번호 순서로 <b>{R.streak}문제 연속</b> 맞히면 <b>+1</b>. 조각 {R.cost}개가 모이면 구슬 하나 — 열면 기프티콘이 나올 수도 있어요.
-        풀기 화면을 떠나면(다른 앱 · 홈 · 화면 꺼짐) 기록돼요. {R.awayMin}초까지는 괜찮고, 하루에 {R.awayEvery}번째마다 조각 {R.awayPen}개가 빠져요.
+        풀기 화면을 떠나면(다른 앱 · 홈 · 전원 버튼 — 손대지 않아 화면이 저절로 꺼진 건 안 셈) 기록돼요. {R.awayMin}초까지는 괜찮고, 하루에 {R.awayEvery}번째마다 조각 {R.awayPen}개가 빠져요.
       </div>
       {got && (
         <div className="mx-modal"><div className="box" style={{textAlign: "center"}}>
@@ -3838,8 +3842,10 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
   // 이탈 — 풀기 화면을 떠났다 돌아옴. 기록(ev)에도 남긴다(2초 안 되는 깜빡임은 빼고). 조각 셈은 서버 hwAway(reportAway)
   function awayEv(x, gap, rested) {
     const tH = x.hiddenT != null ? x.hiddenT : nowT(x);
-    const y = { ...x, hiddenAt: null, hiddenT: null, ...(rested ? { pausedMs: (x.pausedMs || 0) + gap * 1000 } : {}) };
+    const y = { ...x, hiddenAt: null, hiddenT: null, hiddenOff: null, ...(rested ? { pausedMs: (x.pausedMs || 0) + gap * 1000 } : {}) };
     if (gap < 2) return y;
+    // 화면이 저절로 꺼졌던 것 — 이탈 기록은 없다. 쉬었다고 했으면 쉬기(pz)로만 남긴다
+    if (x.hiddenOff) { if (rested) y.ev = [...x.ev, { t: tH, k: "pz", s: Math.round(gap) }]; return y; }
     y.ev = [...x.ev, { t: tH, k: "away", r: rested ? tH : nowT(y), s: Math.round(gap), q: x.cur }];
     return y;
   }
@@ -3876,29 +3882,39 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
   // 집에서 푼다 — 폰을 내려놓고 자리를 뜨면 시계가 계속 간다. 화면을 오래 안 봤으면 돌아왔을 때 묻는다.
   // (화면이 꺼지면 «안 봄» 이 되므로 켜 두게 한다 — wakeLock)
   useEffect(() => {
-    let wake = null, gone = false;
+    let wake = null, gone = false, wakeLost = 0, touched = Date.now();
     const grab = async () => {
-      try { if (!gone && !wake && "wakeLock" in navigator) { wake = await navigator.wakeLock.request("screen"); wake.addEventListener("release", () => { wake = null; }); } } catch (e) {}
+      try { if (!gone && !wake && "wakeLock" in navigator) { wake = await navigator.wakeLock.request("screen"); wake.addEventListener("release", () => { wake = null; wakeLost = Date.now(); }); } } catch (e) {}
     };
+    const poke = () => { touched = Date.now(); };
     const check = () => {
       const x = sRef.current; if (!x || !x.hiddenAt) return;
       const gap = (Date.now() - x.hiddenAt) / 1000;
-      if (x.pzAt || x.endT != null) { put({ ...x, hiddenAt: null, hiddenT: null }); return; }
-      reportAway(Math.round(gap), x.cur, x.bookId);   // 쉬었다고 답해도 떠난 건 떠난 것 — 묻기 전에 바로 적는다
+      if (x.pzAt || x.endT != null) { put({ ...x, hiddenAt: null, hiddenT: null, hiddenOff: null }); return; }
+      if (!x.hiddenOff) reportAway(Math.round(gap), x.cur, x.bookId);   // 쉬었다고 답해도 떠난 건 떠난 것 — 묻기 전에 바로 적는다. 화면 꺼짐은 안 셈
       if (gap < HW_AWAY) { put(awayEv(x, gap, false)); return; }
       setAway({ from: x.hiddenAt, to: Date.now() });
     };
     const vis = () => {
       const x = sRef.current; if (!x || x.endT != null) return;
-      if (document.visibilityState === "hidden") { if (!x.hiddenAt && !x.pzAt) put({ ...x, hiddenAt: Date.now(), hiddenT: nowT(x) }); }
-      else { grab(); check(); }
+      if (document.visibilityState === "hidden") {
+        if (x.hiddenAt || x.pzAt) return;
+        // 화면 켜 두기를 잡고 있었으면(숨는 순간 풀린 것 포함) 저절로 꺼질 수 없다 → 떠난 것.
+        // 못 잡은 폰에서 한참 손대지 않다가 숨었으면 자동 꺼짐으로 본다
+        const held = !!wake || Date.now() - wakeLost < 1500;
+        const off = !held && (Date.now() - touched) / 1000 >= HW_IDLE_OFF;
+        put({ ...x, hiddenAt: Date.now(), hiddenT: nowT(x), hiddenOff: off || null });
+      } else { poke(); grab(); check(); }
     };
     grab(); check();   // 창이 닫혔다가(폰이 탭을 내림) 다시 열렸을 때도
     const leave = (e) => { if (sRef.current) { e.preventDefault(); e.returnValue = ""; } };
+    const POKE = ["pointerdown", "touchstart", "keydown", "scroll", "wheel"];
+    POKE.forEach((k) => document.addEventListener(k, poke, { capture: true, passive: true }));
     document.addEventListener("visibilitychange", vis);
     window.addEventListener("beforeunload", leave);
     return () => {
       gone = true;
+      POKE.forEach((k) => document.removeEventListener(k, poke, { capture: true }));
       document.removeEventListener("visibilitychange", vis);
       window.removeEventListener("beforeunload", leave);
       try { if (wake) wake.release(); } catch (e) {}
@@ -3907,7 +3923,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
   function awayAnswer(rested) {
     const x = sRef.current, a = away; setAway(null);
     if (!x) return;
-    put(a ? awayEv(x, (a.to - a.from) / 1000, rested) : { ...x, hiddenAt: null, hiddenT: null });
+    put(a ? awayEv(x, (a.to - a.from) / 1000, rested) : { ...x, hiddenAt: null, hiddenT: null, hiddenOff: null });
   }
 
   if (!S) return null;
@@ -4356,7 +4372,7 @@ function PieceBoard({ cls }) {
             ); })}</tbody>
         </table></div>
       )}
-      <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.6}}>받을 상품을 누르면 «줬음» 으로 지워져요. 이탈 = 풀기 화면을 {rules ? rules.awayMin : 5}초 넘게 떠남(다른 앱 · 홈 · 화면 꺼짐) — 어느 앱으로 갔는지는 몰라요.</div>
+      <div className="cm-hint" style={{marginTop: 8, lineHeight: 1.6}}>받을 상품을 누르면 «줬음» 으로 지워져요. 이탈 = 풀기 화면을 {rules ? rules.awayMin : 5}초 넘게 떠남(다른 앱 · 홈 · 전원 버튼 — 손대지 않아 화면이 저절로 꺼진 건 안 셈) — 어느 앱으로 갔는지는 몰라요.</div>
     </div>
     <div className="cm-card">
       <h3 className="cm-h3">구슬 상품 · 확률 <span className="cm-h-hint">(대상 반 공통 · 학생에겐 확률이 안 보여요)</span></h3>
