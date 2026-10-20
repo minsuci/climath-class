@@ -2379,6 +2379,31 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
 
   useEffect(() => {
     live(sRef.current);   // 새로고침으로 돌아왔을 때도 선생님 판에 다시 뜨게
+    // 푸는 도중 시험지가 고쳐졌으면(번호 순서 · 문항 종류 · 칸) 새로고침 때 맞춘다 — 시간(startedAt · ev)은 그대로.
+    //   10/20 광남고: 인쇄본과 번호가 달라 시험 중에 정답을 다시 올렸다. 기기엔 옛 문항 종류가 남아 21번(객관식)을 못 적었다.
+    //   종류가 그대로인 번호의 답은 살리고, 바뀐 번호의 답만 지운다(지운 것도 시간 흐름에 남긴다)
+    (async () => {
+      try {
+        const x0 = sRef.current; if (!x0 || x0.endT != null) return;
+        const d = await examListDoc().get();
+        const e = ((d.exists && d.data().exams) || []).find((y) => y.id === x0.examId);
+        const x = sRef.current; if (!e || !x || x.endT != null || x.sending) return;
+        const sig1 = (q) => JSON.stringify([q.n, q.type, !!q.multi, (q.parts || []).map((p) => p.label), !!q.any, q.label || "", q.pt || 0]);
+        if (e.questions.map(sig1).join() === x.questions.map(sig1).join()) return;
+        const old = {}; x.questions.forEach((q) => { old[q.n] = q; });
+        const kind = (q) => JSON.stringify([q.type, !!q.multi, (q.parts || []).length]);
+        const answers = {}, gone = [];
+        Object.keys(x.answers).forEach((k) => {
+          const n = Number(k), q = e.questions.find((y) => y.n === n), o = old[n];
+          if (q && o && kind(q) === kind(o)) answers[k] = x.answers[k]; else gone.push(n);
+        });
+        const t = nowT(x);
+        const cur = e.questions.some((q) => q.n === x.cur) ? x.cur : e.questions[0].n;
+        put({ ...x, questions: e.questions, answers, cur, ev: [...x.ev, ...gone.map((n) => ({ t, k: "ans", q: n, v: null }))] });
+        const q = e.questions.find((y) => y.n === cur), i = q && q.parts ? mxFirstEmpty(answers[cur], q.parts.length) : 0;
+        setPi(i); setBuf(mxBufFor(q, answers[cur], i));
+      } catch (err) {}
+    })();
     // 이미 끝난 시험(제출 실패 뒤 새로고침)이면 바로 다시 보낸다. 서버는 같은 rid 면 덮어쓴다
     if (sRef.current && sRef.current.endT != null) submit(sRef.current.reason || "submit");
     const t = setInterval(() => {
