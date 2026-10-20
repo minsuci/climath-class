@@ -271,7 +271,10 @@ async function resetStudentPin(res, { idToken, name }) {
   }
   // ⚠ 이름이 겹치면 누구 것을 지우는지 알 수 없다. PIN 은 이름 하나에 하나뿐이라
   //    한 사람만 초기화할 방법이 없다 — 동명이인은 이름을 A·B·C 로 갈라야 한다.
-  const dup = mine.length ? mine.filter((x) => x.member.pid).map((x) => x.member.pid)
+  // 끝난 반은 세지 않는다 — 8/31 에 끝난 «고1S 화목반» 명단에 옛 pid 로 남은 학생(박범의 · 민우영 ·
+  //   윤지섭 · 안현준)이 «같은 이름 둘» 로 잡혀 초기화가 막혔다(10/20). 끝난 반의 반별 PIN 은 아래에서 같이 지운다
+  const live = mine.filter((x) => !classEnded(x.cls));
+  const dup = mine.length ? (live.length ? live : mine).filter((x) => x.member.pid).map((x) => x.member.pid)
                           : people.map((p) => p.id);
   if (new Set(dup).size > 1) {
     res.status(409).json({ error: "같은 이름이 둘 이상이에요. 이름을 A·B·C 로 나눈 뒤 다시 해주세요" });
@@ -283,9 +286,10 @@ async function resetStudentPin(res, { idToken, name }) {
     await deleteDoc("classes/" + x.cls.id + "/students/" + x.member.id);
   }
   // 반이 없으면 기댈 defaultPin 도 없다. 로그인도 이때는 기본값으로 본다.
-  const def = String((mine.length && mine[0].member.defaultPin) || DEFAULT_PIN);
+  const first = mine.find((x) => !classEnded(x.cls)) || mine[0];
+  const def = String((first && first.member.defaultPin) || DEFAULT_PIN);
   res.status(200).json({ ok: true, name: nm, pin: def,
-                         classes: mine.map((x) => x.cls.name),
+                         classes: (live.length ? live : mine).map((x) => x.cls.name),
                          noClass: !mine.length });
 }
 
