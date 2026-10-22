@@ -119,6 +119,13 @@ function summary(e) {
     console.log("\n" + logs.length + "건 → " + out);
     return;
   }
+  // 반의 기본 시험지 — 학생 화면에서 먼저 골라져 있다 (10/22). id 를 비우면 기본을 푼다
+  //   node tools/exam-push.mjs --pick <반ID> <시험지ID>
+  if (has("--pick")) {
+    const i = process.argv.indexOf("--pick"), cid = process.argv[i + 1], id = process.argv[i + 2] || "";
+    const r = await call({ action: "examPick", cid, id });
+    console.log("기본 시험지:", JSON.stringify(r.by)); return;
+  }
   // 학생 지정(names)을 지금 명단으로 다시 맞춘다 — 자리 ID 를 «반ID/자리ID» 로 바꾼 뒤 (10/8) · 몇 번 돌려도 같다
   //   node tools/exam-push.mjs --resids [--dry]
   if (has("--resids")) {

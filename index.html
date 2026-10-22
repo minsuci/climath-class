@@ -2125,6 +2125,8 @@ const examLogCol = (cid, date) => dayDoc(cid, date).collection("examLogs");
 // 선생님 «지금 시험 중» — 학생 기기가 번호·푼 개수만 적는다(답은 안 적는다). 날마다 한 칸
 const examLiveCol = (cid, date) => dayDoc(cid, date).collection("examLive");
 const examListDoc = () => db.collection("appConfig").doc("examList");
+// 반마다 «오늘 볼 시험지» — 학생 화면 시험지 칸의 기본값. {by: {반ID: 시험지ID}} (10/22 — TOP 채다언이 01 을 다시 고른 일)
+const examPickDoc = () => db.collection("appConfig").doc("examPick");
 const mxKey = (cid, sid) => "climath_mock_" + cid + "_" + sid;
 function mxLoad(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } }
 function mxSave(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
@@ -2892,6 +2894,9 @@ function MockExamTab({ cls, me }) {
   const [mins, setMins] = useState("");
   const [past, setPast] = useState(null);
   const [again, setAgain] = useState(0);
+  const [pins, setPins] = useState(null);
+  const touched = useRef(false);   // 직접 고른 뒤에는 기본값으로 되돌리지 않는다
+  useEffect(() => examPickDoc().onSnapshot((d) => setPins((d.exists && d.data().by) || {}), () => setPins({})), []);
 
   useEffect(() => examListDoc().onSnapshot((d) => {
     const all = (d.exists && d.data().exams) || [];
@@ -2900,10 +2905,18 @@ function MockExamTab({ cls, me }) {
     setExams(all.filter((e) => !isHwBook(e) && (!e.test || me.teacher) && (!(e.cids || []).length || e.cids.includes(cls.id))
       && (me.teacher || mxOpenTo(e, cls.id, me.id))));
   }, () => setExams([])), [cls.id, me.teacher, me.id]);
+  // 기본 시험지: ① 선생님이 이 반에 정해 둔 것 ② 없으면 내가 아직 안 낸 첫 시험지 ③ 그래도 없으면 맨 앞
   useEffect(() => {
-    if (!exams || !exams.length || exams.find((e) => e.id === pick)) return;
-    setPick(exams[0].id); setMins(String(exams[0].minutes));
-  }, [exams]);
+    if (!exams || !exams.length) return;
+    if (touched.current && exams.find((e) => e.id === pick)) return;
+    const pin = pins && pins[cls.id], done = new Set((past || []).map((l) => l.examId));
+    const e = exams.find((x) => x.id === pin) || (past && exams.find((x) => !done.has(x.id))) || exams[0];
+    if (e.id !== pick) { setPick(e.id); setMins(String(e.minutes)); }
+  }, [exams, pins, past]);
+  async function setPin(id) {
+    try { await examPickDoc().set({ by: { [cls.id]: id }, updated: Date.now() }, { merge: true }); }
+    catch (e) { alert("기본 시험지를 못 바꿨어요: " + (e.message || e)); }
+  }
   useEffect(() => {
     let live = true;
     mxLogs(cls.id, me.id, 60).then((a) => { if (live) setPast(me.teacher ? a : a.filter((l) => !l.voided)); }).catch(() => { if (live) setPast([]); });
@@ -2939,9 +2952,12 @@ function MockExamTab({ cls, me }) {
         : (<>
           <label className="cm-label">시험지</label>
           <select className="cm-input" style={{margin: 0}} value={pick}
-            onChange={(e) => { setPick(e.target.value); const x = exams.find((y) => y.id === e.target.value); if (x) setMins(String(x.minutes)); }}>
-            {exams.map((e) => <option key={e.id} value={e.id}>{e.title} · {e.questions.length}문항 · {e.minutes}분{e.test ? " (시험용)" : ""}</option>)}
+            onChange={(e) => { touched.current = true; setPick(e.target.value); const x = exams.find((y) => y.id === e.target.value); if (x) setMins(String(x.minutes)); }}>
+            {exams.map((e) => <option key={e.id} value={e.id}>{pins && pins[cls.id] === e.id ? "★ " : ""}{e.title} · {e.questions.length}문항 · {e.minutes}분{e.test ? " (시험용)" : ""}</option>)}
           </select>
+          {me.teacher && pins && (pins[cls.id] === pick
+            ? <div className="cm-h-hint" style={{marginTop: 4}}>★ 이 반 학생들은 이 시험지가 먼저 골라져 있어요 · <a href="#" onClick={(e) => { e.preventDefault(); setPin(""); }}>기본 풀기</a></div>
+            : <button className="cm-btn" style={{marginTop: 6}} onClick={() => setPin(pick)}>★ 이 반 기본 시험지로</button>)}
           <label className="cm-label">제한 시간(분)</label>
           <input className="cm-input" style={{margin: 0, maxWidth: 120}} inputMode="numeric" value={mins}
             onChange={(e) => setMins(e.target.value.replace(/\D/g, ""))} />

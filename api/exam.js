@@ -1147,6 +1147,15 @@ export default async function handler(req, res) {
         if (!body.dry) await rebuildList();
         res.status(200).json({ ok: true, dry: !!body.dry, done }); return;
       }
+      // 반의 기본 시험지(appConfig/examPick.by) — {cid, id}. id 가 비면 기본을 푼다 (10/22)
+      if (body.action === "examPick") {
+        const cid = String(body.cid || ""), id = String(body.id || "");
+        if (!cid) { res.status(400).json({ error: "cid 가 필요해요" }); return; }
+        const cur = (await getDoc("appConfig/examPick").catch(() => null)) || {};
+        const by = { ...(cur.by || {}), [cid]: id };
+        await patchDoc("appConfig/examPick", { by, updated: Date.now() });
+        res.status(200).json({ ok: true, by }); return;
+      }
       if (body.action === "examDel") {
         await deleteDoc("examKeys/" + String(body.id || ""));
         const n = await rebuildList();
