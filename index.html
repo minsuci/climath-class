@@ -3805,6 +3805,184 @@ function hwSum(logs) {
            rate: tried ? Math.round((ok / tried) * 100) : null };
 }
 
+// ===== 오답 모아보기 (10/24) — 과제 채점 기록(hwLogs)만. 실전 시험(examLogs)은 섞지 않는다 =====
+// 학생 · 교재 · 번호마다 한 줄: 처음 시도가 X 면 오답(스스로 채점 X 포함, 안 적은 것은 뺀다).
+// 같은 기록에서 다시 풀어 맞혔거나(fin) 뒤 기록에서 맞히면 «고침». 처음 맞힌 번호를 뒤에 또 틀린 것은 오답으로 안 친다(처음 시도 기준)
+function hwWrongList(logs) {
+  const seen = {}, out = [];
+  (logs || []).filter((l) => !l.teacher).slice().sort((a, b) => (a.time || 0) - (b.time || 0)).forEach((l) => (l.questions || []).forEach((q) => {
+    if (q.answer == null || q.auto === null) return;
+    const k = l.sid + "|" + l.bookId + "|" + q.n, w = seen[k];
+    if (!w) {
+      seen[k] = q.auto ? { ok: true } : out[out.push({ sid: l.sid, name: l.name, bookId: l.bookId, title: l.title, n: q.n, u: q.u, date: l.date,
+        answer: q.answer, type: q.type, self: !!q.self, fixed: q.fin === true, log: l }) - 1];
+    } else if (!w.ok && !w.fixed && (q.auto || q.fin === true)) { w.fixed = true; w.fixLog = l; }
+  }));
+  return out;
+}
+// 책 번호(창고 교재 label «02단원 1번») — 없으면 «12번»
+const hwLabelOf = (book, n) => { const q = book && (book.questions || []).find((x) => x.n === n); return (q && q.label) || n + "번"; };
+// 복사용 한 줄 — «코어 공수1-1: 01단원 3번, 01단원 7번» · label 없는 교재는 «수평교: 3, 7, 12»
+function hwWrongText(title, book, ns) {
+  const lab = ns.some((n) => hwLabelOf(book, n) !== n + "번");
+  return title + ": " + (lab ? ns.map((n) => hwLabelOf(book, n)).join(", ") : ns.join(", "));
+}
+async function hwCopy(text, say) {
+  try { await navigator.clipboard.writeText(text); say("복사했어요 ✓"); } catch (e) { say("복사가 안 돼요 — 아래 글을 길게 눌러 직접 복사해 주세요"); }
+}
+
+// 선생님 «오답 모아보기» — 반 전체(번호마다 몇 명) · 학생별(번호 목록). 고친 것은 ✓ 로 남긴다
+function WrongBoard({ cls }) {
+  const books = useHwBooks(cls, HW_T);
+  const [logs, setLogs] = useState(null);
+  const [again, setAgain] = useState(0);
+  const [mode, setMode] = useState("class");
+  const [days, setDays] = useState(0);
+  const [bookId, setBookId] = useState("");
+  const [left, setLeft] = useState(false);     // 아직 못 맞힌 것만
+  const [minN, setMinN] = useState(1);         // 반 전체 — 틀린 학생 이만큼 이상
+  const [sid, setSid] = useState("");
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    let live = true; setLogs(null);
+    hwLogs(cls.id, null, 120).then((a) => { if (live) setLogs(a); }).catch(() => { if (live) setLogs([]); });
+    return () => { live = false; };
+  }, [cls.id, again]);
+  const bookOf = (id) => (books || []).find((b) => b.id === id);
+  const kids = (cls.roster || []).filter((r) => r && r.id && r.name && !r.teacher && !isEnded(r));
+  const since = days ? ymd(new Date(Date.now() - (days - 1) * 864e5)) : "";
+  const all = hwWrongList(logs).filter((w) => kids.some((r) => r.id === w.sid));
+  const W = all.filter((w) => w.date >= since && (!bookId || w.bookId === bookId) && (!left || !w.fixed));
+  const bookIds = [...new Set(W.map((w) => w.bookId))].sort((a, b) => ((bookOf(a) || {}).order || 0) - ((bookOf(b) || {}).order || 0) || String(a).localeCompare(String(b)));
+  const titleOf = (id) => (bookOf(id) || {}).title || (all.find((w) => w.bookId === id) || {}).title || id;
+  const say = (m) => { setMsg(m); setTimeout(() => setMsg(""), 4000); };
+  // 푼 학생 수(처음 시도) — «3/7명» 의 분모
+  const triedBy = {};
+  (logs || []).forEach((l) => { if (l.teacher) return; (l.questions || []).forEach((q) => { if (q.answer == null || q.auto === null) return;
+    const k = l.bookId + ":" + q.n; (triedBy[k] || (triedBy[k] = new Set())).add(l.sid); }); });
+  function csv() {
+    const cell = (v) => { const t = v == null ? "" : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+    const out = [["이름", "교재", "번호", "책 번호", "단원", "처음 낸 날", "처음 답", "지금"]];
+    W.slice().sort((a, b) => a.name.localeCompare(b.name) || String(a.bookId).localeCompare(String(b.bookId)) || a.n - b.n).forEach((w) => {
+      const b = bookOf(w.bookId);
+      out.push([w.name, titleOf(w.bookId), w.n, hwLabelOf(b, w.n), hwUnit(b, w), w.date, w.self ? "스스로 X" : hwAns(w, w.answer), w.fixed ? "고침" : "남음"]);
+    });
+    mxDownloadText(cls.name + "_오답_" + (since || "전체") + ".csv", "\ufeff" + out.map((r) => r.map(cell).join(",")).join("\r\n"));
+  }
+  const chip = (on, t, f, sub) => (
+    <button key={t} className="cm-chip" onClick={f} style={{border: "1px solid " + (on ? "var(--navy2)" : "#e3ddd3"), background: on ? "var(--navy2)" : "#fff",
+      color: on ? "#fff" : "var(--ink)", cursor: "pointer", fontSize: 14, padding: "6px 12px"}}>{t}{sub != null && <span style={{marginLeft: 5, opacity: .75, fontSize: 12}}>{sub}</span>}</button>);
+  const per = kids.map((r) => { const mine = W.filter((w) => w.sid === r.id); return { r, mine, left: mine.filter((w) => !w.fixed).length }; });
+  const cur = per.find((x) => x.r.id === sid);
+
+  return (<>
+    <div className="cm-card">
+      <h3 className="cm-h3">오답 모아보기 <span className="cm-h-hint">(과제 채점 · 처음 시도에서 틀린 문제)</span></h3>
+      <div className="cm-hint" style={{marginBottom: 10}}>
+        답을 적고 낸 문제 중 <b>처음에 틀린 것</b>만 모아요. 다시 풀어 맞혔으면 <b style={{color: "var(--muted)"}}>✓ 고침</b>으로 남고, 안 적은 번호는 안 들어가요. 실전 시험은 시험마다 따로 봐요.
+      </div>
+      <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10}}>
+        {chip(mode === "class", "반 전체", () => setMode("class"))}
+        {chip(mode === "kid", "학생별", () => setMode("kid"))}
+      </div>
+      <div style={{display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center"}}>
+        <select className="cm-input" style={{margin: 0, width: "auto"}} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          {[[0, "전부"], [30, "최근 30일"], [14, "최근 2주"], [7, "최근 7일"]].map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+        </select>
+        <select className="cm-input" style={{margin: 0, width: "auto"}} value={bookId} onChange={(e) => setBookId(e.target.value)}>
+          <option value="">교재 전부</option>
+          {[...new Set(all.map((w) => w.bookId))].map((id) => <option key={id} value={id}>{titleOf(id)}</option>)}
+        </select>
+        {mode === "class" && (
+          <select className="cm-input" style={{margin: 0, width: "auto"}} value={minN} onChange={(e) => setMinN(Number(e.target.value))}>
+            {[1, 2, 3, 5].map((v) => <option key={v} value={v}>{v === 1 ? "한 명이라도 틀림" : v + "명 이상 틀림"}</option>)}
+          </select>
+        )}
+        <label style={{display: "flex", gap: 6, alignItems: "center", fontSize: 14}}><input type="checkbox" checked={left} onChange={(e) => setLeft(e.target.checked)} />아직 못 맞힌 것만</label>
+        <button className="cm-link" onClick={() => setAgain((x) => x + 1)}>새로고침</button>
+        {W.length > 0 && <button className="cm-link" onClick={csv}>엑셀로 받기</button>}
+      </div>
+      {msg && <div className="cm-done">{msg}</div>}
+    </div>
+
+    {logs === null ? <div className="cm-card cm-empty">불러오는 중…</div>
+      : !W.length ? <div className="cm-card cm-empty">{all.length ? "이 조건에 맞는 오답이 없어요" : "아직 틀린 문제가 없어요"}</div>
+      : mode === "class" ? bookIds.map((id) => {
+        const b = bookOf(id), by = {};
+        W.filter((w) => w.bookId === id).forEach((w) => { (by[w.n] || (by[w.n] = [])).push(w); });
+        const rows = Object.entries(by).map(([n, ws]) => ({ n: Number(n), ws })).filter((x) => x.ws.length >= minN)
+          .sort((a, c) => c.ws.length - a.ws.length || a.n - c.n);
+        if (!rows.length) return null;
+        const ns = rows.map((x) => x.n).sort((a, c) => a - c);
+        return (
+          <div className="cm-card" key={id}>
+            <div style={{display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap"}}>
+              <h3 className="cm-h3" style={{margin: 0}}>{titleOf(id)}</h3>
+              <span className="cm-hint">{rows.length}문제</span>
+              <span style={{flex: 1}} />
+              <button className="cm-link" onClick={() => hwCopy(hwWrongText(titleOf(id), b, ns), say)}>번호 복사</button>
+            </div>
+            <div className="mx-tw" style={{marginTop: 8}}><table className="mx-table">
+              <thead><tr><th style={{textAlign: "left"}}>문제</th><th style={{textAlign: "left"}}>단원</th><th>틀림</th><th style={{textAlign: "left"}}>아직 못 맞힘</th><th style={{textAlign: "left"}}>고침</th></tr></thead>
+              <tbody>{rows.map(({ n, ws }) => { const t = (triedBy[id + ":" + n] || new Set()).size; return (
+                <tr key={n}>
+                  <td style={{textAlign: "left", whiteSpace: "nowrap"}}><b>{n}</b>{hwLabelOf(b, n) !== n + "번" && <small style={{display: "block", fontSize: 10.5, color: "var(--muted)"}}>{hwLabelOf(b, n)}</small>}</td>
+                  <td style={{textAlign: "left", fontSize: 12.5}}>{hwUnit(b, ws[0])}</td>
+                  <td style={{whiteSpace: "nowrap"}}><b style={{color: "#d6453f"}}>{ws.length}</b>{t ? "/" + t + "명" : "명"}</td>
+                  <td style={{textAlign: "left", fontSize: 13}}>{ws.filter((w) => !w.fixed).map((w) => w.name).join(", ")}</td>
+                  <td style={{textAlign: "left", fontSize: 13, color: "var(--muted)"}}>{ws.filter((w) => w.fixed).map((w) => w.name + "✓").join(", ")}</td>
+                </tr>); })}</tbody>
+            </table></div>
+          </div>
+        );
+      }) : (<>
+        <div className="cm-card">
+          <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+            {per.map(({ r, mine, left: lf }) => chip(sid === r.id, r.name, () => setSid(sid === r.id ? "" : r.id), mine.length ? (lf ? "남음 " + lf : "✓") : "0"))}
+          </div>
+          {!cur && <div className="cm-hint" style={{marginTop: 8}}>학생을 누르면 교재 · 단원별 오답 번호가 나와요. 옆 숫자는 아직 못 맞힌 개수.</div>}
+        </div>
+        {cur && <WrongOfKid name={cur.r.name} list={cur.mine} bookOf={bookOf} titleOf={titleOf} say={say} />}
+      </>)}
+  </>);
+}
+
+// 한 학생의 오답 — 교재 · 단원별 번호 칩(빨강 = 아직 · 회색 ✓ = 고침). 선생님 «학생별» · 학생 «내 오답» 이 같이 쓴다
+function WrongOfKid({ name, list, bookOf, titleOf, say, onOpen }) {
+  const ids = [...new Set(list.map((w) => w.bookId))];
+  if (!list.length) return <div className="cm-card cm-empty">{name ? name + " — " : ""}틀린 문제가 없어요</div>;
+  return ids.map((id) => {
+    const b = bookOf(id), mine = list.filter((w) => w.bookId === id).sort((a, c) => a.n - c.n);
+    const units = [...new Set(mine.map((w) => hwUnit(b, w)))];
+    const lf = mine.filter((w) => !w.fixed);
+    return (
+      <div className="cm-card" key={id}>
+        <div style={{display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap"}}>
+          <h3 className="cm-h3" style={{margin: 0}}>{name ? name + " · " : ""}{titleOf(id)}</h3>
+          <span className="cm-hint">틀림 {mine.length} · 아직 {lf.length}</span>
+          <span style={{flex: 1}} />
+          {say && lf.length > 0 && <button className="cm-link" onClick={() => hwCopy((name ? name + " " : "") + hwWrongText(titleOf(id), b, lf.map((w) => w.n)), say)}>아직 못 맞힌 번호 복사</button>}
+        </div>
+        {units.map((u) => (
+          <div key={u} style={{marginTop: 10}}>
+            {u && <div className="cm-label" style={{marginTop: 0}}>{u}</div>}
+            <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+              {mine.filter((w) => hwUnit(b, w) === u).map((w) => (
+                <span key={w.n} title={(w.fixed ? "고침 · " : "") + "처음 " + w.date + (w.self ? " · 스스로 X" : " · 처음 답 " + hwAns(w, w.answer))}
+                  onClick={onOpen ? () => onOpen(w.fixLog || w.log) : undefined}
+                  style={{display: "inline-block", padding: "4px 9px", borderRadius: 8, fontSize: 13.5, fontWeight: 700, cursor: onOpen ? "pointer" : "default",
+                          border: "1.5px solid " + (w.fixed ? "#d9d3c7" : "#d6453f"), color: w.fixed ? "var(--muted)" : "#b3261e", background: w.fixed ? "#f5f2ec" : "#fff"}}>
+                  {w.n}{hwLabelOf(b, w.n) !== w.n + "번" ? <small style={{fontWeight: 500, marginLeft: 4}}>{hwLabelOf(b, w.n)}</small> : null}{w.fixed ? " ✓" : ""}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  });
+}
+
 // ===== 조각 — 과제 보상 (설계 확정 2026-10-12) =====
 // 볼트 «20 작업/조각 보상 — 과제 집중 설계.md». 조각 · 이탈 · 구슬은 **전부 서버**(api/exam.js PC · hwPieces · hwAway · pcOpen).
 // 처음 맞힘 1 · 다시 맞힘 1 · 번호 순 5연속 +1 · 이탈(5초 넘게) 하루 3번째마다 −10 · 조각 20 = 구슬 1
@@ -4424,6 +4602,15 @@ function HwTab({ cls, me, home, onChanged }) {
         </table></div>
       </div>
     )}
+    {(() => {   // 내 오답 — 처음에 틀린 번호(빨강 = 아직 · ✓ = 고침). 누르면 그 기록 → «틀린 문제 다시 풀기»
+      const mineW = hwWrongList(past);
+      if (!mineW.length) return null;
+      const bk = (id) => (books || []).find((b) => b.id === id);
+      return (<>
+        <div className="cm-card cm-hint" style={{marginBottom: 0}}><b>내 오답</b> — 처음에 틀린 번호예요. <b style={{color: "#b3261e"}}>빨간 칸</b>은 아직 못 맞힌 것, 회색 ✓ 는 다시 풀어 맞힌 것. 번호를 누르면 그날 기록이 열리고 거기서 다시 풀 수 있어요.</div>
+        <WrongOfKid list={mineW} bookOf={bk} titleOf={(id) => (bk(id) || {}).title || (mineW.find((w) => w.bookId === id) || {}).title || id} onOpen={(l) => setView(l)} />
+      </>);
+    })()}
     <div className="cm-card">
       <h3 className="cm-h3">낸 과제</h3>
       {past === null ? <div className="cm-empty">불러오는 중…</div>
@@ -7255,7 +7442,7 @@ function AdminView() {
           // 종강한 반에서는 수업 로그를 새로 찍을 일이 없다
           ...(isIndividual(cls) && !isClassEnded(cls) ? [{ key: "c:live", ico: "◐", label: "수업 로그" }] : []),
           { key: "c:mock", ico: "⏱", label: "실전 시험" },
-          ...(hwBooksT && hwBooksT.length ? [{ key: "c:hwb", ico: "✎", label: "과제" }] : []),
+          ...(hwBooksT && hwBooksT.length ? [{ key: "c:hwb", ico: "✎", label: "과제" }, { key: "c:wrong", ico: "✕", label: "오답 모아보기" }] : []),
           ...(!isClassEnded(cls) ? [{ key: "c:shelf", ico: "▦", label: "교재 고르기" }] : []),
           { key: "c:notes", ico: "✎", label: "강의노트" },
           { key: "c:textbooks", ico: "⚙", label: "반 설정" },
@@ -8615,6 +8802,7 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
 
       {activeView === "mock" && <MockExamBoard cls={cls} />}
       {activeView === "hwb" && <HwBoard cls={cls} />}
+      {activeView === "wrong" && <WrongBoard cls={cls} />}
       {activeView === "shelf" && <ShelfPicker cls={cls} canEdit={canEdit} onClassChanged={onClassChanged} />}
 
       {activeView === "days" && (
