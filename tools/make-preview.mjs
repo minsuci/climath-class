@@ -214,11 +214,39 @@ const STUB = `
     var rules = function(){ return { cost: PCF.cost, streak: PCF.streak, awayMin: PCF.awayMin, awayEvery: PCF.awayEvery, awayPen: PCF.awayPen }; };
     var add = function(sid, n, k){ if (!n) return; var d = ledger(b.cid, sid); d.name = rowOf(sid).name; d.bal += n; d.earned += n; d.log.push({ t: Date.now(), k: k, d: n }); };
     var book = ((store["appConfig/examList"] || {}).exams || []).filter(function(e){ return e.id === b.bookId; })[0];
+    if (book && book.qc) book = Object.assign({}, book, { questions: Array.from(book.qc.t, function(c, i){ return { n: i + 1, type: c === "m" ? "mc" : c === "s" ? "short" : "essay" }; }) });   // 창고 교재 — 목록엔 짧게(qc)
     var evNow = cfg.event && cfg.event.day === kstDay() && (cfg.event.items || []).length ? cfg.event : null;
     var evWon = function(d){ return evNow && d.evDay === evNow.day ? d.evWins || 0 : 0; };
     var itemOf = function(p){ var l = p.ev ? ((cfg.event || {}).items || []) : (cfg.items || []); return l.filter(function(y){ return y.id === p.id; })[0]; };
     var lectOf = function(cid){ var d = store["hwLect/" + cid] || {}; return { b: d.b || {}, odd: !!d.odd, rel: d.rel || {} }; };
     var lHas = function(L, bid, n){ return (L.b[bid] || []).indexOf(n) >= 0 || (L.odd && n % 2 === 1 && (L.rel[bid] || []).indexOf(n) < 0); };
+    /* 학원 교재 고르기(10/24) — 서버 shelfAct 를 얇게. 창고는 PV_SHELF 네 권, 목록엔 서버처럼 짧게(qc) 싣는다 */
+    if (b.action === "shelfList") return ok({ ok: true, books: PV_SHELF.map(function(x){ return { key: x.key, title: x.title, subj: x.subj, series: x.series, seriesName: x.seriesName, vol: x.vol, order: x.order,
+      n: x.qs.length, auto: x.qs.filter(function(q){ return q.type !== "essay"; }).length }; }) });
+    if (b.action === "shelfHang" || b.action === "shelfDrop") {
+      var sb = PV_SHELF.filter(function(x){ return x.key === b.key; })[0];
+      if (!sb) return bad("창고에 없는 교재예요", 404);
+      var L5 = store["appConfig/examList"] || { exams: [] }, id5 = "과제-" + b.key, c5 = b.cid;
+      var e5 = L5.exams.filter(function(e){ return e.id === id5; })[0];
+      if (!e5) {
+        if (b.action === "shelfDrop") return ok({ ok: true });
+        e5 = { id: id5, kind: "hw", shelf: b.key, title: sb.title, units: sb.units, link: b.key.replace("-", " "), cids: [], allc: [], sids: [], questions: [], order: 0,
+               qc: { t: sb.qs.map(function(q){ return q.type === "mc" ? "m" : q.type === "short" ? "s" : "e"; }).join(""), u: sb.u, l: sb.l } };
+        L5.exams.push(e5);
+      }
+      e5.cids = e5.cids.filter(function(x){ return x !== c5; }); e5.allc = e5.allc.filter(function(x){ return x !== c5; });
+      e5.sids = e5.sids.filter(function(x){ return x.indexOf(c5 + "/") !== 0; });
+      var books5 = null;
+      if (b.action === "shelfHang") {
+        e5.cids.push(c5);
+        if ((b.sids || []).length) e5.sids = e5.sids.concat(b.sids.map(function(x){ return c5 + "/" + x; })); else e5.allc.push(c5);
+        var nm5 = b.key.replace("-", " ");
+        if (b.board && cls.type !== "individual" && !(cls.books || []).some(function(x){ return x.name === nm5; })) { books5 = (cls.books || []).concat({ name: nm5, total: sb.qs.length }); cls.books = books5; }
+      }
+      e5.test = !e5.cids.length;
+      store["appConfig/examList"] = L5; touch();
+      return ok(Object.assign({ ok: true, id: id5, cids: e5.cids }, books5 ? { books: books5 } : {}));
+    }
     if (b.action === "hwLectGet") return ok({ ok: true, lect: lectOf(b.cid) });
     if (b.action === "hwLectSet") {   // 미리보기 — 지급(hwLectPay)은 안 흉내 냄
       var L0 = lectOf(b.cid);
@@ -361,6 +389,17 @@ const STUB = `
     { id: "g1", name: "1,000원 기프티콘", price: 1000, pct: 30, stock: 95 }, { id: "g2", name: "2,000원 기프티콘", price: 2000, pct: 6, stock: 20 },
     { id: "g3", name: "3,000원 기프티콘", price: 3000, pct: 3, stock: 10 }, { id: "g4", name: "4,500원 기프티콘", price: 4500, pct: 1.2, stock: 4 },
     { id: "g5", name: "6,000원 기프티콘", price: 6000, pct: 0.8, stock: 2 }] };
+
+  /* 미리보기 창고 — 단원 둘, 단원마다 1번부터(«01단원 n번»). 정답은 위 교재A 와 같게 ①·1 */
+  var pvBook = function(key, title, subj, series, seriesName, vol, order, n){
+    var h = Math.ceil(n / 2), qs = Array.from({ length: n }, function(_, i){ var k = i + 1; return { n: k, type: k % 7 === 0 ? "essay" : k % 5 === 0 ? "short" : "mc" }; });
+    return { key: key, title: title, subj: subj, series: series, seriesName: seriesName, vol: vol, order: order, qs: qs, units: ["01 다항식", "02 방정식"],
+             u: [[0, 0], [h, 1]], l: [[0, "01단원 ", 1], [h, "02단원 ", 1]] };
+  };
+  var PV_SHELF = [pvBook("코어-공수1-1", "Unlimited Core 공통수학1 1권", "공통수학1", "코어", "Unlimited Core", "1권", 1, 120),
+    pvBook("코어-공수1-2", "Unlimited Core 공통수학1 2권", "공통수학1", "코어", "Unlimited Core", "2권", 2, 90),
+    pvBook("베켐-공수1-1", "내신 Basecamp 공통수학1 1권", "공통수학1", "베이스캠프", "내신 Basecamp", "1권", 301, 80),
+    pvBook("챌린지-대수1", "Unlimited Challenge 대수 1권", "대수", "챌린지", "Unlimited Challenge", "1권", 101, 60)];
 
   /* ---- 시험용 반 ---- 실제 시드 생성은 앱에서 없앴으므로 여기서 넣는다 */
   var t0 = Date.now();

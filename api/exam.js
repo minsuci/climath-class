@@ -213,16 +213,33 @@ async function resolveSids(cids, names) {
   return { sids };
 }
 
+// 창고 교재(학원 교재 정답 · shelf)는 한 권이 400~500문항이라 목록(appConfig/examList · 문서 하나 1MB 한도)에
+// 문항을 그대로 실으면 42권이면 775KB 다. 종류 글자 줄(t) · 단원 구간(u) · 이름표 구간(l)으로 줄여 싣고 화면이 풀어 쓴다(hwExpand).
+// n 은 1부터 연번이어야 한다(창고 교재는 그렇게 만든다)
+function shelfCompact(qs) {
+  const T = { mc: "m", short: "s", essay: "e" };
+  const t = qs.map((q) => T[q.type] || "e").join("");
+  const u = [], l = [];
+  qs.forEach((q, i) => {
+    if (q.u != null && (!u.length || u[u.length - 1][1] !== q.u)) u.push([i, q.u]);
+    const m = /^(.*?)(\d+)번$/.exec(q.label || "");
+    const last = l[l.length - 1];
+    if (m && !(last && last[1] === m[1] && last[2] + (i - last[0]) === Number(m[2]))) l.push([i, m[1], Number(m[2])]);
+  });
+  return { t, ...(u.length ? { u } : {}), ...(l.length ? { l } : {}) };
+}
+
 async function rebuildList() {
   const all = await listDocs("examKeys").catch(() => []);
   const exams = all.map((e) => ({
     id: e.id, title: e.title, minutes: e.minutes,
     cids: e.cids || [], sids: e.sids || [], test: !!e.test, lock: !!e.lock, order: e.order || 0,
     ...(e.kind === "hw" ? { kind: "hw", units: e.units || [], link: e.link || "", ...(e.free ? { free: true } : {}) } : {}),
-    questions: (e.questions || []).map((q) => ({ n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}),
+    ...(e.shelf ? { shelf: e.shelf, allc: e.allc || [], qc: shelfCompact(e.questions || []), questions: [] } : {}),
+    ...(e.shelf ? {} : { questions: (e.questions || []).map((q) => ({ n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}),
                                                  ...(q.label ? { label: q.label } : {}), ...(q.u != null ? { u: q.u } : {}),
                                                  ...(hasParts(q) ? { parts: q.parts.map((p) => ({ label: p.label, ...(p.g != null ? { g: p.g } : {}) })), ...(q.any ? { any: true } : {}) } : {}),
-                                                 ...(isMulti(q) ? { multi: true } : {}) })),
+                                                 ...(isMulti(q) ? { multi: true } : {}) })) }),
   })).sort((a, b) => (a.order - b.order) || String(a.title).localeCompare(String(b.title), "ko"));
   await patchDoc(LIST_PATH, { exams, updated: Date.now() });
   return exams.length;
@@ -839,6 +856,73 @@ async function pcSwap(res, claims, b) {
   if (bad) { await pcStockMove(p.id, +1, !!p.ev).catch(() => null); res.status(400).json({ error: bad }); return; }
   res.status(200).json({ ok: true, prize });
 }
+// ───────────── 학원 교재 고르기 (10/24) — 선생님 앱 «반 설정 → 학원 교재 고르기» ─────────────
+// 창고(shelf/{key}) 한 권은 examKeys/«과제-{key}» 문서 하나 — 여러 반이 같이 쓴다(반마다 복사하면 목록이 1MB 를 넘는다).
+//   cids  — 건 반들
+//   allc  — 그중 «반 전체»로 건 반(학생 지정이 없는 반). sids 가 있어도 이 반 학생은 다 낸다
+//   sids  — «반ID/자리ID» — 학생만 골라 건 반의 학생들
+//   link  — 반 교재(번호표) 이름 = 창고 짧은 이름(«코어 공수1-1»). 반 교재에 같은 이름이 없으면 따로 카드로 뜬다
+// 마지막 반이 빠지면 test(선생님만 보임)로 숨긴다 — cids 가 비면 «모든 반» 이 되기 때문. 기록(hwLogs)은 그대로 남는다
+const SHELF_PRE = "과제-";
+const shelfName = (key) => String(key).replace("-", " ");   // 첫 «-» 만 — «코어-공수1-1» → «코어 공수1-1»
+async function shelfAct(res, claims, b) {
+  const cid = String(b.cid || "");
+  if (!(await pcTeacher(res, claims, cid))) return;
+  if (b.action === "shelfList") {
+    const idx = await getDoc("shelf/_index").catch(() => null);
+    res.status(200).json({ ok: true, books: (idx && idx.books) || [] }); return;
+  }
+  if (!cid) { res.status(400).json({ error: "반이 필요해요" }); return; }
+  const key = String(b.key || "");
+  if (!/^[0-9A-Za-z가-힣_.\-]{2,40}$/.test(key)) { res.status(400).json({ error: "교재가 이상해요" }); return; }
+  const id = SHELF_PRE + key, path = "examKeys/" + id;
+  const cls = await getDoc("classes/" + cid).catch(() => null);
+  if (!cls) { res.status(404).json({ error: "반이 없어요" }); return; }
+  let book = null;
+  if (b.action === "shelfHang") {
+    book = await getDoc("shelf/" + key).catch(() => null);
+    if (!book) { res.status(404).json({ error: "창고에 없는 교재예요" }); return; }
+  }
+  const ids = new Set((cls.roster || []).filter((r) => r && r.id && !r.teacher).map((r) => r.id));
+  const pick = b.action === "shelfHang" && Array.isArray(b.sids) ? [...new Set(b.sids.map(String))] : [];
+  if (pick.some((x) => !ids.has(x))) { res.status(400).json({ error: "이 반 명단에 없는 학생이 있어요" }); return; }
+  // 같은 교재를 두 선생님이 동시에 걸면 cids 가 엇갈린다 — 읽은 판이 그대로일 때만 쓴다(아니면 다시)
+  for (let tries = 0; tries < 5; tries++) {
+    const { doc: cur, v } = await getDocV(path);
+    if (cur && (cur.kind !== "hw" || cur.shelf !== key)) { res.status(409).json({ error: "같은 이름의 다른 교재가 있어요 — 관리자에게" }); return; }
+    const others = (cur ? cur.sids || [] : []).filter((x) => !String(x).startsWith(cid + "/"));
+    let cids = (cur ? cur.cids || [] : []).filter((x) => x !== cid);
+    let allc = (cur ? cur.allc || [] : []).filter((x) => x !== cid);
+    let sids = others;
+    if (b.action === "shelfHang") {
+      cids = cids.concat(cid);
+      if (pick.length) sids = others.concat(pick.map((x) => cid + "/" + x));
+      else allc = allc.concat(cid);
+    } else if (!cur) { res.status(200).json({ ok: true }); return; }
+    // 반 전체로 건 반만 남았으면 sids 는 비워도 된다 — 그래도 남겨 두면 «정해진 학생만» 이 다른 반에 새지 않게 allc 가 막는다
+    const src = book || cur;
+    const data = {
+      title: String(src.title || key), kind: "hw", shelf: key, units: src.units || [], link: shelfName(key),
+      questions: src.questions || [], cids, allc, sids, names: [],
+      test: !cids.length, lock: false, free: false, order: cur ? cur.order || 0 : 0, updated: Date.now(),
+    };
+    if (await patchDocIf(path, data, null, v)) {
+      // 번호표에도 — 반 교재(이름 · 문항 수)로 넣는다. 개별진도반은 학생마다 교재라 안 넣는다(따로 카드로 뜬다)
+      let books = null;
+      if (b.action === "shelfHang" && b.board && cls.type !== "individual") {
+        const nm = shelfName(key), cb = cls.books || [];
+        if (!cb.some((x) => (x && x.name) === nm)) {
+          books = cb.concat({ name: nm, total: (src.questions || []).length });
+          await patchDoc("classes/" + cid, { books });
+        }
+      }
+      await rebuildList();
+      res.status(200).json({ ok: true, id, cids, open: !data.test, ...(books ? { books } : {}) }); return;
+    }
+  }
+  res.status(409).json({ error: "다른 선생님이 같은 교재를 막 바꿨어요 — 다시 눌러 주세요" });
+}
+
 // 선생님 — 담당 반인지(관리자는 다)
 async function pcTeacher(res, claims, cid) {
   if (!(claims.role === "teacher" || claims.role === "owner")) { res.status(403).json({ error: "선생님만 할 수 있어요" }); return false; }
@@ -978,7 +1062,9 @@ async function hwSubmit(res, claims, b) {
   const key = await getDoc("examKeys/" + bookId).catch(() => null);
   if (!key || key.kind !== "hw") { res.status(404).json({ error: "그 교재가 없어요" }); return; }
   if ((key.cids || []).length && !key.cids.includes(cid) && !who.teacher) { res.status(403).json({ error: "이 반 교재가 아니에요" }); return; }
-  if ((key.sids || []).length && !who.teacher && !key.sids.includes(cid + "/" + sid) && !key.sids.includes(sid)) { res.status(403).json({ error: "이 교재는 정해진 학생만 낼 수 있어요" }); return; }
+  // 창고 교재는 반을 다 빼면 cids 가 빈다 — 빈 cids 를 «모든 반» 으로 읽지 않는다
+  if (key.shelf && !(key.cids || []).includes(cid)) { res.status(403).json({ error: "이 반에서 뺀 교재예요" }); return; }
+  if ((key.sids || []).length && !who.teacher && !(key.allc || []).includes(cid) && !key.sids.includes(cid + "/" + sid) && !key.sids.includes(sid)) { res.status(403).json({ error: "이 교재는 정해진 학생만 낼 수 있어요" }); return; }
   const byN = {}; (key.questions || []).forEach((q) => { byN[q.n] = q; });
   const nums = [...new Set((Array.isArray(b.nums) ? b.nums : []).map(Number))].filter((n) => byN[n]).sort((x, y) => x - y);
   if (!nums.length) { res.status(400).json({ error: "푼 번호가 없어요" }); return; }
@@ -1155,6 +1241,24 @@ export default async function handler(req, res) {
         const by = { ...(cur.by || {}), [cid]: id };
         await patchDoc("appConfig/examPick", { by, updated: Date.now() });
         res.status(200).json({ ok: true, by }); return;
+      }
+      // 학원 교재 정답 창고 올리기 (10/24) — {books:[{key, meta, title, units, questions}]}. shelf/{key} 에 통째, shelf/_index 에 목록.
+      // shelf 는 보안 규칙상 앱(학생·선생님)이 직접 못 읽는다 — 정답이 들어 있다. 선생님은 shelfList/shelfHang 으로만
+      if (body.action === "shelfPut") {
+        const books = Array.isArray(body.books) ? body.books : [];
+        if (!books.length) { res.status(400).json({ error: "books 가 비었어요" }); return; }
+        for (const b of books) {
+          if (!/^[0-9A-Za-z가-힣_.\-]{2,40}$/.test(String(b.key || "")) || !Array.isArray(b.questions) || !b.questions.length) { res.status(400).json({ error: "이상한 교재: " + b.key }); return; }
+          const bad = b.questions.findIndex((q, i) => q.n !== i + 1 || !["mc", "short", "essay"].includes(q.type));
+          if (bad >= 0) { res.status(400).json({ error: b.key + " " + (bad + 1) + "번째 문항 — n 은 1부터 연번 · type 은 mc/short/essay" }); return; }
+          await patchDoc("shelf/" + b.key, { key: b.key, title: String(b.title || b.key), units: b.units || [], meta: b.meta || {}, questions: b.questions, updated: Date.now() });
+        }
+        const cur = (await getDoc("shelf/_index").catch(() => null)) || {};
+        const idx = {}; (cur.books || []).forEach((m) => { idx[m.key] = m; });
+        books.forEach((b) => { idx[b.key] = { key: b.key, title: String(b.title || b.key), ...(b.meta || {}), n: b.questions.length,
+          auto: b.questions.filter((q) => q.type !== "essay").length }; });
+        await patchDoc("shelf/_index", { books: Object.values(idx), updated: Date.now() });
+        res.status(200).json({ ok: true, put: books.length, total: Object.keys(idx).length }); return;
       }
       if (body.action === "examDel") {
         await deleteDoc("examKeys/" + String(body.id || ""));
@@ -1356,6 +1460,7 @@ export default async function handler(req, res) {
     if (body.action === "hwAway") return await hwAway(res, claims, body);
     if (["pcItemsGet", "pcItemsSet", "pcEventSet", "pcCouponAdd", "pcCouponDel", "pcBoard", "pcGive", "pcAdjust", "hwLectGet", "hwLectSet"].includes(body.action)) return await pcTeacherAct(res, claims, body);
     if (body.action === "hkRemove") return await hkRemove(res, claims, body);
+    if (["shelfList", "shelfHang", "shelfDrop"].includes(body.action)) return await shelfAct(res, claims, body);
     res.status(400).json({ error: "그런 동작이 없어요" });
   } catch (e) {
     console.error("[exam]", e);

@@ -699,6 +699,16 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - 학생 결과 화면 «🧩 조각 +N» = pieces.pts + log.fixed + 스스로 채점 O 수(서버 장부와 같은 셈)
 - 미리보기: `tools/make-preview.mjs` 에 가짜 `/api/exam`(과제 채점 · 조각 · 이벤트 · 바꾸기) — 일반반 `c-reg` 가 대상(김서진·임서윤·김태윤), 교재A 정답은 «객관식 ①, 단답 1», 25번은 스스로 채점, «조각 시험» 20문항은 아무 답이나 정답. 조각 문서는 sessionStorage `__pvPc` 에 남아 선생님↔학생 화면을 오가도 이어진다(처음부터 하려면 지울 것). 서버 시험은 스크래치 `pc2.mjs`(35개)
 
+### 학원 교재 고르기 (`ShelfPicker` · `shelfAct`, 2026-10-24)
+- 학원 교재(코어·챌린지·베이스·베이스캠프·96%·퍼펙트·BASE) 빠른정답을 JSON 으로 옮긴 **창고**가 서버 `shelf/{key}`(정답 통째) · `shelf/_index`(목록 — 정답 없음)에 있다. 규칙 맨 끝 거절이라 앱은 못 읽는다. 올리기 = `node tools/shelf-push.mjs`(도구 열쇠 `shelfPut`, 창고 폴더 = 바탕화면 `변형교재\_클래스앱도구\교재 정답`, 만드는 곳 `변형교재\_교재정답_scripts`). `--dry` 로 과목·교재·권 표만
+- 선생님 반 메뉴 **«교재 고르기»**(키 `c:shelf`, 끝난 반엔 안 뜸): 과목 → 교재 → 권 → 반 전체/학생 고르기 → 걸기. `shelfList` · `shelfHang{cid,key,sids?,board?}` · `shelfDrop{cid,key}` — 담당 반만(`pcTeacher`)
+- **한 권 = examKeys `과제-{key}` 문서 하나를 여러 반이 같이 쓴다**(반마다 복사하면 목록 1MB 를 넘는다). `cids`=건 반 · `allc`=그중 «반 전체» 반 · `sids`=«반ID/자리ID»(학생만 고른 반). `mxOpenTo` · `hwSubmit` 이 `allc` 를 본다. 마지막 반을 빼면 `test:true` + cids 빔 — **빈 cids 를 «모든 반» 으로 읽지 않게** 화면(`useHwBooks`)·서버(`hwSubmit`) 둘 다 `shelf` 면 막는다. 빼도 hwLogs 는 남는다
+- 목록(`appConfig/examList`)엔 창고 교재 문항을 **짧게** 싣는다: `qc{t:"msse…", u:[[자리,단원]…], l:[[자리,앞말,첫 번호]…]}` + `questions:[]`. 화면 `hwExpand` 가 풀어 `label`(«02단원 1번»)까지 되살린다 — 서버 `shelfCompact` 와 짝, 한쪽만 고치지 말 것. 42권 다 걸어도 목록 38KB. 창고 교재 n 은 1부터 연번이어야 한다(shelfPut 이 막음)
+- `link` = 창고 이름 첫 «-» 만 띄운 것(«코어 공수1-1»). «번호표에도 넣기» 면 반 교재에 그 이름·문항 수를 더한다(개진반 빼고). 번호표에 없는 link 는 학생 화면에 **따로 카드**(`loose` — 10/24 전엔 link 가 있으면 아예 안 보였다)
+- 풀기 화면·결과 표에 `label`(책 번호)을 같이 보인다 — 학생이 책 해설에서 찾을 번호. run 상태 `questions` 에 label 을 실어 둔다
+- 선생님 도구 `class.mjs` 의 과제교재올리기·열기·지우기는 `shelf` 문서를 거절한다(여러 반이 같이 씀). 도구 `과제교재걸기` 는 반 하나에 따로 복사(`과제-{key}-{반}`) — 앱이 기본
+- 미리보기: 가짜 `/api/exam` 에 창고 네 권(`PV_SHELF`) · shelfList/Hang/Drop. 학생↔선생님 오갈 때 examList·c-reg 는 `__pvPc` 에 직접 넣어야 남는다
+
 ### 앱 설치(PWA) — 학생 앱 · 선생님 앱 따로 (2026-10-10)
 - 팀체크와 같은 꼴: 루트 `sw.js`(캐시 **안 함** — 설치 조건만 채우는 빈 fetch 처리기. 캐시를 넣으면 배포 직후 옛 판이 뜬다)
 - **앱이 두 개다.** 학생 앱 `manifest.json`(id `/`, C 아이콘 `icon-192/512/mask` · `apple-touch-icon.png`) / 선생님 앱 `manifest-admin.json`(id·start_url·scope 모두 `/t/`, T 아이콘 `icon-t-*` · `apple-touch-icon-t.png`). `/t/` 는 `vercel.json` rewrite 로 같은 index.html 이고 `IS_T_PATH` 면 관리자 화면(옛 `?admin=1` 도 그대로 된다). `<head>` 의 작은 스크립트가 주소를 보고 manifest 를 골라 붙인다 — 그래서 manifest 링크가 HTML 에 직접 안 적혀 있다

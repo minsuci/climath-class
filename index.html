@@ -2883,6 +2883,7 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
 function mxOpenTo(e, cid, sid) {
   const s = e.sids || [];
   if (!s.length) return true;
+  if ((e.allc || []).includes(cid)) return true;   // 학원 교재 고르기 — 이 반은 반 전체로 걸었다(다른 반은 학생만 골랐어도)
   return s.some((x) => String(x).indexOf("/") >= 0) ? s.includes(cid + "/" + sid) : s.includes(sid);
 }
 function MockExamTab({ cls, me }) {
@@ -3645,9 +3646,11 @@ function StudentHomework({ cls, me }) {
   }
   if (!done || hwBooks === null) return <div className="cm-card cm-empty">불러오는 중…</div>;
   const myBooks = getStudentBooks(cls, me);
-  const byLink = {}; hwBooks.forEach((h) => { if (h.link && !byLink[h.link]) byLink[h.link] = h; });
-  // 반 교재에 안 이어진 과제 교재(예: «조각 시험» — 아무 답이나 정답) — 따로 잠근 카드로 띄운다
-  const loose = hwBooks.filter((h) => !h.link && (h.questions || []).length);
+  const myNames = new Set(myBooks.map((b) => b.name));
+  const byLink = {}; hwBooks.forEach((h) => { if (h.link && myNames.has(h.link) && !byLink[h.link]) byLink[h.link] = h; });
+  // 반 교재에 안 이어진 과제 교재(예: «조각 시험» — 아무 답이나 정답 · 번호표에 안 넣은 학원 교재) — 따로 잠근 카드로 띄운다.
+  // link 가 있어도 이 학생의 반 교재에 그 이름이 없으면 여기로 온다(10/24 — 전엔 아예 안 보였다)
+  const loose = hwBooks.filter((h) => !(h.link && byLink[h.link] === h) && (h.questions || []).length);
   const anyLocked = myBooks.some((b) => byLink[b.name]) || loose.length > 0;
   const anyFree = myBooks.some((b) => !byLink[b.name]);
   const cards = (ctl) => (<>
@@ -3697,6 +3700,17 @@ const HW_IDLE_OFF = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.
 const HW_ONCE = 400;         // 한 번에 낼 수 있는 문항 (서버 HW_MAX_Q 와 같게)
 const HW_T = { teacher: true };
 const isHwBook = (e) => !!e && e.kind === "hw";
+// 창고 교재(학원 교재 고르기)는 목록에 문항을 짧게 싣는다 — api/exam.js shelfCompact 의 짝.
+// t: 종류 글자 줄(m 객관식 · s 단답 · e 서술, 번호는 1부터 연번) · u: [시작 자리, 단원] 구간 · l: [시작 자리, 앞말, 첫 번호] 구간 → «07단원 23번»
+const HW_TYPE = { m: "mc", s: "short", e: "essay" };
+function hwExpand(e) {
+  if (!e || !e.qc) return e;
+  const qs = Array.from(e.qc.t || "", (c, i) => ({ n: i + 1, type: HW_TYPE[c] || "essay" }));
+  const runs = (rs, f) => (rs || []).forEach((r, k) => { const end = k + 1 < rs.length ? rs[k + 1][0] : qs.length; for (let i = r[0]; i < end; i++) f(qs[i], r, i); });
+  runs(e.qc.u, (q, r) => { q.u = r[1]; });
+  runs(e.qc.l, (q, r, i) => { q.label = r[1] + (r[2] + i - r[0]) + "번"; });
+  return { ...e, questions: qs };
+}
 // 이 반에 걸린 과제 교재. 선생님 판도 같이 쓴다(cls 가 없으면 빈 목록)
 function useHwBooks(cls, me) {
   const cid = cls ? cls.id : "", tch = !!(me && me.teacher);
@@ -3705,7 +3719,8 @@ function useHwBooks(cls, me) {
     if (!cid) { setBooks([]); return; }
     return examListDoc().onSnapshot((d) => {
       const all = (d.exists && d.data().exams) || [];
-      setBooks(all.filter((e) => isHwBook(e) && (!e.test || tch) && (!(e.cids || []).length || e.cids.includes(cid)) && (tch || !me || !me.id || mxOpenTo(e, cid, me.id))));   // names 로 건 교재는 그 학생만(10/12)
+      // 창고 교재(shelf)는 반을 다 빼면 cids 가 빈다 — 그때 «모든 반» 으로 보이지 않게 건 반에서만
+      setBooks(all.filter((e) => isHwBook(e) && (!e.test || tch) && ((e.cids || []).length ? e.cids.includes(cid) : !e.shelf) && (tch || !me || !me.id || mxOpenTo(e, cid, me.id))).map(hwExpand));   // names 로 건 교재는 그 학생만(10/12)
     }, () => setBooks([]));
   }, [cid, tch, me && me.id]);
   return books;
@@ -4156,7 +4171,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
       {toast && <div className="pc-toast">{toast}</div>}
       <div className="mx-body">
         <div className="mx-q">
-          <div className="mx-num">{q.n}번<small>{q.type === "essay" ? "스스로 채점" : MX_TYPE[q.type]}{unit ? " · " + unit : ""}{lectSet.has(q.n) ? " · 수업 풀이 — 조각 보류" : ""}</small></div>
+          <div className="mx-num">{q.n}번{q.label && <span className="mx-lb">{q.label}</span>}<small>{q.type === "essay" ? "스스로 채점" : MX_TYPE[q.type]}{unit ? " · " + unit : ""}{lectSet.has(q.n) ? " · 수업 풀이 — 조각 보류" : ""}</small></div>
           {S.retry && <div className="mx-note" style={{marginTop: 8}}>처음에 틀린 문제예요. 다시 풀어서 답을 적어요 — 처음 답은 그대로 남아요.</div>}
           {body}
           <div className="mx-foot">
@@ -4245,6 +4260,7 @@ function HwResult({ log: log0, book, onBack, onRetry, canSelf }) {
   const [busy, setBusy] = useState(false);
   useEffect(() => { setLog(log0); }, [log0]);
   const rows = log.questions || [];
+  const lbl = {}; ((book && book.questions) || []).forEach((x) => { if (x.label) lbl[x.n] = x.label; });   // 창고 교재 — 책 번호
   const selfTodo = rows.filter((q) => q.auto === null && q.answer != null);
   // 앱에 못 적는 답 — 책 빠른정답을 보고 학생이 정한다. 한 번 정하면 못 바꾼다(서버 hwSelf)
   async function mark(n, ok) {
@@ -4295,7 +4311,7 @@ function HwResult({ log: log0, book, onBack, onRetry, canSelf }) {
           const f = hwFirst(q);
           return (
             <tr key={q.n}>
-              <td><b>{q.n}</b>{q.lect ? <small style={{display: "block", fontSize: 10, fontWeight: 800, color: "#9a6b00"}}>수업</small> : null}</td>
+              <td><b>{q.n}</b>{lbl[q.n] ? <small style={{display: "block", fontSize: 10.5, color: "var(--muted)", whiteSpace: "nowrap"}}>{lbl[q.n]}</small> : null}{q.lect ? <small style={{display: "block", fontSize: 10, fontWeight: 800, color: "#9a6b00"}}>수업</small> : null}</td>
               {book && (book.units || []).length ? <td style={{textAlign: "left", fontSize: 12.5}}>{hwUnit(book, q)}</td> : null}
               <td>{hwAns(q, q.answer)}</td>
               <td style={{fontWeight: 800, color: f === "O" ? "var(--green)" : f === "X" ? "#d6453f" : "var(--muted)", whiteSpace: "nowrap"}}>
@@ -4355,7 +4371,7 @@ function HwTab({ cls, me, home, onChanged }) {
     const first = (at && bk.questions.find((q) => q.n === at)) ? at : (bk.questions.find((q) => !d.has(q.n)) || bk.questions[0]).n;
     begin({ rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), bookId: bk.id, title: bk.title,
             units: bk.units || [], all: true, cur: first, ev: [{ t: 0, k: "go", q: first }],
-            questions: bk.questions.map((q) => ({ n: q.n, type: q.type, ...(q.u != null ? { u: q.u } : {}) })) });
+            questions: bk.questions.map((q) => ({ n: q.n, type: q.type, ...(q.u != null ? { u: q.u } : {}), ...(q.label ? { label: q.label } : {}) })) });   // label — 창고 교재 책 번호
   }
   const ctl = {
     start: (bk, n) => start(bk, n),
@@ -4365,7 +4381,8 @@ function HwTab({ cls, me, home, onChanged }) {
   function retry(log, wrong) {
     const bk = (books || []).find((b) => b.id === log.bookId);
     begin({ rid: log.rid, bookId: log.bookId, title: log.title, units: (bk && bk.units) || [], retry: { date: log.date, rid: log.rid },
-            questions: wrong.map((q) => ({ n: q.n, type: q.type, ...(q.u != null ? { u: q.u } : {}) })) });
+            questions: wrong.map((q) => { const o = bk && bk.questions.find((x) => x.n === q.n);
+              return { n: q.n, type: q.type, ...(q.u != null ? { u: q.u } : {}), ...(o && o.label ? { label: o.label } : {}) }; }) });
   }
 
   const runBook = running ? (mxLoad(K) || {}).bookId : null;
@@ -7238,6 +7255,7 @@ function AdminView() {
           ...(isIndividual(cls) && !isClassEnded(cls) ? [{ key: "c:live", ico: "◐", label: "수업 로그" }] : []),
           { key: "c:mock", ico: "⏱", label: "실전 시험" },
           ...(hwBooksT && hwBooksT.length ? [{ key: "c:hwb", ico: "✎", label: "과제" }] : []),
+          ...(!isClassEnded(cls) ? [{ key: "c:shelf", ico: "▦", label: "교재 고르기" }] : []),
           { key: "c:notes", ico: "✎", label: "강의노트" },
           { key: "c:textbooks", ico: "⚙", label: "반 설정" },
         ] : []),
@@ -8596,6 +8614,7 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
 
       {activeView === "mock" && <MockExamBoard cls={cls} />}
       {activeView === "hwb" && <HwBoard cls={cls} />}
+      {activeView === "shelf" && <ShelfPicker cls={cls} canEdit={canEdit} onClassChanged={onClassChanged} />}
 
       {activeView === "days" && (
         <div className="cm-card">
@@ -8664,6 +8683,135 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
       </>)}
     </div>
     </>
+  );
+}
+
+// ===== 학원 교재 고르기 (10/24) — 과목 → 교재 → 권 → 대상 =====
+// 정답은 팀장이 미리 옮겨 둔 창고(서버 shelf · 앱은 못 읽음)에 있다. 고르면 그 반 학생 «과제» 탭에 «답 내기» 교재로 뜬다.
+// 한 권은 여러 반이 같이 쓰는 문서 하나(api/exam.js shelfAct). 빼도 낸 기록은 남는다
+const SHELF_SUBJ = ["공통수학1", "공통수학2", "대수", "미적분Ⅰ", "미적분Ⅱ"];
+function ShelfChip({ on, children, onClick, sub }) {
+  return (
+    <button className="cm-chip" onClick={onClick}
+      style={{border: "1px solid " + (on ? "var(--navy2)" : "#e3ddd3"), cursor: "pointer", fontSize: 14, padding: "7px 13px",
+              background: on ? "var(--navy2)" : "#fff", color: on ? "#fff" : "var(--ink)", textAlign: "left", lineHeight: 1.35}}>
+      {children}{sub && <span style={{display: "block", fontSize: 11, opacity: .75}}>{sub}</span>}
+    </button>
+  );
+}
+function ShelfPicker({ cls, canEdit, onClassChanged }) {
+  const hwAll = useHwBooks(cls, HW_T);
+  const [idx, setIdx] = useState(null);
+  const [subj, setSubj] = useState(""), [ser, setSer] = useState(""), [key, setKey] = useState("");
+  const [who, setWho] = useState("all"), [pick, setPick] = useState([]), [board, setBoard] = useState(true);
+  const [busy, setBusy] = useState(false), [msg, setMsg] = useState(""), [err, setErr] = useState("");
+  useEffect(() => {
+    setIdx(null);
+    pcApi({ action: "shelfList", cid: cls.id }).then((j) => setIdx(j.books || [])).catch((e) => { setErr(e.message); setIdx([]); });
+  }, [cls.id]);
+  const students = (cls.roster || []).filter((r) => r && r.id && !r.teacher);
+  const hung = (hwAll || []).filter((h) => h.shelf && (h.cids || []).includes(cls.id));
+  const scope = (h) => (h.allc || []).includes(cls.id) ? "반 전체"
+    : (h.sids || []).filter((x) => String(x).startsWith(cls.id + "/")).map((x) => (students.find((r) => r.id === String(x).split("/")[1]) || {}).name || "?").join(", ");
+  const books = idx || [];
+  const subjs = SHELF_SUBJ.filter((x) => books.some((b) => b.subj === x));
+  const sers = [...new Set(books.filter((b) => b.subj === subj).sort((a, b) => (a.order || 0) - (b.order || 0)).map((b) => b.series))];
+  const vols = books.filter((b) => b.subj === subj && b.series === ser).sort((a, b) => (a.order || 0) - (b.order || 0));
+  const cur = books.find((b) => b.key === key);
+  const curHung = cur && hung.find((h) => h.shelf === cur.key);
+  const boardName = cur ? cur.key.replace("-", " ") : "";   // 서버 shelfName 과 같게 — 첫 «-» 만
+  const hasBoard = getBooks(cls).some((b) => b.name === boardName);
+  function choose(k) {
+    setKey(k); setMsg(""); setErr("");
+    const h = hung.find((x) => x.shelf === k);
+    if (h && !(h.allc || []).includes(cls.id)) { setWho("pick"); setPick((h.sids || []).filter((x) => String(x).startsWith(cls.id + "/")).map((x) => String(x).split("/")[1])); }
+    else { setWho("all"); setPick([]); }
+  }
+  async function hang() {
+    if (busy || !cur) return;
+    if (who === "pick" && !pick.length) { setErr("학생을 한 명 이상 골라 주세요"); return; }
+    setBusy(true); setErr(""); setMsg("");
+    try {
+      const j = await pcApi({ action: "shelfHang", cid: cls.id, key: cur.key, sids: who === "pick" ? pick : [], board: board && !isIndividual(cls) });
+      if (j.books) { cls.books = j.books; onClassChanged && onClassChanged(); }
+      setMsg("걸었어요 ✓ — 학생 «과제» 탭에 «" + cur.title + "» 가 떠요" + (j.books ? " · 번호표에 «" + boardName + "» 를 넣었어요" : ""));
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
+  async function drop(h) {
+    if (busy) return;
+    if (!confirm("«" + h.title + "» 를 이 반에서 뺄까요?\n학생 화면에서 사라지고, 이미 낸 기록은 그대로 남아요. 다시 걸 수 있어요.")) return;
+    setBusy(true); setErr(""); setMsg("");
+    try { await pcApi({ action: "shelfDrop", cid: cls.id, key: h.shelf }); setMsg("뺐어요 — «" + h.title + "»"); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
+  const step = (n, t) => <div className="cm-label" style={{marginTop: 14}}>{n}. {t}</div>;
+  return (
+    <div className="cm-card">
+      <h3 className="cm-h3">학원 교재 고르기 <span className="cm-h-hint">(정답이 올라가 있어 앱이 바로 채점)</span></h3>
+      <div className="cm-hint" style={{marginBottom: 10}}>
+        과목 → 교재 → 권을 고르고 <b>걸기</b>를 누르면 이 반 학생 <b>«과제»</b> 탭에 «답 내기» 교재로 떠요.
+        번호는 교재 연번이고 옆에 «07단원 23번» 처럼 책 번호가 같이 보여요. 답이 수·보기 하나인 문항만 바로 채점되고, 식·√·부등식 같은 건 학생이 해설 보고 스스로 O/X 해요.
+      </div>
+
+      {hung.length > 0 && (<>
+        <div className="cm-label">이 반에 건 교재</div>
+        {hung.map((h) => (
+          <div key={h.id} style={{display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: "1px solid var(--line)"}}>
+            <div style={{flex: 1, minWidth: 0}}>
+              <div style={{fontWeight: 600}}>{h.title}</div>
+              <div style={{fontSize: 12, color: "var(--muted)"}}>{(h.questions || []).length}문항 · {scope(h) || "—"}</div>
+            </div>
+            {canEdit && <button className="cm-link" style={{flex: "none"}} onClick={() => choose(h.shelf)}>대상 바꾸기</button>}
+            {canEdit && <button className="cm-link" style={{flex: "none", color: "#c2703f"}} disabled={busy} onClick={() => drop(h)}>빼기</button>}
+          </div>
+        ))}
+      </>)}
+
+      {!canEdit ? <div className="cm-empty" style={{marginTop: 10}}>담당 반에서만 고를 수 있어요</div>
+        : idx === null ? <div className="cm-empty">교재 목록을 불러오는 중…</div>
+        : !books.length ? <div className="cm-empty">{err || "창고가 비었어요 — 한민수 팀장에게"}</div> : (<>
+        {step(1, "과목")}
+        <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
+          {subjs.map((x) => <ShelfChip key={x} on={x === subj} onClick={() => { setSubj(x); setSer(""); setKey(""); setMsg(""); }}>{x}</ShelfChip>)}
+        </div>
+        {subj && (<>{step(2, "교재")}
+          <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
+            {sers.map((x) => <ShelfChip key={x} on={x === ser} onClick={() => { setSer(x); setKey(""); setMsg(""); }}
+              sub={(books.find((b) => b.subj === subj && b.series === x) || {}).seriesName}>{x}</ShelfChip>)}
+          </div></>)}
+        {ser && (<>{step(3, "권")}
+          <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
+            {vols.map((b) => <ShelfChip key={b.key} on={b.key === key} onClick={() => choose(b.key)}
+              sub={b.n + "문항 · 바로 채점 " + b.auto + (hung.some((h) => h.shelf === b.key) ? " · 걸려 있음" : "")}>{b.vol}</ShelfChip>)}
+          </div></>)}
+        {cur && (<>
+          {step(4, "누구에게")}
+          <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
+            <ShelfChip on={who === "all"} onClick={() => setWho("all")}>반 전체</ShelfChip>
+            <ShelfChip on={who === "pick"} onClick={() => setWho("pick")}>학생 고르기</ShelfChip>
+          </div>
+          {who === "pick" && (
+            <div style={{display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8}}>
+              {students.map((r) => { const on = pick.includes(r.id);
+                return <ShelfChip key={r.id} on={on} onClick={() => setPick((P) => on ? P.filter((x) => x !== r.id) : P.concat(r.id))}>{r.name}</ShelfChip>; })}
+            </div>
+          )}
+          {!isIndividual(cls) && (
+            <label style={{display: "flex", gap: 8, alignItems: "center", marginTop: 12, fontSize: 14}}>
+              <input type="checkbox" checked={board || hasBoard} disabled={hasBoard} onChange={(e) => setBoard(e.target.checked)} />
+              <span>반 «과제» 번호표에도 넣기 <span style={{color: "var(--muted)", fontSize: 12}}>{hasBoard ? "(이미 있어요 — «" + boardName + "»)" : "(«" + boardName + "» " + cur.n + "문항 · 낸 번호가 칠해져요)"}</span></span>
+            </label>
+          )}
+          <button className="cm-btn cm-btn-primary" disabled={busy} onClick={hang}>
+            {busy ? "거는 중…" : curHung ? "대상 바꿔 다시 걸기" : "«" + cur.title + "» 걸기"}
+          </button>
+        </>)}
+      </>)}
+      {msg && <div className="cm-done">{msg}</div>}
+      {err && idx && idx.length > 0 && <div className="cm-err">{err}</div>}
+    </div>
   );
 }
 
