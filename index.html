@@ -3961,7 +3961,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
     if (me.teacher) return;
     pcApi({ action: "pcMe", cid: cls.id, sid: me.id }).then((j) => {
       if (!j.on) { setPc({ on: false }); pcAwaySave(cls.id, me.id, []); return; }
-      const p = { on: true, awayN: j.awayN, rules: j.rules, lect: j.lect || null };
+      const p = { on: true, awayN: j.awayN, rules: j.rules, lect: j.lect || null, books: j.books || null };   // books — 조각 주는 교재(10/24 · 반이 대상이어도 이 교재만)
       setPc(p); pcRef.current = p;
       if (pcAwayQueue(cls.id, me.id).length) sendAways(p);   // 앱이 닫혔다 열린 사이의 이탈 · 못 보낸 것
     }).catch(() => {});
@@ -3969,7 +3969,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
   // 떠났다 돌아온 것을 쌓고 보낸다. 조각을 쓰는 반인지 아직 모르면(막 열었을 때) 쌓아만 두고, 위에서 알게 되면 보낸다
   async function reportAway(s, q, book) {
     const p = pcRef.current;
-    if (me.teacher || (p && !p.on) || s <= (p ? p.rules.awayMin : 5)) return;
+    if (me.teacher || (p && (!p.on || (p.books && !p.books.includes(book)))) || s <= (p ? p.rules.awayMin : 5)) return;
     pcAwaySave(cls.id, me.id, [...pcAwayQueue(cls.id, me.id), { aid: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), s, q, book }]);
     if (p) sendAways(p);
   }
@@ -4125,7 +4125,8 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
   const blanks = S.questions.filter((x) => !mxAnswered(S, x.n)).map((x) => x.n);
   const answered = S.questions.filter((x) => mxAnswered(S, x.n)).map((x) => x.n);
   const prevSet = new Set(S.all ? prevNums || [] : []);
-  const lectSet = new Set(pc && pc.on && pc.lect ? S.questions.map((x) => x.n).filter((n) => lectHas(pc.lect, S.bookId, n)) : []);   // 수업 풀이(보류) — 지금은 조각 없음(10/15)
+  const pcOn = !!(pc && pc.on && (!pc.books || pc.books.includes(S.bookId)));   // 이 교재가 조각을 주나 — 아니면 이탈 칸도 안 띄운다
+  const lectSet = new Set(pcOn && pc.lect ? S.questions.map((x) => x.n).filter((n) => lectHas(pc.lect, S.bookId, n)) : []);   // 수업 풀이(보류) — 지금은 조각 없음(10/15)
   const none = S.questions.every((x) => !mxAnswered(S, x.n));
   const unit = S.units && q.u != null ? S.units[q.u] : "";
   const padKey = (k) => { if (busy.current) return; setBuf((b) => (k === "⌫" ? b.slice(0, -1) : k === "C" ? "" : b.length < 12 ? b + k : b)); };
@@ -4163,7 +4164,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
     <div className="mx-run">
       <div className="mx-top">
         <div><div className="mx-who">{me.name}</div><div className="mx-ttl">{S.title}{S.retry ? " · 틀린 문제 다시" : ""}</div></div>
-        {pc && pc.on && <div className={"mx-away" + (pc.awayN === pc.rules.awayEvery - 1 ? " warn" : "")} title={"풀기 화면을 떠나면 기록돼요 — 하루 " + pc.rules.awayEvery + "번째마다 조각 −" + pc.rules.awayPen}>이탈 {pc.awayN}/{pc.rules.awayEvery}</div>}
+        {pcOn && <div className={"mx-away" + (pc.awayN === pc.rules.awayEvery - 1 ? " warn" : "")} title={"풀기 화면을 떠나면 기록돼요 — 하루 " + pc.rules.awayEvery + "번째마다 조각 −" + pc.rules.awayPen}>이탈 {pc.awayN}/{pc.rules.awayEvery}</div>}
         <div className="mx-clock" title="쉰 시간은 빼고 센다">{mxClock(nowT(S))}</div>
         <button className="mx-sub" style={{background: "transparent", color: "#fff", border: "1.5px solid rgba(255,255,255,.6)"}} disabled={frozen} onClick={pause}>쉬기</button>
         <button className="mx-sub" disabled={frozen || (S.all && !answered.length)} onClick={() => setAsk(true)}>제출</button>

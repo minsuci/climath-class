@@ -581,6 +581,9 @@ const r1 = (x) => Math.round(x * 10) / 10;
 //   조각 20 = 구슬 1. 구슬을 열면 확률로 기프티콘 또는 꽝. 재고 없는 게 뽑히면 구슬을 안 쓴다(«나중에 다시»)
 // 장부 classes/{cid}/pieces/{sid} — 쓰기는 서버만, 조건부 쓰기(getDocV · patchDocIf)로 겹침을 막는다
 const PC = {
+  // 조각 주는 교재 — 마왕님이 정한 것만(10/24 «내가 직접 설정해야 들어간다»). 반이 대상이어도 이 목록에 없는 교재는 조각·이탈 없음.
+  // appConfig/pieces.books 가 있으면 그것(pieces.mjs --books). 학원 교재 고르기로 건 교재 · 선생님 도구로 올린 교재는 저절로 안 들어간다
+  books: ["수평교-2026-2기말", "퀀텀점프-2026-2기말"],
   cids: ["s-mongeum", "jasago"],   // 대상 반 — 10/12 고1S · 고1자사고반(TOP 은 뺌). appConfig/pieces.cids 가 있으면 그것(10/13 TOP 더함 — pieces.mjs --cids)
   cost: 20,        // 구슬 하나 = 조각 20
   streak: 5,       // 번호 순 연속 정답 다섯마다 +1
@@ -593,8 +596,11 @@ const PC_LOG = 150, PC_AWAY = 300;
 async function pcCfg() {
   const { doc, v } = await getDocV("appConfig/pieces");
   const d = doc || {};
-  return { items: (d.items || []).filter((x) => x && x.id && x.name), cids: Array.isArray(d.cids) && d.cids.length ? d.cids : PC.cids, v, doc: d };
+  return { items: (d.items || []).filter((x) => x && x.id && x.name), cids: Array.isArray(d.cids) && d.cids.length ? d.cids : PC.cids,
+           books: Array.isArray(d.books) ? d.books : PC.books, v, doc: d };
 }
+// 이 반 · 이 교재가 조각을 주나 — 반(cids)과 교재(books) 둘 다
+const pcBookOn = (cfg, cid, bookId) => !!cfg && cfg.cids.includes(cid) && cfg.books.includes(String(bookId || ""));
 // 낸 것 하나에서 번 조각 — 처음 맞힌 문제 + 번호 순 5연속. 안 적은 번호 · 스스로 채점 기다리는 것은 건너뛴다(끊지도 잇지도 않음)
 function hwPieces(questions) {
   let first = 0, streaks = 0, run = 0;
@@ -761,7 +767,7 @@ async function pcMe(res, claims, b) {
   const d = (await getDoc(pcPath(cid, sid)).catch(() => null)) || {};
   const td = pcToday(d), ev = pcEvt(cfg);
   res.status(200).json({ ok: true, on: true, teacher: !!who.teacher, bal: d.bal || 0, earned: d.earned || 0, opened: d.opened || 0,
-    awayN: td.n, awayTot: td.tot, rules: pcRules(), lect: await hwLectGet(cid), held: d.held || 0,
+    awayN: td.n, awayTot: td.tot, rules: pcRules(), lect: await hwLectGet(cid), held: d.held || 0, books: cfg.books,
     prizes: (d.prizes || []).slice(-60).map((p) => (p.voucher && !p.given ? { ...p, canSwap: pcSwapOk(cfg, p) } : p)),
     hasItems: cfg.items.length > 0 || !!ev,   // 확률표는 학생에게 안 보인다(10/12)
     event: ev ? { title: ev.title || "", cap: ev.cap || 1, won: pcEvWon(d, ev), names: ev.items.map((x) => x.name),
@@ -776,6 +782,7 @@ async function hwAway(res, claims, b) {
   if (who.teacher) { res.status(200).json({ ok: true, teacher: true }); return; }
   const cfg = await pcCfg();
   if (!cfg.cids.includes(cid)) { res.status(200).json({ ok: true, on: false }); return; }
+  if (!cfg.books.includes(String(b.book || ""))) { res.status(200).json({ ok: true, on: false, book: false }); return; }   // 조각 안 주는 교재
   const aid = String(b.aid || "").slice(0, 40), now = Date.now(), today = kstDate(now);
   let dup = false, lost = 0, hit = false;
   const r = await pcEdit(cid, sid, (d) => {
@@ -1103,7 +1110,7 @@ async function hwSubmit(res, claims, b) {
   let pieces = null;
   if (!who.teacher) {
     const cfg = await pcCfg().catch(() => null);
-    if (cfg && cfg.cids.includes(cid)) {
+    if (pcBookOn(cfg, cid, bookId)) {
       const p = hwPieces(questions), held = questions.filter((q) => q.lect && q.auto === true).length;   // 보류 — 나중에 풀면 들어올 것
       const pc = p.pts > 0 || held > 0 ? await pcAdd(cid, sid, who.name, p.pts, { k: "hw", rid }, held).catch((e) => { console.error("[pieces]", e); return null; }) : { add: 0 };
       if (pc) { pieces = { ...p, add: pc.add, held, ...(pc.bal != null ? { bal: pc.bal } : {}) }; await patchDoc(base + "/hwLogs/" + rid, { pieces: { first: p.first, streaks: p.streaks, pts: pc.add, ...(held ? { held } : {}) } }).catch(() => {}); }
@@ -1146,7 +1153,7 @@ async function hwRetry(res, claims, b) {
   let pc = null;
   if (!who.teacher && (newly > 0 || heldN > 0)) {
     const cfg = await pcCfg().catch(() => null);
-    if (cfg && cfg.cids.includes(cid)) pc = await pcAdd(cid, log.sid, who.name, Math.max(0, newly), { k: "retry", rid }, Math.max(0, heldN)).catch(() => null);
+    if (pcBookOn(cfg, cid, log.bookId)) pc = await pcAdd(cid, log.sid, who.name, Math.max(0, newly), { k: "retry", rid }, Math.max(0, heldN)).catch(() => null);
   }
   res.status(200).json({ ok: true, log: { ...log, ...patch }, ...(pc ? { pieces: pc.add, bal: pc.bal } : {}) });
 }
@@ -1178,7 +1185,7 @@ async function hwSelf(res, claims, b) {
   let pc = null;
   if (!who.teacher && (gain > 0 || heldN > 0)) {
     const cfg = await pcCfg().catch(() => null);
-    if (cfg && cfg.cids.includes(cid)) pc = await pcAdd(cid, log.sid, who.name, Math.max(0, gain), { k: "self", rid }, Math.max(0, heldN)).catch(() => null);
+    if (pcBookOn(cfg, cid, log.bookId)) pc = await pcAdd(cid, log.sid, who.name, Math.max(0, gain), { k: "self", rid }, Math.max(0, heldN)).catch(() => null);
   }
   res.status(200).json({ ok: true, log: { ...log, ...patch }, ...(pc ? { pieces: pc.add, bal: pc.bal } : {}) });
 }
@@ -1357,7 +1364,7 @@ export default async function handler(req, res) {
         if (body.op === "get") {
           const cfg = await pcCfg(), cids = Array.isArray(body.cids) && body.cids.length ? body.cids.map(String) : cfg.cids, ledgers = {};
           for (const c of cids) ledgers[c] = await listDocs("classes/" + c + "/pieces").catch(() => []);
-          res.status(200).json({ ok: true, cfg: cfg.doc, cids: cfg.cids, today: kstDate(Date.now()), ledgers }); return;
+          res.status(200).json({ ok: true, cfg: cfg.doc, cids: cfg.cids, books: cfg.books, today: kstDate(Date.now()), ledgers }); return;
         }
         if (body.op === "event") return await pcTeacherAct(res, TOOL, { ...body, action: "pcEventSet" });
         if (body.op === "items") return await pcTeacherAct(res, TOOL, { ...body, action: "pcItemsSet" });
@@ -1368,6 +1375,13 @@ export default async function handler(req, res) {
           if (!want.length || bad.length) { res.status(400).json({ error: "없는 반: " + (bad.join(", ") || "(빈 목록)") }); return; }
           await patchDoc("appConfig/pieces", { cids: want, at: Date.now() });
           res.status(200).json({ ok: true, cids: want }); return;
+        }
+        if (body.op === "books") {   // 조각 주는 교재 정하기 — 있는 과제 교재만(10/24)
+          const want = Array.isArray(body.books) ? [...new Set(body.books.map(String))] : [];
+          const have = new Set((await listDocs("examKeys").catch(() => [])).filter((e) => e.kind === "hw").map((e) => e.id)), bad = want.filter((x) => !have.has(x));
+          if (bad.length) { res.status(400).json({ error: "없는 과제 교재: " + bad.join(", ") }); return; }
+          await patchDoc("appConfig/pieces", { books: want, at: Date.now() });
+          res.status(200).json({ ok: true, books: want }); return;
         }
         if (body.op === "couponAdd") { const r = await pcCouponAdd(body.item, body.img, "tool"); res.status(r.error ? (r.dup ? 409 : 400) : 200).json(r); return; }
         if (body.op === "coupons") { res.status(200).json({ ok: true, list: (((await getDoc(PC_CIDX).catch(() => null)) || {}).list || []) }); return; }

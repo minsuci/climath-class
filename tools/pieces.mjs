@@ -7,6 +7,7 @@
 //   node tools/pieces.mjs --items-clear                           평소 상품표 비우기(상품이 없으면 구슬이 안 열린다 — 구슬은 그대로)
 //   node tools/pieces.mjs --coupon <상품id> 사진.png [사진2.png …]  쿠폰(기프티콘 바코드) 사진 넣기 — 같은 사진은 서버가 막는다
 //   node tools/pieces.mjs --cids s-mongeum jasago L9gW…          조각 쓰는 반 바꾸기(있는 반만 · 10/13 TOP 더함)
+//   node tools/pieces.mjs --books 수평교-2026-2기말 퀀텀점프-2026-2기말   조각 주는 교재 정하기(10/24 — 목록에 없는 교재는 조각·이탈 없음 · 통째로 바꿈)
 //   node tools/pieces.mjs --odd <반ID> on|off                     홀수 번호 기본 보류(원장님 반 · 10/15) — 지금 상태만 보려면 --odd <반ID>
 //   node tools/pieces.mjs --coupons                               쿠폰 목록(누가 받았나 · 사진은 안 보임)
 //   node tools/pieces.mjs --reset <반ID> [학생ID…]                장부 지우기 — 먼저 tools/logs/pieces-backup-*.json 에 받아 둔다
@@ -28,7 +29,7 @@ async function call(body) {
 }
 function show(j) {
   const ev = j.cfg.event;
-  console.log("오늘(한국) " + j.today + " · 대상 반 " + j.cids.join(", "));
+  console.log("오늘(한국) " + j.today + " · 대상 반 " + j.cids.join(", ") + " · 조각 주는 교재 " + ((j.books || []).join(", ") || "(없음)"));
   console.log("상품표: " + ((j.cfg.items || []).map((x) => x.name + " " + (x.pct != null ? x.pct + "%" : "(확률 없음 — 옛 판)") + " 재고 " + (x.stock == null ? "∞" : x.stock)).join(" · ") || "비어 있음"));
   console.log("이벤트: " + (ev ? ev.day + (ev.day === j.today ? " (오늘 켜짐)" : " (지난 것)") + " · " + (ev.title || "") + " · 한 사람 " + ev.cap + "개 · " + ev.items.map((x) => x.name + " " + x.pct + "% 재고 " + (x.stock == null ? "∞" : x.stock)).join(" · ") : "없음"));
   for (const [c, rows] of Object.entries(j.ledgers)) {
@@ -61,6 +62,7 @@ else if (has("--odd")) {
   console.log(cid, "홀수 기본 보류:", j.lect.odd ? "켬" : "끔", "· 직접 표시", JSON.stringify(j.lect.b), "· 푼 홀수", JSON.stringify(j.lect.rel));
 }
 else if (has("--cids")) { const i = args.indexOf("--cids"), cs = args.slice(i + 1).filter((x) => !x.startsWith("--")); const j = await call({ op: "cids", cids: cs }); console.log("조각 쓰는 반:", j.cids.join(", ")); }
+else if (has("--books")) { const i = args.indexOf("--books"), bs = args.slice(i + 1).filter((x) => !x.startsWith("--")); const j = await call({ op: "books", books: bs }); console.log("조각 주는 교재:", j.books.join(", ") || "(없음)"); }
 else if (has("--items-clear")) { await call({ op: "items", items: [] }); console.log("평소 상품표 비움"); }
 else if (has("--reset")) {
   const cid = arg("--reset"), j = await call({ op: "get", cids: [cid] });
