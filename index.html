@@ -2905,12 +2905,13 @@ function MockExamTab({ cls, me }) {
     setExams(all.filter((e) => !isHwBook(e) && (!e.test || me.teacher) && (!(e.cids || []).length || e.cids.includes(cls.id))
       && (me.teacher || mxOpenTo(e, cls.id, me.id))));
   }, () => setExams([])), [cls.id, me.teacher, me.id]);
-  // 기본 시험지: ① 선생님이 이 반에 정해 둔 것 ② 없으면 내가 아직 안 낸 첫 시험지 ③ 그래도 없으면 맨 앞
+  // 기본 시험지: ① 선생님이 이 반에 정해 둔 것(내가 아직 안 냈으면) ② 없으면 내가 아직 안 낸 첫 시험지 ③ 그래도 없으면 맨 앞
   useEffect(() => {
     if (!exams || !exams.length) return;
     if (touched.current && exams.find((e) => e.id === pick)) return;
     const pin = pins && pins[cls.id], done = new Set((past || []).map((l) => l.examId));
-    const e = exams.find((x) => x.id === pin) || (past && exams.find((x) => !done.has(x.id))) || exams[0];
+    // 정해 둔 시험지를 이미 냈으면 건너뛴다 — 수업에서 1회를 보고 과제로 2회를 풀 때 1회가 다시 뜨지 않게 (10/24)
+    const e = exams.find((x) => x.id === pin && !done.has(x.id)) || (past && exams.find((x) => !done.has(x.id))) || exams[0];
     if (e.id !== pick) { setPick(e.id); setMins(String(e.minutes)); }
   }, [exams, pins, past]);
   async function setPin(id) {
