@@ -10,6 +10,7 @@
 //
 // 누가 받나: 선생님은 언제나. 학생은 **그 시험을 제출한 기록이 있을 때만** —
 // 기록(examLogs)의 이름이 로그인한 이름과 같아야 한다.
+// 오답 과제(examKeys kind hw · wb, 10/26)는 그 학생(names)이면 풀기 전에도 받는다 — {wb:true} 로 묻는다
 //
 // 넣기는 PC 도구로 (tools/exam-img.py, 도구 열쇠 team/tools.lessonKey)
 import { verifyIdToken, getDoc, patchDoc, deleteDoc, listIdsWithPrefix } from "./_google.js";
@@ -72,7 +73,14 @@ export default async function handler(req, res) {
       const cls = await getDoc("classes/" + String(body.cid)).catch(() => null);
       if (cls && (cls.roster || []).some((r) => r && r.teacher && r.name === claims.sname)) teacher = true;
     }
-    if (!teacher) {
+    // 오답 과제(10/26) — 그 학생에게 건 오답 모음은 풀면서 본다(낸 뒤가 아니라). 시험이 아니라 새어 나갈 것이 없다
+    let wbOk = false;
+    if (!teacher && body.wb) {
+      const key = await getDoc("examKeys/" + examId).catch(() => null);
+      wbOk = !!(key && key.kind === "hw" && key.wb && !key.test && (key.names || []).includes(claims.sname));
+      if (!wbOk) { res.status(403).json({ error: "나에게 걸린 오답 과제가 아니에요" }); return; }
+    }
+    if (!teacher && !wbOk) {
       // 그 시험을 **낸** 학생만. 기록의 이름이 로그인한 이름과 같은지 본다
       const cid = String(body.cid || ""), date = String(body.date || ""), rid = String(body.rid || "");
       if (!(claims.cids || []).includes(cid)) { res.status(403).json({ error: "그 반 학생이 아니에요" }); return; }

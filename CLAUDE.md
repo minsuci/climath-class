@@ -708,6 +708,17 @@ reports/{cid_sid_ym} { comment, hwSnapshot, sname, cname }   # 월간 보고서
 - 학생 «과제» 탭 «낸 과제» 위에 «내 오답»(같은 `WrongOfKid`) — 칩을 누르면 그 기록(`HwResult`)이 열려 «틀린 문제 다시 풀기»
 - 셈(`hwWrongList`): hwLogs 만(실전 시험 examLogs 와 안 섞음). 학생·교재·번호마다 **처음 시도**가 X 면 오답(스스로 X 포함, 안 적음·서술 대기 빼고). 같은 기록 fin 이나 **뒤 기록에서 맞히면** 고침. 처음 맞힌 걸 뒤에 틀린 건 안 친다. 서버 일 없음 — 화면이 hwLogs(120일)를 읽어 센다
 
+### 오답 과제 (`StudentWrongHw` · `WbBoard` · `WbPic`, 2026-10-26)
+
+마왕님 «오답 모음을 앱 과제로 · 실전 시험처럼 선생님이 학생별로 · AI 열쇠로». 학생 한 명의 오답 모음(원본 + 쌍둥이, `변형교재\_오답교재_scripts\wb_weekly.py`)을 그 학생에게만 건다.
+- **과제 교재 그대로**: examKeys `kind:"hw"` + **`wb:true`** + `names:[학생]`(→ sids). 채점 · 다시 풀기(hwRetry) · «왜 틀렸어?»(whyMark) · 조각까지 과제와 같은 길. 서버 일은 examPut 이 `wb` · 문항 `o`(원래 문항 «교재:번호:원본|숫자|묻는 말», 40자) 를 싣는 것과 rebuildList 의 `wb` 뿐
+- **가르기**: `useHwBooks(cls, me, wb)` — 셋째 인자가 없으면 wb 를 **뺀다**(그래서 «과제» 탭 · 과제 판 · 오답 모아보기 · 교재 고르기는 전과 같다). 과제 판 · 오답 모아보기는 `useWbIds` 로 오답 과제 기록(hwLogs)도 뺀다 — 기록 자리는 과제와 같은 hwLogs
+- 학생: «오답 과제» 탭(걸린 학생에게만, 출석 없이) → `HwTab wb` → 풀기 화면에 **문항 그림**(`WbPic` → api/examimg `{wb:true}` — 그 시험지가 wb 이고 names 에 로그인한 이름이 있고 test 가 아닐 때만. 실전 시험 그림처럼 «낸 뒤» 가 아니라 풀면서). 그림 자리는 실전과 같은 `examImgs/{id}__{n}`
+- 선생님: 반 메뉴 «오답 과제»(`WbBoard`) — 학생 · 낸 수 · 처음 맞힘 · 또 틀림(다시 풀어 고침 ✓, 칩에 원래 문항 label)
+- 올리기: 나스 «클래스앱 도구» `class.mjs 오답과제올리기 --파일 …_앱\오답과제.json --반 <반ID>` (선생님 AI 열쇠). 그림 먼저 → examPut → **다시 읽어 wb 가 빠졌으면 지운다**(옛 앱 판이면 «과제» 탭에 섞여 뜨므로). id `과제-오답-<이름>-<YYMMDD>`
+- 학습기록(learn-export): 오답 과제 줄은 `kind:"오답과제"` + `orig`(= 문항 o) — 과제 제출 수에 안 섞인다
+- 미리보기: 임서윤(c-reg/s2)에게 «과제-오답-임서윤-pv» 6문항. 가짜 examimg 그림은 캔버스 글자
+
 ### 학원 교재 고르기 (`ShelfPicker` · `shelfAct`, 2026-10-24)
 - 학원 교재(코어·챌린지·베이스·베이스캠프·96%·퍼펙트·BASE) 빠른정답을 JSON 으로 옮긴 **창고**가 서버 `shelf/{key}`(정답 통째) · `shelf/_index`(목록 — 정답 없음)에 있다. 규칙 맨 끝 거절이라 앱은 못 읽는다. 올리기 = `node tools/shelf-push.mjs`(도구 열쇠 `shelfPut`, 창고 폴더 = 바탕화면 `변형교재\_클래스앱도구\교재 정답`, 만드는 곳 `변형교재\_교재정답_scripts`). `--dry` 로 과목·교재·권 표만
 - 선생님 반 메뉴 **«교재 고르기»**(키 `c:shelf`, 끝난 반엔 안 뜸): 과목 → 교재 → 권 → 반 전체/학생 고르기 → 걸기. `shelfList` · `shelfHang{cid,key,sids?,board?}` · `shelfDrop{cid,key}` — 담당 반만(`pcTeacher`)

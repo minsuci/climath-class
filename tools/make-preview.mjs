@@ -439,7 +439,11 @@ const STUB = `
     { id: "pv-mx", title: "실전 미리보기 (정답 ① · 단답 1)", minutes: 20, cids: ["c-reg"],
       questions: Array.from({ length: 10 }, function(_, i){ return { n: i + 1, type: i === 9 ? "essay" : i >= 8 ? "short" : "mc" }; }) },   // 10번 서술형(10/26 정답 글 보기)
     { id: "pc-test", kind: "hw", free: true, title: "조각 시험 (아무 답이나 정답)", link: "", units: [], cids: ["c-reg"],
-      questions: Array.from({ length: 20 }, function(_, i){ return { n: i + 1, type: "mc" }; }) }] };
+      questions: Array.from({ length: 20 }, function(_, i){ return { n: i + 1, type: "mc" }; }) },
+    /* 오답 과제(10/26) — 임서윤 한 명에게. 정답은 교재A 처럼 ①·1 */
+    { id: "과제-오답-임서윤-pv", kind: "hw", wb: true, title: "임서윤 기말 오답 모음 (미리보기)", link: "", units: [], cids: ["c-reg"], sids: ["c-reg/s2"],
+      questions: [["퀀텀 3번 원본","mc"],["퀀텀 3번 숫자","mc"],["퀀텀 3번 묻는 말","mc"],["퀀텀 6번 원본","short"],["기출01 15번 원본","mc"],["기출01 20번 원본","short"]]
+        .map(function(x, i){ return { n: i + 1, type: x[1], label: x[0] }; }) }] };
   store["appConfig/pieces"] = { cids: ["c-reg"], items: [
     { id: "g1", name: "1,000원 기프티콘", price: 1000, pct: 30, stock: 95 }, { id: "g2", name: "2,000원 기프티콘", price: 2000, pct: 6, stock: 20 },
     { id: "g3", name: "3,000원 기프티콘", price: 3000, pct: 3, stock: 10 }, { id: "g4", name: "4,500원 기프티콘", price: 4500, pct: 1.2, stock: 4 },

@@ -149,6 +149,8 @@ function checkExam(e) {
   if (!Array.isArray(e.questions) || !e.questions.length) return "문항이 없어요";
   if (e.questions.length > (hw ? 4000 : 200)) return "문항이 너무 많아요";
   if (hw && e.link != null && !(typeof e.link === "string" && e.link.trim() && e.link.length <= 40)) return "link 는 반 교재 이름(40자 안)";
+  // wb = 오답 과제(10/26) — 학생 한 명에게 건 오답 모음. 과제 교재와 똑같이 채점하고, 앱은 «오답 과제» 탭에 따로 띄운다
+  if (e.wb != null && (typeof e.wb !== "boolean" || (e.wb && !hw))) return "wb 는 과제 교재(kind hw)에만 true/false";
   if (hw && e.units != null && !(Array.isArray(e.units) && e.units.every((u) => typeof u === "string" && u.trim() && u.length <= 30))) return "units 는 단원 이름(30자 안) 목록";
   const seen = {};
   for (const q of e.questions) {
@@ -180,6 +182,7 @@ function checkExam(e) {
       if (!ks.length || ks.some((k) => !String(k == null ? "" : k).trim())) return q.n + "번 단답형 답이 없어요";
     }
     if (q.pt != null && !(typeof q.pt === "number" && q.pt > 0)) return q.n + "번 배점이 이상해요";
+    if (q.o != null && !(typeof q.o === "string" && q.o.trim() && q.o.length <= 40)) return q.n + "번 o(원래 문항 «교재:번호:종류»)는 40자 안 글자";
     if (q.label != null && !(typeof q.label === "string" && q.label.trim() && q.label.length <= 16)) return q.n + "번 이름(label)이 이상해요";
     if (q.u != null && !(hw && Number.isInteger(q.u) && q.u >= 0 && q.u < (e.units || []).length)) return q.n + "번 단원(u)이 이상해요";
     if (q.p != null && !(hw && Number.isInteger(q.p) && q.p > 0)) return q.n + "번 쪽(p)이 이상해요";
@@ -234,7 +237,7 @@ async function rebuildList() {
   const exams = all.map((e) => ({
     id: e.id, title: e.title, minutes: e.minutes,
     cids: e.cids || [], sids: e.sids || [], test: !!e.test, lock: !!e.lock, order: e.order || 0,
-    ...(e.kind === "hw" ? { kind: "hw", units: e.units || [], link: e.link || "", ...(e.free ? { free: true } : {}) } : {}),
+    ...(e.kind === "hw" ? { kind: "hw", units: e.units || [], link: e.link || "", ...(e.free ? { free: true } : {}), ...(e.wb ? { wb: true } : {}) } : {}),
     ...(e.shelf ? { shelf: e.shelf, allc: e.allc || [], qc: shelfCompact(e.questions || []), questions: [] } : {}),
     ...(e.shelf ? {} : { questions: (e.questions || []).map((q) => ({ n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}),
                                                  ...(q.label ? { label: q.label } : {}), ...(q.u != null ? { u: q.u } : {}),
@@ -1318,12 +1321,14 @@ export default async function handler(req, res) {
           title: String(e.title).trim(), minutes: Number(e.minutes) || 0,
           kind: e.kind === "hw" ? "hw" : null, units: e.kind === "hw" ? (e.units || []).map((u) => String(u).trim()) : null,
           link: e.kind === "hw" && e.link ? String(e.link).trim() : null,   // 반 «과제» 번호표의 교재 이름 — 낸 번호를 거기 칠한다
+          wb: e.kind === "hw" && e.wb ? true : null,   // 오답 과제(10/26) — 학생 «오답 과제» 탭 · 풀면서 문항 그림(api/examimg)
           questions: e.questions.map((q) => ({ n: q.n, type: q.type, ...(q.ans != null ? { ans: q.ans } : {}),
                                                ...(q.label ? { label: String(q.label).trim() } : {}),
                                                ...(q.pt != null ? { pt: q.pt } : {}),
                                                ...(q.u != null ? { u: q.u } : {}), ...(q.p != null ? { p: q.p } : {}),
                                                ...(q.parts ? { parts: q.parts.map((p) => ({ label: String(p.label).trim(), ans: p.ans, ...(p.pt != null ? { pt: p.pt } : {}), ...(p.g != null ? { g: String(p.g) } : {}) })) } : {}),
                                                ...(q.any ? { any: true } : {}),
+                                               ...(q.o ? { o: String(q.o).trim() } : {}),   // 오답 과제 — 원래 문항(교재:번호:원본|숫자|묻는 말). 학습기록이 잇는다
                                                ...(q.type === "essay" && q.sol ? { sol: String(q.sol).slice(0, 400) } : {}) })),
           cids: Array.isArray(e.cids) ? e.cids.map(String) : [], sids, names, test: !!e.test, lock: !!e.lock, free: !!e.free,   // free = 시험용 과제 교재 — 답을 적으면 다 정답(조각 흐름 시험, 10/12) hkEmpty: !!e.hkEmpty,   // hkEmpty = 학결모 «걸어 둘 학생 없이 숨겨 둔» 시험지 (학생을 걸면 열린다)
           order: Number(e.order) || 0, updated: Date.now(),

@@ -4,7 +4,7 @@
 //   node tools/learn-export.mjs --dry      받기만 하고 쓰지 않는다(몇 줄인지만)
 //
 // 쌓는 곳: %USERPROFILE%\.climath\learn-data\
-//   학습기록.jsonl   한 줄 = {kind(시험|과제), date, cid, cls, sid, name, src(시험지·교재 id), srcName, rid, n, type,
+//   학습기록.jsonl   한 줄 = {kind(시험|과제|오답과제 — 오답과제는 orig «교재:번호:원본|숫자|묻는 말» 이 붙는다), date, cid, cls, sid, name, src(시험지·교재 id), srcName, rid, n, type,
 //                    unit, also, concept, lv, pt, answer, key, first(처음 채점 o/x/null), final(마지막 o/x/null), retries, sec, late, score,
 //                    why(다시 풀어 맞혔을 때 고른 «처음엔 왜 틀렸어» 코드 · 없으면 null), rushed(실전만 — 시간에 쫓겼어 · 과제는 null)}
 //                    **지우지 않는다** — 앱에서 기록·시험지가 지워져도 여기엔 남는다(같은 rid·번호는 새 값으로 덮음)
@@ -93,7 +93,9 @@ async function main() {
       const kq = {}; (k.questions || []).forEach((q) => { kq[q.n] = q; });
       for (const q of l.questions || []) {
         const u = q.u != null ? q.u : kq[q.n] ? kq[q.n].u : null;
-        rows.push({ kind: "과제", date: l.date, cid: c.id, cls: c.name, sid: l.sid, name: l.name, src: l.bookId, srcName: l.title, rid: l.rid, n: q.n, type: q.type,
+        // 오답 과제(10/26 · examKeys wb) — kind «오답과제» 로 가른다(과제 제출 수에 안 섞이게). orig = 원래 문항 «교재:번호:원본|숫자|묻는 말»
+        const wb = !!k.wb, o = kq[q.n] && kq[q.n].o ? kq[q.n].o : null;
+        rows.push({ kind: wb ? "오답과제" : "과제", ...(wb ? { orig: o } : {}), date: l.date, cid: c.id, cls: c.name, sid: l.sid, name: l.name, src: l.bookId, srcName: l.title, rid: l.rid, n: q.n, type: q.type,
           unit: u != null && units[u] ? units[u] : null, also: [], concept: null, lv: null, pt: null, answer: q.answer,
           key: kq[q.n] && kq[q.n].ans != null ? kq[q.n].ans : null, first: ox(q.auto), final: ox(q.fin != null ? q.fin : q.auto),
           retries: (q.tries || []).length, sec: q.sec != null ? q.sec : null, late: false, score: null, lect: !!(q.lect || q.lectFreed),
@@ -112,7 +114,7 @@ async function main() {
   rows.forEach((r) => all.set(id(r), r));
   const list = [...all.values()].sort((a, b) => (a.date + a.name + a.src + String(a.n).padStart(4, "0")).localeCompare(b.date + b.name + b.src + String(b.n).padStart(4, "0")));
   fs.writeFileSync(F + ".tmp", list.map((r) => JSON.stringify(r)).join("\n") + "\n"); fs.renameSync(F + ".tmp", F);
-  const cols = ["kind", "date", "cls", "name", "srcName", "n", "part", "type", "unit", "concept", "lv", "first", "final", "retries", "why", "rushed", "sec", "late", "answer", "key", "pt", "score", "src", "cid", "sid", "rid"];
+  const cols = ["kind", "date", "cls", "name", "srcName", "n", "orig", "part", "type", "unit", "concept", "lv", "first", "final", "retries", "why", "rushed", "sec", "late", "answer", "key", "pt", "score", "src", "cid", "sid", "rid"];
   const esc = (v) => { const s = v == null ? "" : Array.isArray(v) ? v.join("/") : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   fs.writeFileSync(path.join(OUT, "학습기록.csv"), "﻿" + cols.join(",") + "\n" + list.map((r) => cols.map((c) => esc(r[c])).join(",")).join("\n") + "\n");
   const students = new Set(list.map((r) => r.name)).size;

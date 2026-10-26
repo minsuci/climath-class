@@ -3585,9 +3585,10 @@ function StudentHome({ cls, me, onLogout }) {
   }
 
   const hwBooks = useHwBooks(cls, me);   // 과제 채점 교재 — «과제» 탭 안에서 «답 내기» 교재가 된다
+  const wbBooks = useHwBooks(cls, me, true);   // 오답 과제(10/26) — 걸린 학생에게만 탭이 뜬다
   // 실전 시험은 출석과 묶지 않는다 — 시간 재는 시험을 «출석부터» 에서 막으면 시작부터 어긋난다
   const hwOpen = !!(hwBooks && hwBooks.length);   // 과제 채점 교재가 걸린 반은 «과제» 를 출석 없이 연다 — 집에서 푼다
-  const noGateTabs = ["q", "notes", "mock", ...(hwOpen ? ["hw"] : [])]; // 출석 없이도 볼 수 있는 탭
+  const noGateTabs = ["q", "notes", "mock", "wb", ...(hwOpen ? ["hw"] : [])]; // 출석 없이도 볼 수 있는 탭
   // 출석 탭은 없다(10/19) — 수업 날 들어오면 위에서 저절로 출석. 다른 날 이미 출석이 찍혔으면(보강 따위) 그날도 수업 날로 본다
   const classToday = !me.teacher && (!!att || scheduledToday);
   const fallback = hwOpen ? "hw" : "mock";
@@ -3606,6 +3607,7 @@ function StudentHome({ cls, me, onLogout }) {
       items={[
         { key: "q", ico: "?", label: "질문" },
         { key: "hw", ico: "▤", label: "과제", disabled: !me.teacher && !att && !hwOpen },
+        ...(me.teacher || (wbBooks && wbBooks.length) ? [{ key: "wb", ico: "↺", label: "오답 과제" }] : []),
         { sep: true },
         // 진도계획표 · 안내문 · 내신 · AI 힌트는 지웠다(10/17 마왕님)
         { key: "mock", ico: "⏱", label: "실전 시험" },
@@ -3645,6 +3647,7 @@ function StudentHome({ cls, me, onLogout }) {
 
       {activeTab === "q" && <QuestionForm cls={cls} me={me} qDate={qDate} />}
       {activeTab === "hw" && <StudentHomework cls={cls} me={me} />}
+      {activeTab === "wb" && <StudentWrongHw cls={cls} me={me} />}
       {activeTab === "mock" && <MockExamTab cls={cls} me={me} />}
       {activeTab === "notes" && (
         <div className="cm-card">
@@ -3836,7 +3839,8 @@ function hwExpand(e) {
   return { ...e, questions: qs };
 }
 // 이 반에 걸린 과제 교재. 선생님 판도 같이 쓴다(cls 가 없으면 빈 목록)
-function useHwBooks(cls, me) {
+// wb — 오답 과제(10/26): 학생 한 명에게 건 오답 모음(examKeys wb). 과제 교재 목록에선 빼고 «오답 과제» 탭 · 판에서만 본다
+function useHwBooks(cls, me, wb) {
   const cid = cls ? cls.id : "", tch = !!(me && me.teacher);
   const [books, setBooks] = useState(null);
   useEffect(() => {
@@ -3844,10 +3848,15 @@ function useHwBooks(cls, me) {
     return examListDoc().onSnapshot((d) => {
       const all = (d.exists && d.data().exams) || [];
       // 창고 교재(shelf)는 반을 다 빼면 cids 가 빈다 — 그때 «모든 반» 으로 보이지 않게 건 반에서만
-      setBooks(all.filter((e) => isHwBook(e) && (!e.test || tch) && ((e.cids || []).length ? e.cids.includes(cid) : !e.shelf) && (tch || !me || !me.id || mxOpenTo(e, cid, me.id))).map(hwExpand));   // names 로 건 교재는 그 학생만(10/12)
+      setBooks(all.filter((e) => isHwBook(e) && !!e.wb === !!wb && (!e.test || tch) && ((e.cids || []).length ? e.cids.includes(cid) : !e.shelf) && (tch || !me || !me.id || mxOpenTo(e, cid, me.id))).map(hwExpand));   // names 로 건 교재는 그 학생만(10/12)
     }, () => setBooks([]));
-  }, [cid, tch, me && me.id]);
+  }, [cid, tch, me && me.id, !!wb]);
   return books;
+}
+// 오답 과제 기록은 «과제» 판 · «오답 모아보기» 에 섞지 않는다 — 그 교재 id 들
+function useWbIds(cls) {
+  const wb = useHwBooks(cls, HW_T, true);
+  return new Set((wb || []).map((b) => b.id));
 }
 // 반 «과제» 번호표에 띄울 «과제 채점에서 처음에 틀린 번호» — {반 교재 이름: Set(번호)}. 교재의 link 로 잇는다.
 // 다시 풀어 맞혔어도 처음에 틀렸으면 남긴다(그게 «실수 0» 의 대상이다)
@@ -3989,9 +3998,115 @@ async function hwCopy(text, say) {
   try { await navigator.clipboard.writeText(text); say("복사했어요 ✓"); } catch (e) { say("복사가 안 돼요 — 아래 글을 길게 눌러 직접 복사해 주세요"); }
 }
 
+// ===== 오답 과제 (10/26 마왕님 «오답 모음을 앱 과제로 · 실전 시험처럼 학생별로 · AI 열쇠로») =====
+// 오답 모음 PDF(wb_weekly.py)와 같은 번호 · 같은 문항. examKeys kind:"hw" + wb:true + names:[학생] — 채점 · 다시 풀기 · «왜 틀렸어?» 는 과제와 똑같다.
+// 다른 점: 학생 «오답 과제» 탭에 따로 뜨고, 풀면서 문항 그림을 본다(api/examimg {wb:true} — 그 학생에게만).
+// 올리기: 나스 «클래스앱 도구» class.mjs 오답과제올리기 (선생님 AI 열쇠). 문항 o = 원래 문항(교재:번호:원본|숫자|묻는 말) → 학습기록
+const wbPicCache = {};
+function WbPic({ examId, n, cid }) {
+  const key = examId + "__" + n;
+  const [st, setSt] = useState(() => wbPicCache[key] || { wait: true });
+  useEffect(() => {
+    let live = true;
+    if (wbPicCache[key] && !wbPicCache[key].err) { setSt(wbPicCache[key]); return; }
+    setSt({ wait: true });
+    (async () => {
+      try {
+        const u = firebase.auth().currentUser; if (!u) throw new Error("로그인이 풀렸어요");
+        const r = await fetch("/api/examimg", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken: await u.getIdToken(), examId, n, wb: true, cid }) });
+        let j = null; try { j = await r.json(); } catch (e) {}
+        if (!r.ok) throw new Error((j && j.error) || "그림을 못 불러왔어요 (" + r.status + ")");
+        wbPicCache[key] = { src: "data:image/png;base64," + j.png };
+      } catch (e) { wbPicCache[key] = { err: e.message || "그림을 못 불러왔어요" }; }
+      if (live) setSt(wbPicCache[key]);
+    })();
+    return () => { live = false; };
+  }, [key]);
+  return (
+    <div className="mx-qimg" style={{marginTop: 8}}>
+      {st.src ? <img src={st.src} alt={n + "번 문제"} /> : <div className="cm-empty" style={{padding: 20}}>{st.err ? st.err + " — 종이 오답지를 보고 풀어요" : "문제 불러오는 중…"}</div>}
+    </div>
+  );
+}
+function StudentWrongHw({ cls, me }) {
+  const books = useHwBooks(cls, me, true);
+  const [ver, setVer] = useState(0);
+  if (books === null) return <div className="cm-card cm-empty">불러오는 중…</div>;
+  if (!books.length) return <div className="cm-card cm-empty">아직 나에게 온 오답 과제가 없어요</div>;
+  const home = (ctl) => (<>
+    <div className="cm-card cm-hint">
+      선생님이 <b>내가 틀린 문제</b>와 <b>쌍둥이 문제</b>로 만든 과제예요. <b>풀기 시작</b>을 누르면 문제가 화면에 떠요(종이 오답지와 번호가 같아요).
+      낸 뒤 틀린 번호는 다시 풀 수 있고, 다시 풀어 맞히면 «처음엔 왜 틀렸어?» 를 하나 눌러 주세요.
+    </div>
+    {books.map((h) => {
+      const total = Math.max(...h.questions.map((q) => q.n)), nx = ctl.next(h);
+      return <BookHwCard key={"wb-" + h.id + "-" + ver} book={{ name: h.title, total }} initial={ctl.answered(h.id).filter((n) => n <= total)} locked
+        startHint={nx ? nx + "번부터" : "다 냈어요"} onStart={(n) => ctl.start(h, n)} />;
+    })}
+  </>);
+  return <HwTab cls={cls} me={me} wb home={home} onChanged={() => setVer((v) => v + 1)} />;
+}
+// 선생님 «오답 과제» — 오답 과제마다 학생 · 처음 시도 · 다시 풀어 고친 것 · 남은 것. 남은 번호는 원래 문항(label)으로
+function WbBoard({ cls }) {
+  const books = useHwBooks(cls, HW_T, true);
+  const [logs, setLogs] = useState(null);
+  const [view, setView] = useState(null);
+  const [again, setAgain] = useState(0);
+  useEffect(() => {
+    let live = true; setLogs(null);
+    hwLogs(cls.id, null, 120).then((a) => { if (live) setLogs(a); }).catch(() => { if (live) setLogs([]); });
+    return () => { live = false; };
+  }, [cls.id, again]);
+  if (view) return <HwResult log={view} book={(books || []).find((b) => b.id === view.bookId)} onBack={() => setView(null)} />;
+  const nameOf = (b) => [...new Set((b.sids || []).filter((x) => String(x).startsWith(cls.id + "/")).map((x) => {
+    const r = (cls.roster || []).find((y) => y && y.id === String(x).split("/")[1]); return r ? r.name : "?"; }))].join(", ") || "반 전체";
+  return (<>
+    <div className="cm-card">
+      <h3 className="cm-h3">오답 과제 <span className="cm-h-hint">(학생별 오답 모음 · 처음 시도 기준)</span>
+        <button className="cm-link" style={{float: "right"}} onClick={() => setAgain((x) => x + 1)}>새로 읽기</button></h3>
+      <div className="cm-hint">올리기는 선생님 AI 열쇠로 — 나스 «클래스앱 도구» <b>오답과제올리기</b>. 학생은 «오답 과제» 탭에서 문제 그림을 보며 풀어요.</div>
+    </div>
+    {books === null || logs === null ? <div className="cm-card cm-empty">불러오는 중…</div>
+      : !books.length ? <div className="cm-card cm-empty">이 반에 올라온 오답 과제가 없어요</div>
+      : books.map((b) => {
+        const L = logs.filter((l) => l.bookId === b.id && !l.teacher).sort((x, y) => (x.time || 0) - (y.time || 0));
+        const st = {};
+        L.forEach((l) => (l.questions || []).forEach((q) => {
+          if (q.answer == null) return;
+          const w = st[q.n];
+          if (!w) st[q.n] = { first: q.auto, fixed: q.auto !== true && q.fin === true, why: q.why || null };
+          else if (w.first !== true && (q.auto === true || q.fin === true)) { w.fixed = true; if (q.why) w.why = q.why; }
+        }));
+        const done = Object.keys(st).length, okN = Object.values(st).filter((w) => w.first === true).length;
+        const xs = Object.entries(st).filter(([, w]) => w.first === false).map(([n, w]) => ({ n: Number(n), ...w })).sort((a, c) => a.n - c.n);
+        const labelOf = (n) => { const q = b.questions.find((x) => x.n === n); return n + "번" + (q && q.label ? " " + q.label : ""); };
+        return (
+          <div key={b.id} className="cm-card">
+            <div style={{display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap"}}>
+              <b style={{fontSize: 16}}>{nameOf(b)}</b><span>{b.title}</span>{b.test && <span className="cm-chip">선생님 모드만</span>}
+              <span style={{flex: 1}} />
+              {L.length > 0 && <button className="cm-link" onClick={() => setView(L[L.length - 1])}>마지막 기록 보기</button>}
+            </div>
+            <div className="cm-hint" style={{marginTop: 6}}>
+              {b.questions.length}문항 중 <b>{done}</b> 냄 · 처음에 맞힘 <b>{okN}</b> · 또 틀림 <b style={{color: "#d6453f"}}>{xs.length}</b>
+              {xs.length ? <> (다시 풀어 고침 {xs.filter((w) => w.fixed).length})</> : null}
+              {!L.length && " — 아직 안 냈어요"}
+            </div>
+            {xs.length > 0 && <div style={{marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6}}>
+              {xs.map((w) => <span key={w.n} className="cm-chip" style={{borderColor: w.fixed ? "#cfe5d6" : "#f0c9c6", background: w.fixed ? "#eef7f1" : "#fdf0ef"}}
+                title={w.why ? "왜: " + ((WHY_LIST.find((x) => x[0] === w.why) || [])[1] || w.why) : ""}>{labelOf(w.n)}{w.fixed ? " ✓" : ""}</span>)}
+            </div>}
+          </div>
+        );
+      })}
+  </>);
+}
+
 // 선생님 «오답 모아보기» — 반 전체(번호마다 몇 명) · 학생별(번호 목록). 고친 것은 ✓ 로 남긴다
 function WrongBoard({ cls }) {
   const books = useHwBooks(cls, HW_T);
+  const wbIds = useWbIds(cls);
   const [logs, setLogs] = useState(null);
   const [again, setAgain] = useState(0);
   const [mode, setMode] = useState("class");
@@ -4009,7 +4124,7 @@ function WrongBoard({ cls }) {
   const bookOf = (id) => (books || []).find((b) => b.id === id);
   const kids = (cls.roster || []).filter((r) => r && r.id && r.name && !r.teacher && !isEnded(r));
   const since = days ? ymd(new Date(Date.now() - (days - 1) * 864e5)) : "";
-  const all = hwWrongList(logs).filter((w) => kids.some((r) => r.id === w.sid));
+  const all = hwWrongList((logs || []).filter((l) => !wbIds.has(l.bookId))).filter((w) => kids.some((r) => r.id === w.sid));
   const W = all.filter((w) => w.date >= since && (!bookId || w.bookId === bookId) && (!left || !w.fixed));
   const bookIds = [...new Set(W.map((w) => w.bookId))].sort((a, b) => ((bookOf(a) || {}).order || 0) - ((bookOf(b) || {}).order || 0) || String(a).localeCompare(String(b)));
   const titleOf = (id) => (bookOf(id) || {}).title || (all.find((w) => w.bookId === id) || {}).title || id;
@@ -4510,6 +4625,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
         <div className="mx-q">
           <div className="mx-num">{q.n}번{q.label && <span className="mx-lb">{q.label}</span>}<small>{q.type === "essay" ? "스스로 채점" : MX_TYPE[q.type]}{unit ? " · " + unit : ""}{lectSet.has(q.n) ? " · 수업 풀이 — 조각 보류" : ""}</small></div>
           {S.retry && <div className="mx-note" style={{marginTop: 8}}>처음에 틀린 문제예요. 다시 풀어서 답을 적어요 — 처음 답은 그대로 남아요.</div>}
+          {S.wb && <WbPic examId={S.bookId} n={q.n} cid={cls.id} />}
           {body}
           <div className="mx-foot">
             <button className="mx-btn" disabled={!prev} onClick={() => prev && go(prev.n)}>◀ 이전</button>
@@ -4681,9 +4797,9 @@ function HwResult({ log: log0, book, onBack, onRetry, canSelf, fresh }) {
 // 학생 — 교재 고르고, 푼 번호 적고, 시작
 // home(ctl) 을 주면(과제 탭 안 — StudentHomework) 교재 고르기 카드 대신 그걸 그린다.
 // ctl.start(교재, 번호?) · ctl.answered(교재id) = 답을 적어 낸 번호 · ctl.next(교재) = 이어서 풀 번호
-function HwTab({ cls, me, home, onChanged }) {
+function HwTab({ cls, me, home, onChanged, wb }) {
   const K = hwKey(cls.id, me.id);
-  const books = useHwBooks(cls, me);
+  const books = useHwBooks(cls, me, wb);
   const [running, setRunning] = useState(() => !!mxLoad(K));
   const [view, setView] = useState(null);
   const [fresh, setFresh] = useState(false);   // 방금 다시 풀기를 낸 결과 — «처음엔 왜 틀렸어?» 를 띄운다
@@ -4720,7 +4836,7 @@ function HwTab({ cls, me, home, onChanged }) {
     const d = doneOf(bk.id);
     const first = (at && bk.questions.find((q) => q.n === at)) ? at : (bk.questions.find((q) => !d.has(q.n)) || bk.questions[0]).n;
     begin({ rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), bookId: bk.id, title: bk.title,
-            units: bk.units || [], all: true, cur: first, ev: [{ t: 0, k: "go", q: first }],
+            units: bk.units || [], all: true, cur: first, ...(bk.wb ? { wb: true } : {}), ev: [{ t: 0, k: "go", q: first }],
             questions: bk.questions.map((q) => ({ n: q.n, type: q.type, ...(q.u != null ? { u: q.u } : {}), ...(q.label ? { label: q.label } : {}) })) });   // label — 창고 교재 책 번호
   }
   const ctl = {
@@ -4730,7 +4846,7 @@ function HwTab({ cls, me, home, onChanged }) {
   };
   function retry(log, wrong) {
     const bk = (books || []).find((b) => b.id === log.bookId);
-    begin({ rid: log.rid, bookId: log.bookId, title: log.title, units: (bk && bk.units) || [], retry: { date: log.date, rid: log.rid },
+    begin({ rid: log.rid, bookId: log.bookId, title: log.title, units: (bk && bk.units) || [], retry: { date: log.date, rid: log.rid }, ...(bk && bk.wb ? { wb: true } : {}),
             questions: wrong.map((q) => { const o = bk && bk.questions.find((x) => x.n === q.n);
               return { n: q.n, type: q.type, ...(q.u != null ? { u: q.u } : {}), ...(o && o.label ? { label: o.label } : {}) }; }) });
   }
@@ -5026,6 +5142,7 @@ function PieceBoard({ cls }) {
 // 선생님 — 수업 전 판. 반 · 기간 · 교재로 «안 낸 학생 · 많이 틀린 문제 · 오래 걸린 문제 · 단원별» 을 본다
 function HwBoard({ cls }) {
   const books = useHwBooks(cls, HW_T);
+  const wbIds = useWbIds(cls);
   const [logs, setLogs] = useState(null);
   const [days, setDays] = useState(7);
   const [bookId, setBookId] = useState("");
@@ -5041,7 +5158,7 @@ function HwBoard({ cls }) {
   if (view) return <HwResult log={view} book={bookOf(view.bookId)} onBack={() => setView(null)} />;
 
   const since = days ? ymd(new Date(Date.now() - (days - 1) * 864e5)) : "";
-  const L = (logs || []).filter((l) => !l.teacher && l.date >= since && (!bookId || l.bookId === bookId));
+  const L = (logs || []).filter((l) => !l.teacher && !wbIds.has(l.bookId) && l.date >= since && (!bookId || l.bookId === bookId));
   const kids = (cls.roster || []).filter((r) => r && r.id && r.name && !r.teacher && !isEnded(r));
   const per = kids.map((r) => { const mine = L.filter((l) => l.sid === r.id); return { r, mine, s: hwSum(mine), last: mine[0] }; });
   // 문항별 — 교재:번호 로 모은다
@@ -7497,6 +7614,7 @@ function AdminView() {
   const [showEnded, setShowEnded] = useState(false); // 종강한 반 펼치기
   const [cls, setCls] = useState(null);
   const hwBooksT = useHwBooks(cls, HW_T);   // 과제 채점 메뉴는 교재가 걸린 반에만
+  const wbBooksT = useHwBooks(cls, HW_T, true);   // 오답 과제 메뉴도 걸린 반에만
   const [busyLogin, setBusyLogin] = useState(false);
   // 안내문이 생기면서 일반반의 "진도표"는 대개 안 쓰게 됐다. 다만 개별진도반은
   // 학생마다 진도계획표가 따로라 안내문(반 하나짜리)으로 대체되지 않는다.
@@ -7614,6 +7732,7 @@ function AdminView() {
           ...(isIndividual(cls) && !isClassEnded(cls) ? [{ key: "c:live", ico: "◐", label: "수업 로그" }] : []),
           { key: "c:mock", ico: "⏱", label: "실전 시험" },
           ...(hwBooksT && hwBooksT.length ? [{ key: "c:hwb", ico: "✎", label: "과제" }, { key: "c:wrong", ico: "✕", label: "오답 모아보기" }] : []),
+          ...(wbBooksT && wbBooksT.length ? [{ key: "c:wbb", ico: "↺", label: "오답 과제" }] : []),
           ...(!isClassEnded(cls) ? [{ key: "c:shelf", ico: "▦", label: "교재 고르기" }] : []),
           { key: "c:notes", ico: "✎", label: "강의노트" },
           { key: "c:textbooks", ico: "⚙", label: "반 설정" },
@@ -8974,6 +9093,7 @@ function AdminDays({ cls, canEdit, isOwner, meName, activeView, setActiveView, s
       {activeView === "mock" && <MockExamBoard cls={cls} />}
       {activeView === "hwb" && <HwBoard cls={cls} />}
       {activeView === "wrong" && <WrongBoard cls={cls} />}
+      {activeView === "wbb" && <WbBoard cls={cls} />}
       {activeView === "shelf" && <ShelfPicker cls={cls} canEdit={canEdit} onClassChanged={onClassChanged} />}
 
       {activeView === "days" && (
