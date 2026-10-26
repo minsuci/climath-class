@@ -760,6 +760,13 @@ Google Gemini 무료 등급, 모델 `gemini-2.5-flash-lite`.
 Vercel 환경변수 **`GEMINI_API_KEY`**. 답을 주지 않고 힌트만 주도록 시스템 프롬프트로 강제.
 수식은 LaTeX로 답하게 하고 앱에서 KaTeX(`MathText`)로 렌더. 최근 12개 메시지만 전달.
 
+### «지금 시험 중» 실시간 O/X (`MockExamLive` · api `liveMark`/`liveMarks`, 2026-10-26)
+선생님 반 «실전 시험» 탭의 번호 칩을 초록(맞음) · 빨강(틀림) · 노랑(서술형 · 꼬리문제 일부)으로 칠한다.
+- 학생 기기 `live()` → 답이 바뀌면 1.5초 뒤 `liveMark`(지금 답 전부). 서버가 examKeys 로 채점해 **`examLiveMarks/{cid}__{date}__{sid}`** 에 `{rid, m:{번호: o|x|h|p}}`
+- ⚠ O/X 를 `days/…/examLive` 에 쓰지 않는다 — days 아래는 같은 반 학생끼리 읽힌다(규칙 inClass). examLiveMarks 는 규칙에 없어 «전부 거절» → 학생은 못 읽는다. 서버도 학생에게 O/X 를 돌려주지 않는다(정답 맞히기 통로 막기)
+- examLive 문서에 `av`(답 바뀐 횟수)를 더 적는다. 선생님 판은 av 가 바뀌면 3초 뒤, 그리고 30초마다 `liveMarks` 로 받는다. rid 가 다른(지난) O/X 는 안 칠한다
+- 미리보기(make-preview.mjs)에도 같은 흉내가 있다(정답 ①·1)
+
 ---
 
 ## 과거에 겪은 버그와 원인

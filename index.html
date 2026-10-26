@@ -280,7 +280,14 @@ html,body{margin:0; padding:0;}
 .mx-lchips{display:flex; flex-wrap:wrap; gap:3px;}
 .mx-lchips span{width:24px; height:21px; font-size:11.5px; border:1.5px solid var(--line); border-radius:5px; display:inline-flex; align-items:center; justify-content:center; color:var(--muted); background:#fff;}
 .mx-lchips span.done{background:#e9eef6; color:var(--navy); font-weight:700;}
+.mx-lchips span.mo{background:#e3f4e8; border-color:#2e9d5b; color:#1f7a44; font-weight:700;}
+.mx-lchips span.mx{background:#fde8e8; border-color:#d64545; color:#b42318; font-weight:700;}
+.mx-lchips span.mh, .mx-lchips span.mp{background:#fff6d6; border-color:#d9a400; color:#8a6400; font-weight:700;}
 .mx-lchips span.cur{border-color:var(--navy); background:var(--navy); color:#fff;}
+.mx-lkey{display:inline-block; padding:0 5px; border-radius:4px; border:1.5px solid; font-weight:700;}
+.mx-lkey.o{background:#e3f4e8; border-color:#2e9d5b; color:#1f7a44;}
+.mx-lkey.x{background:#fde8e8; border-color:#d64545; color:#b42318;}
+.mx-lkey.p{background:#fff6d6; border-color:#d9a400; color:#8a6400;}
 .mx-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(54px,1fr)); gap:7px;}
 .mx-chip{border:2px solid var(--line); border-radius:10px; background:#fff; padding:6px 0 4px; text-align:center; line-height:1.15; cursor:pointer; font-family:inherit; color:var(--ink);}
 .mx-chip b{display:block; font-size:17px;}
@@ -2299,18 +2306,33 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
   // 선생님 판에 «몇 번을 푸는 중» 을 알린다. 번호나 푼 개수가 바뀔 때만 쓴다.
   // 실패해도 시험은 그대로 간다 — 이건 보기용이다
   const liveSig = useRef("");
+  // 선생님 판 실시간 O/X (10/26) — 답이 바뀌면 1.5초 뒤 지금 답을 서버로. 채점·저장은 서버(api/exam.js liveMark), 학생에겐 O/X 를 안 돌려준다
+  const markSig = useRef(""), markT = useRef(null);
+  function liveMarkSend(x) {
+    if (x.endT != null) return;
+    const sig = x.rid + "|" + JSON.stringify(x.answers);
+    if (sig === markSig.current) return;
+    markSig.current = sig;
+    clearTimeout(markT.current);
+    markT.current = setTimeout(() => {
+      pcApi({ action: "liveMark", cid: cls.id, sid: me.id, examId: x.examId, rid: x.rid, date: ymd(new Date(x.startedAt)), answers: x.answers })
+        .catch(() => { markSig.current = ""; });   // 실패하면 다음 답에 다시 보낸다
+    }, 1500);
+  }
   function live(x, state, score) {
     try {
       if (!x) return;
+      liveMarkSend(x);
       const done = x.questions.filter((q) => mxAnswered(x, q.n)).map((q) => q.n);
       const st = state || (x.endT != null ? "sending" : "run");
-      const sig = [x.rid, x.cur, done.join(","), st].join("|");
+      const av = x.ev.filter((e) => e.k === "ans").length;   // 답 바뀐 횟수 — 선생님 판이 O/X 를 다시 받을 때
+      const sig = [x.rid, x.cur, done.join(","), st, av].join("|");
       if (sig === liveSig.current) return;
       liveSig.current = sig;
       const lastGo = [...x.ev].reverse().find((e) => e.k === "go");
       examLiveCol(cls.id, ymd(new Date(x.startedAt))).doc(me.id).set({
         sid: me.id, name: me.name, rid: x.rid, examId: x.examId, title: x.title,
-        qs: x.questions.map((q) => q.n), cur: x.cur, curAt: lastGo ? lastGo.t : 0, done, state: st,
+        qs: x.questions.map((q) => q.n), cur: x.cur, curAt: lastGo ? lastGo.t : 0, done, av, state: st,
         score: score == null ? null : score, startedAt: x.startedAt, limitSec: x.limitSec,
         endT: x.endT == null ? null : x.endT, teacher: !!me.teacher, updated: Date.now(),
       }).catch(() => {});
@@ -3069,6 +3091,18 @@ function MockExamLive({ cls }) {
     const a = []; qs.forEach((d) => a.push(d.data())); setRows(a);
   }, () => setRows([])), [cls.id]);
   useEffect(() => { const t = setInterval(() => setTick((k) => k + 1), 1000); return () => clearInterval(t); }, []);
+  // 실시간 O/X (10/26) — 학생의 답 바뀐 횟수(av)가 달라지면 3초 뒤 서버에서 받는다(학생 기기가 1.5초 뒤 보낸다). 30초마다 한 번 더
+  const [marks, setMarks] = useState({});
+  const markKey = (rows || []).filter((r) => r.state !== "done" || Date.now() - r.updated < 600e3).map((r) => r.sid + ":" + r.rid + ":" + (r.av || 0)).sort().join(",");
+  useEffect(() => {
+    if (!markKey) return;
+    const sids = markKey.split(",").map((x) => x.split(":")[0]);
+    let gone = false;
+    const pull = () => pcApi({ action: "liveMarks", cid: cls.id, date: ymd(new Date()), sids })
+      .then((j) => { if (!gone) setMarks((o) => ({ ...o, ...(j.marks || {}) })); }).catch(() => {});
+    const t1 = setTimeout(pull, 3000), t2 = setInterval(pull, 30000);
+    return () => { gone = true; clearTimeout(t1); clearInterval(t2); };
+  }, [cls.id, markKey]);
   const now = Date.now();
   // 지금 보고 있는 학생만 — 낸 것은 아래 «결과» 에 있다. 시간이 2분 넘게 지났는데 안 낸 것은 남겨 둔다(끊긴 것일 수 있다)
   const on = (r) => r.state !== "done" && (r.limitSec + MX_OVER - (now - r.startedAt) / 1000) > -120;
@@ -3078,12 +3112,13 @@ function MockExamLive({ cls }) {
   if (!list.length) return null;
   return (
     <div className="cm-card">
-      <h3 className="cm-h3">지금 시험 중 <span className="cm-h-hint">(오늘 · 저절로 바뀝니다)</span></h3>
+      <h3 className="cm-h3">지금 시험 중 <span className="cm-h-hint">(오늘 · 저절로 바뀝니다 · <span className="mx-lkey o">초록</span> 맞음 <span className="mx-lkey x">빨강</span> 틀림 <span className="mx-lkey p">노랑</span> 서술형·일부)</span></h3>
       <div className="mx-live">
         {list.map((r) => {
           const el = (now - r.startedAt) / 1000, left = r.limitSec - el, going = on(r);
           const onQ = Math.max(0, el - (r.curAt || 0)), quiet = (now - r.updated) / 1000;
           const done = new Set(r.done || []);
+          const mk = marks[r.sid] && marks[r.sid].rid === r.rid ? marks[r.sid].m : {};
           return (
             <div key={r.sid} className={"mx-lrow" + (going ? "" : " off")}>
               <div className="mx-lhead">
@@ -3102,7 +3137,7 @@ function MockExamLive({ cls }) {
               )}
               <div className="mx-lchips">
                 {(r.qs || []).map((n) => (
-                  <span key={n} className={(going && r.state === "run" && n === r.cur ? "cur" : "") + (done.has(n) ? " done" : "")}>{n}</span>
+                  <span key={n} className={(going && r.state === "run" && n === r.cur ? "cur" : "") + (done.has(n) ? " done" : "") + (mk[n] && (done.has(n) || r.state !== "run") ? " m" + mk[n] : "")}>{n}</span>
                 ))}
               </div>
             </div>

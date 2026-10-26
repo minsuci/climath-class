@@ -410,10 +410,22 @@ const STUB = `
       if ("why" in b) rw.why = b.why; if (b.kind === "exam" && "rushed" in b) rw.rushed = !!b.rushed;
       touch(); return ok({ ok: true, log: JSON.parse(JSON.stringify(LW)) });
     }
+    /* 실시간 O/X (10/26) — 서버 liveMark · liveMarks 흉내. 정답은 미리보기 시험지대로 ①·1 */
+    if (b.action === "liveMark") {
+      var mx = ((store["appConfig/examList"] || {}).exams || []).filter(function(e){ return e.id === b.examId; })[0];
+      if (!mx) return bad("그 시험지가 없어요", 404);
+      var mm = {}; mx.questions.forEach(function(q){ var v = (b.answers || {})[q.n]; if (v == null || v === "") return; mm[q.n] = q.type === "essay" ? "p" : hwOk(q, v) ? "o" : "x"; });
+      store["examLiveMarks/" + b.cid + "__" + b.date + "__" + b.sid] = { rid: b.rid, m: mm }; return ok({ ok: true });
+    }
+    if (b.action === "liveMarks") {
+      if (!tch) return bad("선생님만 볼 수 있어요", 403);
+      var out = {}; (b.sids || []).forEach(function(sid){ var d = store["examLiveMarks/" + b.cid + "__" + b.date + "__" + sid]; if (d) out[sid] = d; });
+      return ok({ ok: true, marks: out });
+    }
     if (b.action === "pcItemsSet") { cfg.items = (b.items || []).map(function(x, i){ return Object.assign({}, x, { id: x.id || "n" + Date.now() + i }); }); store["appConfig/pieces"] = cfg; return ok({ ok: true, items: cfg.items }); }
     return ok({ ok: true });
   };
-  var PC_KEEP = { test: function(k){ return k === "appConfig/pieces" || k === "appConfig/pieceCouponIdx" || k.indexOf("hwLect/") === 0 || ["pieces", "days", "homework"].some(function(c){ return k.indexOf("classes/c-reg/" + c + "/") === 0; }); } };
+  var PC_KEEP = { test: function(k){ return k === "appConfig/pieces" || k === "appConfig/pieceCouponIdx" || k.indexOf("hwLect/") === 0 || k.indexOf("examLiveMarks/") === 0 || ["pieces", "days", "homework"].some(function(c){ return k.indexOf("classes/c-reg/" + c + "/") === 0; }); } };
   var pcSave = function(){ try { var o = {}; Object.keys(store).forEach(function(k){ if (PC_KEEP.test(k)) o[k] = store[k]; }); sessionStorage.setItem("__pvPc", JSON.stringify(o)); } catch(e){} };
   window.fetch = function(url, init){
     if (String(url).indexOf("/api/exam") < 0) return _fetch2(url, init);

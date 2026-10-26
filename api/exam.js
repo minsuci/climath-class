@@ -325,6 +325,43 @@ async function moveLog(res, b) {
 }
 const stripId = (d) => { const { id: _i, ...r } = d || {}; return r; };
 
+// ───────────── «지금 시험 중» 실시간 O/X (10/26) ─────────────
+// 학생 기기가 답이 바뀔 때마다 지금 답을 보낸다. 정답은 서버에만 있으니 채점도 여기서 하고 examLiveMarks 에 둔다.
+// ⚠ 반 친구끼리 서로 읽히는 examLive(days 아래)에는 O/X 를 안 쓴다 — 시험 중에 남의 정오가 보이면 안 된다.
+//    examLiveMarks 는 규칙에 없어(«전부 거절») 학생 기기가 못 읽는다. 학생에게는 O/X 를 돌려주지 않는다(답 맞히기 통로가 되지 않게)
+const liveMarkPath = (cid, date, sid) => "examLiveMarks/" + cid + "__" + date + "__" + sid;
+async function liveMark(res, claims, b) {
+  const cid = String(b.cid || ""), sid = String(b.sid || ""), examId = String(b.examId || ""), rid = String(b.rid || ""), date = String(b.date || "");
+  if (!cid || !sid || !examId || !/^[A-Za-z0-9_-]{6,40}$/.test(rid) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  const who = await hwWho(res, claims, cid, sid); if (!who) return;
+  const key = await getDoc("examKeys/" + examId).catch(() => null);
+  if (!key || key.kind === "hw") { res.status(404).json({ error: "그 시험지가 없어요" }); return; }
+  const answers = b.answers && typeof b.answers === "object" ? b.answers : {};
+  const m = {};   // 번호 → o 맞음 · x 틀림 · h 꼬리문제 일부 · p 서술형(선생님 채점). 안 적은 번호는 없음
+  for (const q of key.questions || []) {
+    const mine = normAns(q, answers[q.n]);
+    if (mine == null || (Array.isArray(mine) && !mine.some((v) => v != null && v !== ""))) continue;
+    if (q.type === "essay") { m[q.n] = "p"; continue; }
+    const g = gradeQ(q, mine);
+    m[q.n] = g.auto ? "o" : g.pa && g.pa.some(Boolean) ? "h" : "x";
+  }
+  await patchDoc(liveMarkPath(cid, date, sid), { cid, date, sid, rid, examId, m, at: Date.now() });
+  res.status(200).json({ ok: true });
+}
+// 선생님 판 — 지금 시험 중인 학생들의 O/X. {cid, date, sids:[…]}
+async function liveMarks(res, claims, b) {
+  if (!(claims.role === "teacher" || claims.role === "owner")) { res.status(403).json({ error: "선생님만 볼 수 있어요" }); return; }
+  const cid = String(b.cid || ""), date = String(b.date || "");
+  const sids = Array.isArray(b.sids) ? [...new Set(b.sids.map(String))].slice(0, 80) : [];
+  if (!cid || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  const marks = {};
+  await Promise.all(sids.map(async (sid) => {
+    const d = await getDoc(liveMarkPath(cid, date, sid)).catch(() => null);
+    if (d) marks[sid] = { rid: d.rid, m: d.m || {} };
+  }));
+  res.status(200).json({ ok: true, marks });
+}
+
 // ───────────── 제출 ─────────────
 async function submit(res, claims, b) {
   const cid = String(b.cid || ""), sid = String(b.sid || ""), examId = String(b.examId || "");
@@ -1552,6 +1589,8 @@ export default async function handler(req, res) {
     if (!claims) { res.status(403).json({ error: "로그인이 풀렸어요. 다시 들어와 주세요." }); return; }
     if (body.action === "aiKeyGet") return await aiKeyGet(res, claims);
     if (body.action === "submit") return await submit(res, claims, body);
+    if (body.action === "liveMark") return await liveMark(res, claims, body);
+    if (body.action === "liveMarks") return await liveMarks(res, claims, body);
     if (body.action === "fix") return await fixAnswer(res, claims, body);
     if (body.action === "hkExam") return await hkExam(res, claims, body);
     if (body.action === "hwSubmit") return await hwSubmit(res, claims, body);
