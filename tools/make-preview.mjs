@@ -281,13 +281,14 @@ const STUB = `
     if (b.action === "hwRetry" || b.action === "hwSelf") {
       var p = "classes/" + b.cid + "/days/" + b.date + "/hwLogs/" + b.rid, L = store[p]; if (!L) return bad("그 기록이 없어요", 404);
       var bk = ((store["appConfig/examList"] || {}).exams || []).filter(function(e){ return e.id === L.bookId; })[0], bn = {}; (bk.questions || []).forEach(function(q){ bn[q.n] = q; });
-      var gain = 0;
+      var gain = 0, nowR = Date.now();
       L.questions = L.questions.map(function(r){
         if (b.action === "hwSelf") { if (!(String(r.n) in (b.marks || {})) || r.auto !== null) return r; if (b.marks[r.n] === true) gain++; return Object.assign({}, r, { auto: b.marks[r.n] === true, self: true }); }
         if (!(r.n in (b.answers || {})) || r.auto !== false || r.fin) return r;
         var okk = hwOk(bn[r.n], b.answers[r.n]); if (okk) gain++;
-        return Object.assign({}, r, { tries: (r.tries || []).concat([{ a: b.answers[r.n], ok: okk, sec: 15, at: Date.now() }]), fin: okk });
+        return Object.assign({}, r, { tries: (r.tries || []).concat([{ a: b.answers[r.n], ok: okk, sec: 15, at: nowR }]), fin: okk });
       });
+      if (b.action === "hwRetry") L.retried = nowR;   // 서버와 같게 — 화면이 «방금 맞힌 것» 을 이 값으로 고른다
       L.correct = L.questions.filter(function(q){ return q.auto === true; }).length; L.pending = L.questions.filter(function(q){ return q.auto === null; }).length;
       L.fixed = L.questions.filter(function(q){ return q.auto === false && q.fin; }).length;
       if (!L.teacher && on) add(L.sid, gain, b.action === "hwSelf" ? "self" : "retry");
@@ -371,6 +372,44 @@ const STUB = `
       d6.prizes = d6.prizes.map(function(x){ return x.pid === b.pid ? np : x; });
       return ok({ ok: true, prize: np });
     }
+    /* 실전 시험 — 제출 · 끝난 뒤 다시 풀기(10/26) · «왜 틀렸어». 정답은 «객관식 ①, 단답 1» */
+    if (String(url).indexOf("/api/examimg") >= 0) {
+      var cv = document.createElement("canvas"); cv.width = 520; cv.height = 150; var g = cv.getContext("2d");
+      g.fillStyle = "#fff"; g.fillRect(0, 0, 520, 150); g.fillStyle = "#222"; g.font = "bold 22px sans-serif";
+      g.fillText((b.kind === "sol" ? "해설 " : "문제 ") + b.n + "번 (미리보기)", 20, 50); g.font = "17px sans-serif";
+      g.fillText(b.kind === "sol" ? "정답은 ① 또는 1 이에요." : "다음 중 옳은 것은? (정답 ① · 단답은 1)", 20, 95);
+      return ok({ png: cv.toDataURL("image/png").split(",")[1] });
+    }
+    if (b.action === "submit") {
+      var ex = ((store["appConfig/examList"] || {}).exams || []).filter(function(e){ return e.id === b.examId; })[0];
+      if (!ex) return bad("그 시험지가 없어요", 404);
+      var asT2 = tch || !!rowOf(b.sid).teacher, dt = kstDay();
+      var qx = ex.questions.map(function(q){ var a = b.answers[q.n]; a = a == null || a === "" ? null : q.type === "mc" ? Number(a) : String(a);
+        return { n: q.n, type: q.type, key: q.type === "mc" ? 1 : "1", answer: a, auto: hwOk(q, a) }; });
+      var cr = qx.filter(function(q){ return q.auto === true; }).length;
+      var lg = { rid: b.rid, cid: b.cid, sid: b.sid, name: rowOf(b.sid).name, examId: ex.id, title: ex.title, minutes: ex.minutes, limitSec: b.limitSec || ex.minutes * 60,
+        endT: b.endT, startedAt: b.startedAt, reason: b.reason || "submit", date: dt, questions: qx, ev: b.ev || [], override: {},
+        score: Math.round(cr / qx.length * 100), got: cr, totalPt: qx.length, correct: cr, n: qx.length, pending: 0, teacher: asT2, time: Date.now() };
+      store["classes/" + b.cid + "/days/" + dt] = store["classes/" + b.cid + "/days/" + dt] || { updated: Date.now() };
+      store["classes/" + b.cid + "/days/" + dt + "/examLogs/" + b.rid] = lg; touch();
+      return ok({ ok: true, log: lg });
+    }
+    if (b.action === "examRetry") {
+      var px = "classes/" + b.cid + "/days/" + b.date + "/examLogs/" + b.rid, LX = store[px]; if (!LX) return bad("그 기록이 없어요", 404);
+      var rx = LX.questions.filter(function(q){ return q.n === b.n; })[0];
+      if (!rx || rx.auto !== false || rx.fin) return bad("틀린 문제만 다시 풀어요");
+      var okx = hwOk(rx, b.answer);
+      rx.tries = (rx.tries || []).concat([{ a: b.answer, ok: okx, sec: Math.round(b.sec || 0), at: Date.now(), seen: b.seen || undefined }]); rx.fin = okx;
+      LX.retried = Date.now(); touch();
+      return ok({ ok: true, right: okx, log: JSON.parse(JSON.stringify(LX)) });
+    }
+    if (b.action === "whyMark") {
+      var pw = "classes/" + b.cid + "/days/" + b.date + "/" + (b.kind === "exam" ? "examLogs/" : "hwLogs/") + b.rid, LW = store[pw]; if (!LW) return bad("그 기록이 없어요", 404);
+      var rw = LW.questions.filter(function(q){ return q.n === b.n; })[0];
+      if (!rw || rw.auto !== false || rw.fin !== true) return bad("다시 풀어 맞힌 문제에만 적어요");
+      if ("why" in b) rw.why = b.why; if (b.kind === "exam" && "rushed" in b) rw.rushed = !!b.rushed;
+      touch(); return ok({ ok: true, log: JSON.parse(JSON.stringify(LW)) });
+    }
     if (b.action === "pcItemsSet") { cfg.items = (b.items || []).map(function(x, i){ return Object.assign({}, x, { id: x.id || "n" + Date.now() + i }); }); store["appConfig/pieces"] = cfg; return ok({ ok: true, items: cfg.items }); }
     return ok({ ok: true });
   };
@@ -383,6 +422,8 @@ const STUB = `
   /* 미리보기 과제 교재 — 일반반의 «교재A» 와 잇는다(정답: 객관식 ①, 단답 1, 25번은 스스로 채점) */
   store["appConfig/examList"] = { exams: [{ id: "pv-hw", kind: "hw", title: "교재A (미리보기 · 정답 ①)", link: "교재A", units: ["1단원", "2단원"], cids: ["c-reg"],
     questions: Array.from({ length: 100 }, function(_, i){ var n = i + 1; return { n: n, type: n === 25 ? "essay" : n % 10 === 0 ? "short" : "mc", u: n <= 50 ? 0 : 1 }; }) },
+    { id: "pv-mx", title: "실전 미리보기 (정답 ① · 단답 1)", minutes: 20, cids: ["c-reg"],
+      questions: Array.from({ length: 10 }, function(_, i){ return { n: i + 1, type: i >= 8 ? "short" : "mc" }; }) },
     { id: "pc-test", kind: "hw", free: true, title: "조각 시험 (아무 답이나 정답)", link: "", units: [], cids: ["c-reg"],
       questions: Array.from({ length: 20 }, function(_, i){ return { n: i + 1, type: "mc" }; }) }] };
   store["appConfig/pieces"] = { cids: ["c-reg"], items: [

@@ -1190,6 +1190,60 @@ async function hwSelf(res, claims, b) {
   res.status(200).json({ ok: true, log: { ...log, ...patch }, ...(pc ? { pieces: pc.add, bal: pc.bal } : {}) });
 }
 
+// ───────────── 실전 시험 — 끝난 뒤 틀린 문제 다시 풀기 (10/26 마왕님 «실전 시험 오답하는 기능 넣고 거기서도 데이터를 쌓자») ─────────────
+// 점수는 **처음 낸 답 그대로** — 다시 푼 것은 score · scores 칸 · 조각 어디에도 안 들어간다. 문항 줄에 tries[] · fin 만 붙는다(과제 hwRetry 와 같은 꼴).
+// 한 번에 한 문항. 꼬리문제 · 서술형은 자동 채점이 안 돼서 뺀다. seen = 정답 · 해설을 보고 푼 것(이유를 안 묻는다)
+async function examRetry(res, claims, b) {
+  const cid = String(b.cid || ""), date = String(b.date || ""), rid = String(b.rid || ""), n = Number(b.n);
+  if (!cid || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^[A-Za-z0-9_-]{6,40}$/.test(rid) || !Number.isInteger(n)) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  const path = "classes/" + cid + "/days/" + date + "/examLogs/" + rid;
+  const log = await getDoc(path).catch(() => null);
+  if (!log) { res.status(404).json({ error: "그 기록이 없어요" }); return; }
+  if (log.voided) { res.status(400).json({ error: "취소된 제출이에요" }); return; }
+  const who = await hwWho(res, claims, cid, log.sid); if (!who) return;
+  const key = await getDoc("examKeys/" + log.examId).catch(() => null);
+  const kq = key && (key.questions || []).find((q) => q.n === n);
+  const i = (log.questions || []).findIndex((q) => q.n === n);
+  if (!kq || i < 0) { res.status(404).json({ error: n + "번 정답을 찾지 못했어요" }); return; }
+  if (hasParts(kq) || kq.type === "essay") { res.status(400).json({ error: "이 문제는 앱에서 다시 채점할 수 없어요" }); return; }
+  const row = log.questions[i], ov = log.override || {};
+  if ((String(n) in ov ? ov[n] : row.auto) !== false) { res.status(400).json({ error: "틀린 문제만 다시 풀어요" }); return; }
+  if (row.fin === true) { res.status(400).json({ error: "이미 다시 풀어 맞혔어요" }); return; }
+  const mine = normAns(kq, b.answer);
+  if (mine == null) { res.status(400).json({ error: "답을 적어요" }); return; }
+  const ok = gradeQ(kq, mine).auto === true, now = Date.now();
+  const t = { a: mine, ok, sec: r1(Math.max(0, Math.min(3600, Number(b.sec) || 0))), at: now, ...(b.seen ? { seen: true } : {}) };
+  const questions = log.questions.map((q, k) => (k === i ? { ...q, tries: [...(q.tries || []), t].slice(-10), fin: ok } : q));
+  await patchDoc(path, { questions, retried: now });
+  res.status(200).json({ ok: true, right: ok, log: { ...log, questions, retried: now } });
+}
+
+// ───────────── «처음엔 왜 틀렸어?» — 다시 풀어 맞힌 문항에만 (10/26) ─────────────
+// 다시 맞힘 = «알았다» 는 증거 → 그때만 실수 종류를 묻는다. 못 고친 것은 몰라서 틀린 것이라 안 묻는다.
+// 과제(hw)는 why 만 · 실전(exam)은 why + rushed(시간에 쫓겼어 — 시험 상황에서만 뜻이 있다). why 는 null 이면 지움
+const WHY = ["calc", "misread", "ask", "case", "method", "stuck"];
+async function whyMark(res, claims, b) {
+  const kind = b.kind === "exam" ? "exam" : "hw";
+  const cid = String(b.cid || ""), date = String(b.date || ""), rid = String(b.rid || ""), n = Number(b.n);
+  if (!cid || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^[A-Za-z0-9_-]{6,40}$/.test(rid) || !Number.isInteger(n)) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  if (b.why != null && !WHY.includes(b.why)) { res.status(400).json({ error: "모르는 이유예요" }); return; }
+  const path = "classes/" + cid + "/days/" + date + "/" + (kind === "exam" ? "examLogs/" : "hwLogs/") + rid;
+  const log = await getDoc(path).catch(() => null);
+  if (!log) { res.status(404).json({ error: "그 기록이 없어요" }); return; }
+  const who = await hwWho(res, claims, cid, log.sid); if (!who) return;
+  const i = (log.questions || []).findIndex((q) => q.n === n);
+  const row = i >= 0 ? log.questions[i] : null, ov = log.override || {};
+  const firstX = row && (kind === "exam" ? (String(n) in ov ? ov[n] : row.auto) === false : row.auto === false);
+  const last = row && (row.tries || []).slice(-1)[0];
+  if (!firstX || row.fin !== true || (kind === "hw" && (row.lect || row.lectFreed)) || (last && last.seen)) { res.status(400).json({ error: "다시 풀어 맞힌 문제에만 적어요" }); return; }
+  const nx = { ...row };
+  if ("why" in b) nx.why = b.why == null ? null : b.why;
+  if (kind === "exam" && "rushed" in b) nx.rushed = !!b.rushed;
+  const questions = log.questions.map((q, k) => (k === i ? nx : q));
+  await patchDoc(path, { questions });
+  res.status(200).json({ ok: true, log: { ...log, questions } });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
   try {
@@ -1467,6 +1521,8 @@ export default async function handler(req, res) {
     if (body.action === "hwSubmit") return await hwSubmit(res, claims, body);
     if (body.action === "hwRetry") return await hwRetry(res, claims, body);
     if (body.action === "hwSelf") return await hwSelf(res, claims, body);
+    if (body.action === "examRetry") return await examRetry(res, claims, body);
+    if (body.action === "whyMark") return await whyMark(res, claims, body);
     if (body.action === "pcMe") return await pcMe(res, claims, body);
     if (body.action === "pcOpen") return await pcOpen(res, claims, body);
     if (body.action === "pcSwap") return await pcSwap(res, claims, body);

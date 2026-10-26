@@ -5,12 +5,15 @@
 //
 // 쌓는 곳: %USERPROFILE%\.climath\learn-data\
 //   학습기록.jsonl   한 줄 = {kind(시험|과제), date, cid, cls, sid, name, src(시험지·교재 id), srcName, rid, n, type,
-//                    unit, also, concept, lv, pt, answer, key, first(처음 채점 o/x/null), final(마지막 o/x/null), retries, sec, late, score}
+//                    unit, also, concept, lv, pt, answer, key, first(처음 채점 o/x/null), final(마지막 o/x/null), retries, sec, late, score,
+//                    why(다시 풀어 맞혔을 때 고른 «처음엔 왜 틀렸어» 코드 · 없으면 null), rushed(실전만 — 시간에 쫓겼어 · 과제는 null)}
 //                    **지우지 않는다** — 앱에서 기록·시험지가 지워져도 여기엔 남는다(같은 rid·번호는 새 값으로 덮음)
 //   학습기록.csv     위와 같은 것(엑셀용) — 매번 jsonl 에서 다시 만든다
 //   raw\YYYY-MM-DD\  그날 받은 원본(시험지 정의 · 반 명단 · 결과) — 무엇이 바뀌었는지 되짚을 때
 // 단원 꼬리표: 과제 교재는 교재의 units · 문항 u. 실전 시험은 꼬리표 파일(TAGS 아래)이 있으면 붙인다.
 // 빼는 것: 선생님 모드로 낸 것 · «이 제출 취소» 된 것.
+// 다시 풀기(10/26~): 실전도 끝난 뒤 틀린 문제를 다시 푼다(문항 줄 tries[] · fin). first 는 처음 채점 그대로, final · retries 는 다시 푼 결과.
+//   why 코드: calc 계산·옮겨 적기 · misread 문제를 잘못 읽음 · ask 묻는 것 착각 · case 경우·끝값 빠뜨림 · method 방법이 안 떠오름 · stuck 손 못 댐
 // 매일 밤 작업 스케줄러가 돌린다(«클래스앱 학습기록», 23:40). 기록 ~\.climath\learn-data\log.txt
 import fs from "fs";
 import os from "os";
@@ -65,7 +68,7 @@ async function main() {
         const ov = l.override && q.n in l.override ? l.override[q.n] : q.auto, tg = t[q.n] || t[String(q.n)] || {};
         const base = { kind: "시험", date: l.date, cid: c.id, cls: c.name, sid: l.sid, name: l.name, src: l.examId, srcName: l.title, rid: l.rid, n: q.n, type: q.type,
           unit: tg.unit || (kq[q.n] && kq[q.n].label) || null, also: tg.also || [], concept: tg.concept || null, lv: tg.lv || null,
-          sec: Math.round((sec[q.n] || 0) * 10) / 10, late: !!q.late, score: l.score };
+          sec: Math.round((sec[q.n] || 0) * 10) / 10, late: !!q.late, score: l.score, why: null, rushed: null };
         // 꼬리문제(10/19~)는 칸마다 한 줄 — 단원 꼬리표는 그 번호 것을 그대로. 시간은 번호 단위라 칸마다 같은 값
         if (Array.isArray(q.parts) && q.parts.length) {
           const all = q.parts.every((p) => typeof p.pt === "number" && p.pt > 0), sum = all ? q.parts.reduce((a, p) => a + p.pt, 0) : 0;
@@ -77,7 +80,11 @@ async function main() {
           });
           continue;
         }
-        rows.push({ ...base, pt: q.pt != null ? q.pt : null, answer: q.answer, key: q.key != null ? q.key : null, first: ox(ov), final: ox(ov), retries: 0 });
+        // 다시 풀기는 처음 틀린 문항에만 붙는다(점수는 처음 답 그대로). fin 이 없으면 처음 채점이 곧 마지막
+        const tr = q.tries || [];
+        rows.push({ ...base, pt: q.pt != null ? q.pt : null, answer: q.answer, key: q.key != null ? q.key : null, first: ox(ov),
+          final: ox(tr.length && q.fin != null ? q.fin : ov), retries: tr.length, why: q.why || null, rushed: q.rushed == null ? null : !!q.rushed,
+          seen: tr.some((t) => t.seen) });
       }
     }
     for (const l of hl) {
@@ -89,7 +96,8 @@ async function main() {
         rows.push({ kind: "과제", date: l.date, cid: c.id, cls: c.name, sid: l.sid, name: l.name, src: l.bookId, srcName: l.title, rid: l.rid, n: q.n, type: q.type,
           unit: u != null && units[u] ? units[u] : null, also: [], concept: null, lv: null, pt: null, answer: q.answer,
           key: kq[q.n] && kq[q.n].ans != null ? kq[q.n].ans : null, first: ox(q.auto), final: ox(q.fin != null ? q.fin : q.auto),
-          retries: (q.tries || []).length, sec: q.sec != null ? q.sec : null, late: false, score: null, lect: !!(q.lect || q.lectFreed) });
+          retries: (q.tries || []).length, sec: q.sec != null ? q.sec : null, late: false, score: null, lect: !!(q.lect || q.lectFreed),
+          why: q.why || null, rushed: null });
       }
     }
   }
@@ -104,7 +112,7 @@ async function main() {
   rows.forEach((r) => all.set(id(r), r));
   const list = [...all.values()].sort((a, b) => (a.date + a.name + a.src + String(a.n).padStart(4, "0")).localeCompare(b.date + b.name + b.src + String(b.n).padStart(4, "0")));
   fs.writeFileSync(F + ".tmp", list.map((r) => JSON.stringify(r)).join("\n") + "\n"); fs.renameSync(F + ".tmp", F);
-  const cols = ["kind", "date", "cls", "name", "srcName", "n", "part", "type", "unit", "concept", "lv", "first", "final", "retries", "sec", "late", "answer", "key", "pt", "score", "src", "cid", "sid", "rid"];
+  const cols = ["kind", "date", "cls", "name", "srcName", "n", "part", "type", "unit", "concept", "lv", "first", "final", "retries", "why", "rushed", "sec", "late", "answer", "key", "pt", "score", "src", "cid", "sid", "rid"];
   const esc = (v) => { const s = v == null ? "" : Array.isArray(v) ? v.join("/") : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   fs.writeFileSync(path.join(OUT, "학습기록.csv"), "﻿" + cols.join(",") + "\n" + list.map((r) => cols.map((c) => esc(r[c])).join(",")).join("\n") + "\n");
   const students = new Set(list.map((r) => r.name)).size;

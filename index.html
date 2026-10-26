@@ -332,6 +332,16 @@ html,body{margin:0; padding:0;}
 .mx-mark.o{color:var(--green); background:#e3f0e8;} .mx-mark.x{color:#d6453f; background:#fae3e2;} .mx-mark.q{color:#9a6b12; background:#f6ecd2;}
 button.mx-mark{border:1px dashed currentColor; cursor:pointer;}
 .mx-long{color:#d6453f; font-weight:700;}
+.why-box{background:#f3f7f1; border:1.5px solid #bcd9c4; border-radius:12px; padding:10px 12px; margin:8px 0;}
+.why-q{font-weight:800; font-size:14px; margin-bottom:7px;} .why-q small{font-weight:600; color:var(--muted); margin-left:4px;}
+.why-chips{display:flex; flex-wrap:wrap; gap:6px;}
+.why-chip{border:1px solid var(--line); background:#fff; border-radius:999px; padding:6px 11px; font-size:13px; font-weight:700; font-family:inherit; color:var(--ink); cursor:pointer;}
+.why-chip.on{background:var(--navy); border-color:var(--navy); color:#fff;}
+.why-chip[disabled]{opacity:.6;}
+.why-rush{display:inline-flex; align-items:center; gap:6px; margin-top:9px; font-size:13.5px; font-weight:700;}
+.why-tag{display:block; font-size:10.5px; font-weight:700; color:#3d6b4b; white-space:nowrap;}
+.mx-retry{border-top:1px solid var(--line); padding:10px 2px 2px; margin-top:8px;}
+.mx-retry .mx-pad button.on{background:var(--navy); border-color:var(--navy); color:#fff;}
 .cm-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(34px,1fr)); gap:5px; user-select:none; -webkit-user-select:none;}
 .cm-cell{display:flex; align-items:center; justify-content:center; padding:7px 0; font-size:11px; border-radius:7px; background:#f0eadd; color:var(--muted); border:1px solid var(--line);}
 button.cm-cell{cursor:pointer; font-family:inherit;}
@@ -2599,7 +2609,8 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
 
 // canMarkSub — 답 고정(lock) 시험에서도 학생이 **주관식(단답·서술)만** O/X 를 직접 고친다(10/15 마왕님).
 //   객관식은 그대로 잠금. 학생이 고친 칸은 selfOv 에 적어 두고 «스스로» 표시 — 선생님이 보고 다시 고칠 수 있다
-function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
+// canRetry — 학생이 끝난 뒤 틀린 문제를 다시 푼다(10/26). 점수 · 점수 칸 · 순위는 처음 낸 답 그대로, 다시 푼 것은 문항 줄 tries[] 에만(서버 examRetry)
+function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, canRetry, onBack }) {
   const [L, setL] = useState(log);
   const [saving, setSaving] = useState(false);
   useEffect(() => { setL(log); }, [log]);
@@ -2641,7 +2652,35 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
   // 해설은 눌러야 열린다 — 먼저 다시 풀어 보게. 한 번 열면 다음 번호에서도 열린 채로
   const [showSol, setShowSol] = useState(false);
   useEffect(() => { if (see != null && showSol) fetchImg(see, "sol"); }, [see, showSol]);
-  function openQ(n) { setSee(n); fetchImg(n, "q"); }
+  // 다시 풀기 — 자동 채점되는 문항(꼬리문제 · 서술형 빼고)만. 아직 못 맞힌 동안은 정답을 가린다(보면 seen — 이유를 안 묻는다)
+  const canRt = (q) => !!canRetry && !L.voided && mxQOk(q, L.override || {}) === false && !mxHasParts(q) && q.type !== "essay" && q.fin !== true;
+  const seenK = "climath_mxseen_" + L.rid;
+  const [seen, setSeen] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem(seenK) || "[]")); } catch (e) { return new Set(); } });
+  const addSeen = (n) => setSeen((s) => { if (s.has(n)) return s; const x = new Set(s); x.add(n); try { localStorage.setItem(seenK, JSON.stringify([...x])); } catch (e) {} return x; });
+  const hideKey = (q) => canRt(q) && !seen.has(q.n);
+  const [rt, setRt] = useState({ n: null, buf: "", t0: 0, msg: "", busy: false });
+  const [okNow, setOkNow] = useState([]);   // 이 화면에서 다시 풀어 맞힌 번호 — 그 순간에만 «처음엔 왜 틀렸어?»
+  useEffect(() => { if (see != null && showSol) { const q = L.questions.find((x) => x.n === see); if (q && canRt(q)) addSeen(see); } }, [see, showSol]);
+  function openQ(n) {
+    setSee(n); fetchImg(n, "q");
+    const q = L.questions.find((x) => x.n === n);
+    if (q && canRt(q)) { if (!seen.has(n)) setShowSol(false); setRt({ n, buf: q.multi ? [] : "", t0: Date.now(), msg: "", busy: false }); }
+  }
+  async function sendRetry(q) {
+    if (rt.busy) return;
+    setRt((x) => ({ ...x, busy: true, msg: "" }));
+    try {
+      const u = firebase.auth().currentUser; if (!u) throw new Error("로그인이 풀렸어요");
+      const r = await fetch("/api/exam", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken: await u.getIdToken(), action: "examRetry", cid: L.cid, date: L.date, rid: L.rid, n: q.n,
+          answer: rt.buf, sec: (Date.now() - rt.t0) / 1000, seen: seen.has(q.n) }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "채점하지 못했어요");
+      setL(j.log);
+      if (j.right) { setOkNow((a) => [...a, q.n]); setRt((x) => ({ ...x, busy: false, msg: "" })); }
+      else setRt({ n: q.n, buf: q.multi ? [] : "", t0: Date.now(), msg: "또 틀렸어요 — 한 번 더 풀어 봐요", busy: false });
+    } catch (e) { setRt((x) => ({ ...x, busy: false, msg: e.message })); }
+  }
   async function fetchImg(n, kind) {
     const key = kind + n;
     if (imgs[key]) return;
@@ -2740,6 +2779,7 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
   const shown = mxAnsText;
   const keyShown = mxKeyText;
   // 꼬리문제 칸을 한 줄씩
+  const anyRt = !!canRetry || L.questions.some((q) => (q.tries || []).length);
   const lines = (q, f) => <div className="mx-plines">{q.parts.map((p, j) => <span key={j}><small>{p.label}</small>{f(j)}</span>)}</div>;
   const at = (v, j) => { const x = Array.isArray(v) ? v[j] : null; return x == null || x === "" ? "–" : x; };
 
@@ -2774,6 +2814,11 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
         </div>
       )}
       {A.pending > 0 && <div className="mx-note">서술형 {A.pending}개가 아직 채점 전이에요. 아래 표에서 «채점» 을 눌러 O/X 를 정해 주세요.</div>}
+      {(() => { const w = L.questions.filter(canRt); return w.length > 0 && (
+        <div className="mx-note" style={{display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap"}}>
+          <span style={{flex: 1, minWidth: 200}}>틀린 <b>{w.length}문제</b>를 다시 풀 수 있어요. 점수는 <b>처음 낸 답 그대로</b>예요. 정답은 다시 풀고 나서 보여요.</span>
+          <button className="mx-btn primary" onClick={() => openQ(w[0].n)}>다시 풀기 — {w[0].n}번부터</button>
+        </div>); })()}
     </div>
 
     <div className="cm-card">
@@ -2797,7 +2842,7 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
     <div className="cm-card">
       <div className="mx-tw">
         <table className="mx-table">
-          <thead><tr><th>번호</th><th>내 답</th><th>정답</th><th>채점</th><th>시간</th><th>들른 횟수</th><th>답 바꿈</th></tr></thead>
+          <thead><tr><th>번호</th><th>내 답</th><th>정답</th><th>채점</th>{anyRt ? <th>다시</th> : null}<th>시간</th><th>들른 횟수</th><th>답 바꿈</th></tr></thead>
           <tbody>
             {A.rows.map((r) => {
               const k = kind(r), txt = r.ok === null ? "채점" : r.ok ? "O" : "X";
@@ -2808,7 +2853,7 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
                     {r.q.fixed ? <span className="mx-fixtag" title={"고친 선생님: " + (r.q.fixed.by || "")}>선생님 고침 · 원래 {shown(r.q, r.q.fixed.from)}</span> : null}
                     {canFix && !L.voided ? <button className="cm-link" style={{display: "block", fontSize: 11, margin: "2px auto 0"}} disabled={saving} onClick={() => fixAns(r.q.n)}>답 고치기</button> : null}
                     {r.q.late ? <div className="mx-latetag" title="시간이 끝난 뒤에 적거나 바꾼 답">시간 뒤{r.q.answerIn != null ? " · 그때 " + shown(r.q, r.q.answerIn) : ""}</div> : null}</td>
-                  <td style={r.q.type === "mc" ? {fontSize: 19} : null}>{mxHasParts(r.q) ? <>{lines(r.q, (j) => [].concat(r.q.parts[j].key).join(" / "))}{r.q.any || r.q.parts.some((p) => p.g != null) ? <div className="cm-hint" style={{fontSize: 11}}>{r.q.any ? "순서 무관" : "묶음 안 순서 무관"}</div> : null}</> : keyShown(r.q)}</td>
+                  <td style={r.q.type === "mc" && !hideKey(r.q) ? {fontSize: 19} : null}>{hideKey(r.q) ? <button className="cm-link" style={{fontSize: 12, whiteSpace: "nowrap"}} onClick={() => addSeen(r.q.n)} title="보면 다시 풀어 맞혀도 «왜 틀렸어» 를 안 물어요">보기</button> : mxHasParts(r.q) ? <>{lines(r.q, (j) => [].concat(r.q.parts[j].key).join(" / "))}{r.q.any || r.q.parts.some((p) => p.g != null) ? <div className="cm-hint" style={{fontSize: 11}}>{r.q.any ? "순서 무관" : "묶음 안 순서 무관"}</div> : null}</> : keyShown(r.q)}</td>
                   <td>{mxHasParts(r.q) ? (
                     <div className="mx-pmarks">{mxPartOks(r.q, L.override || {}).map((o, j) => {
                       const c = o ? "o" : "x", t = o ? "O" : "X";
@@ -2820,6 +2865,9 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
                     ? <button className={"mx-mark " + (k === "u" ? "x" : k)} onClick={() => toggle(r.q.n)} title="눌러서 고치기">{txt}</button>
                     : <span className={"mx-mark " + (k === "u" ? "x" : k)}>{txt}</span>}
                     {Object.keys(L.selfOv || {}).some((x) => x === String(r.q.n) || x.startsWith(r.q.n + ".")) ? <div className="mx-latetag" title="학생이 직접 O/X 를 고친 문항">스스로</div> : null}</td>
+                  {anyRt ? <td>{(r.q.tries || []).map((t, i) => <span key={i} style={{fontWeight: 800, marginRight: 4, color: t.ok ? "var(--green)" : "#d6453f"}} title={t.seen ? "정답 · 해설을 보고 푼 것" : ""}>{t.ok ? "O" : "X"}{t.seen ? "°" : ""}</span>)}
+                    {canRt(r.q) ? <button className="cm-link" style={{display: "block", fontSize: 12, margin: "0 auto"}} onClick={() => openQ(r.q.n)}>다시 풀기</button> : null}
+                    {r.q.why ? <span className="why-tag">{whyText(r.q.why)}</span> : null}{r.q.rushed ? <span className="why-tag">시간에 쫓김</span> : null}</td> : null}
                   <td className={r.sec > avg * 2 ? "mx-long" : ""}>{r.sec ? mxClock(r.sec) : "–"}</td>
                   <td>{r.visits ? r.visits + "번" : "–"}</td>
                   <td>{r.changes > 1 ? (r.changes - 1) + "번" : ""}</td>
@@ -2846,7 +2894,7 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
             <div className="mx-qtop">
               <h4>{mxQName(r.q)}</h4>
               <span className={"mx-mark " + (k === "u" ? "x" : k)}>{r.ok === null ? "채점" : r.ok ? "O" : "X"}</span>
-              <span className="cm-hint">내 답 <b>{shown(r.q, r.q.answer)}</b> · 정답 <b>{keyShown(r.q)}</b>{r.sec ? " · " + mxClock(r.sec) : ""}</span>
+              <span className="cm-hint">내 답 <b>{shown(r.q, r.q.answer)}</b> · 정답 <b>{hideKey(r.q) ? "다시 풀고 나서" : keyShown(r.q)}</b>{r.sec ? " · " + mxClock(r.sec) : ""}</span>
               <span style={{flex: 1}} />
               <button className="cm-link" onClick={() => setSee(null)}>닫기 ✕</button>
             </div>
@@ -2863,10 +2911,30 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, onBack }) {
                 </div>
               )}
             </div>
+            {(canRt(r.q) || okNow.includes(see)) && (
+              <div className="mx-retry">
+                {canRt(r.q) && rt.n === see ? (<>
+                  <div style={{fontWeight: 800, fontSize: 14, marginBottom: 6}}>다시 풀기 <small className="cm-hint">점수는 처음 낸 답 그대로{(r.q.tries || []).length ? " · " + r.q.tries.length + "번 다시 풂" : ""}</small></div>
+                  {r.q.type === "mc" ? (
+                    <div className="mx-pad">{[1, 2, 3, 4, 5].map((c) => {
+                      const on = r.q.multi ? rt.buf.includes(c) : rt.buf === c;
+                      return <button key={c} className={on ? "on" : ""} onClick={() => setRt((x) => ({ ...x, msg: "", buf: r.q.multi ? (x.buf.includes(c) ? x.buf.filter((y) => y !== c) : [...x.buf, c]) : c }))}>{MX_CIRC[c] || c}</button>;
+                    })}</div>
+                  ) : <input className="cm-input" style={{margin: 0}} value={rt.buf} placeholder="답 (분수는 3/4)" onChange={(e) => setRt((x) => ({ ...x, msg: "", buf: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter") sendRetry(r.q); }} />}
+                  <div style={{display: "flex", gap: 10, alignItems: "center", marginTop: 8}}>
+                    <button className="mx-btn primary" disabled={rt.busy || rt.buf === "" || (Array.isArray(rt.buf) && !rt.buf.length)} onClick={() => sendRetry(r.q)}>{rt.busy ? "채점 중…" : "채점"}</button>
+                    {rt.msg ? <span style={{color: "#d6453f", fontWeight: 700, fontSize: 13.5}}>{rt.msg}</span> : null}
+                  </div>
+                </>) : okNow.includes(see) ? (<>
+                  <div style={{fontWeight: 800, color: "var(--green)"}}>다시 풀어 맞혔어요 ✓</div>
+                  {!((r.q.tries || []).slice(-1)[0] || {}).seen && <WhyPick kind="exam" log={L} n={see} onLog={setL} />}
+                </>) : null}
+              </div>
+            )}
             <div className="mx-foot">
               <button className="mx-btn" disabled={!pv} onClick={() => pv && openQ(pv.q.n)}>◀ {pv ? pv.q.n + "번" : ""}</button>
               <span style={{flex: 1}} />
-              <button className={"mx-btn" + (showSol ? "" : " primary")} onClick={() => setShowSol((v) => !v)}>{showSol ? "해설 접기" : "해설 보기"}</button>
+              <button className={"mx-btn" + (showSol || canRt(r.q) ? "" : " primary")} onClick={() => setShowSol((v) => !v)}>{showSol ? "해설 접기" : "해설 보기"}</button>
               <span style={{flex: 1}} />
               <button className="mx-btn" disabled={!nx} onClick={() => nx && openQ(nx.q.n)}>{nx ? nx.q.n + "번" : ""} ▶</button>
             </div>
@@ -2943,7 +3011,7 @@ function MockExamTab({ cls, me }) {
       onDone={(log) => { setRunning(false); setView(log); setAgain((x) => x + 1); }}
       onAbandon={() => setRunning(false)} />;
   }
-  if (view) return <MockExamResult log={view} canMark={!view.lock || !!me.teacher} canMarkSub={!!view.lock && !me.teacher} canFix={!!me.teacher}
+  if (view) return <MockExamResult log={view} canMark={!view.lock || !!me.teacher} canMarkSub={!!view.lock && !me.teacher} canFix={!!me.teacher} canRetry={!me.teacher}
     onBack={() => { setView(null); setAgain((x) => x + 1); }} />;
 
   return (<>
@@ -3791,6 +3859,38 @@ const hwAns = (q, v) => (v == null || v === "" ? "–" : q.type === "mc" ? MX_CI
 // 첫 시도: O · X · –(안 적음) · ?(서술형)
 const hwFirst = (q) => (q.answer == null ? "–" : q.auto === null ? "?" : q.auto ? "O" : "X");
 const hwWrong = (q) => q.auto === false && q.fin !== true && !q.self;   // 아직 못 맞힌 것 (안 적은 것 포함). 스스로 채점한 것은 다시 풀기에서 뺀다
+// «처음엔 왜 틀렸어?» (10/26) — 다시 풀어 맞힌 **그 순간에만** 묻는다(맞힘 = 알았다는 증거, 못 고친 건 몰라서 틀림).
+// 키는 서버 WHY 와 같게. 하나만 고르고 다시 누르면 지움 · 안 눌러도 된다. rushed(시간에 쫓겼어)는 실전에만 — 집 과제는 시간 제한이 없다
+const WHY_LIST = [["calc", "계산 · 옮겨 적기"], ["misread", "문제를 잘못 읽음"], ["ask", "묻는 것 착각"], ["case", "경우 · 끝값 빠뜨림"], ["method", "방법이 안 떠오름"], ["stuck", "손 못 댐"]];
+const whyText = (k) => (WHY_LIST.find((x) => x[0] === k) || [])[1] || "";
+function WhyPick({ kind, log, n, onLog }) {
+  const row = (log.questions || []).find((q) => q.n === n) || {};
+  const [busy, setBusy] = useState(false);
+  async function save(patch) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const u = firebase.auth().currentUser; if (!u) throw new Error("로그인이 풀렸어요");
+      const r = await fetch("/api/exam", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken: await u.getIdToken(), action: "whyMark", kind, cid: log.cid, date: log.date, rid: log.rid, n, ...patch }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "저장하지 못했어요");
+      onLog(j.log);
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+  return (
+    <div className="why-box">
+      <div className="why-q">처음엔 왜 틀렸어? <small>하나만 · 안 눌러도 돼요</small></div>
+      <div className="why-chips">{WHY_LIST.map(([k, t]) => (
+        <button key={k} className={"why-chip" + (row.why === k ? " on" : "")} disabled={busy} onClick={() => save({ why: row.why === k ? null : k })}>{t}</button>
+      ))}</div>
+      {kind === "exam" && (
+        <label className="why-rush"><input type="checkbox" checked={!!row.rushed} disabled={busy} onChange={(e) => save({ rushed: e.target.checked })} /> 시간에 쫓겼어</label>
+      )}
+    </div>
+  );
+}
 // 여러 기록을 합친 숫자 — 학생 «내 기록» 과 선생님 판이 같이 쓴다
 function hwSum(logs) {
   let n = 0, tried = 0, ok = 0, blank = 0, fixed = 0, sec = 0, secN = 0;
@@ -4237,7 +4337,7 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
       let j = null; try { j = await r.json(); } catch (e) {}
       if (!r.ok) throw new Error((j && j.error) || "제출하지 못했어요 (" + r.status + ")");
       mxSave(K, null);
-      onDone(j.log);
+      onDone(j.log, !!f.retry);
     } catch (e) {
       put({ ...f, sending: false });
       setErr(e.message || "제출하지 못했어요");
@@ -4434,11 +4534,14 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
 }
 
 // 한 번 낸 것의 결과. 학생은 여기서 틀린 것을 다시 푼다(onRetry). 정답은 보여 주지 않는다 — 다시 풀어야 하니까
-function HwResult({ log: log0, book, onBack, onRetry, canSelf }) {
+// fresh — 방금 다시 풀기를 내고 온 것. 그때 맞힌 문항에만 «처음엔 왜 틀렸어?» 를 띄운다(나중에 기록을 열면 안 뜬다)
+function HwResult({ log: log0, book, onBack, onRetry, canSelf, fresh }) {
   const [log, setLog] = useState(log0);
   const [busy, setBusy] = useState(false);
   useEffect(() => { setLog(log0); }, [log0]);
   const rows = log.questions || [];
+  // 해설 · 강의로 고친 것(수업 풀이 lect / 나중에 풀린 lectFreed)은 안 묻는다
+  const justFixed = fresh ? rows.filter((q) => q.auto === false && q.fin === true && !q.lect && !q.lectFreed && (q.tries || []).length && q.tries[q.tries.length - 1].at === log.retried) : [];
   const lbl = {}; ((book && book.questions) || []).forEach((x) => { if (x.label) lbl[x.n] = x.label; });   // 창고 교재 — 책 번호
   const selfTodo = rows.filter((q) => q.auto === null && q.answer != null);
   // 앱에 못 적는 답 — 책 빠른정답을 보고 학생이 정한다. 한 번 정하면 못 바꾼다(서버 hwSelf)
@@ -4479,6 +4582,15 @@ function HwResult({ log: log0, book, onBack, onRetry, canSelf }) {
           return <div className="pc-line">🧩 조각 <b>+{log.pieces.pts + fx + sf}</b><span> · 처음 맞힘 {log.pieces.first}{log.pieces.streaks ? " · 5연속 " + log.pieces.streaks + "번" : ""}{fx ? " · 다시 맞힘 " + fx : ""}{sf ? " · 스스로 채점 O " + sf : ""}{lc ? " · 수업 풀이 " + lc + "문제" + (hd ? " (보류 " + hd + "개 — 선생님이 풀면 들어와요)" : "") : ""}{rows.some((q) => hwWrong(q) && !q.lect) ? " · 틀린 문제는 다시 풀어 맞히면 1개씩" : ""}</span></div>;
         })()
       )}
+      {justFixed.length > 0 && (
+        <div style={{marginBottom: 12}}>
+          <div style={{fontWeight: 800, fontSize: 15, color: "var(--green)"}}>다시 풀어 {justFixed.length}문제 맞혔어요</div>
+          {justFixed.map((q) => (
+            <div key={q.n}><b style={{fontSize: 13.5}}>{q.n}번{lbl[q.n] ? " · " + lbl[q.n] : ""}</b>
+              <WhyPick kind="hw" log={log} n={q.n} onLog={setLog} /></div>
+          ))}
+        </div>
+      )}
       {onRetry && wrong.length > 0 && (
         <button className="cm-btn cm-btn-primary" style={{marginBottom: 12}} onClick={() => onRetry(log, wrong)}>틀린 {wrong.length}문제 다시 풀기</button>
       )}
@@ -4498,7 +4610,7 @@ function HwResult({ log: log0, book, onBack, onRetry, canSelf }) {
                   <button className="mx-btn" style={{padding: "3px 10px", marginRight: 4}} disabled={busy} onClick={() => mark(q.n, true)}>O</button>
                   <button className="mx-btn" style={{padding: "3px 10px"}} disabled={busy} onClick={() => mark(q.n, false)}>X</button>
                 </>) : f}{q.self ? <small style={{fontWeight: 600, color: "var(--muted)", marginLeft: 3}}>스스로</small> : null}</td>
-              <td>{(q.tries || []).map((t, i) => <span key={i} style={{fontWeight: 800, marginRight: 4, color: t.ok ? "var(--green)" : "#d6453f"}}>{t.ok ? "O" : "X"}</span>)}</td>
+              <td>{(q.tries || []).map((t, i) => <span key={i} style={{fontWeight: 800, marginRight: 4, color: t.ok ? "var(--green)" : "#d6453f"}}>{t.ok ? "O" : "X"}</span>)}{q.why ? <span className="why-tag">{whyText(q.why)}</span> : null}</td>
               <td style={{color: slow.includes(q.n) ? "#b3261e" : undefined, fontWeight: slow.includes(q.n) ? 700 : undefined}}>{q.sec ? mxClock(q.sec) : ""}</td>
             </tr>
           );
@@ -4516,6 +4628,7 @@ function HwTab({ cls, me, home, onChanged }) {
   const books = useHwBooks(cls, me);
   const [running, setRunning] = useState(() => !!mxLoad(K));
   const [view, setView] = useState(null);
+  const [fresh, setFresh] = useState(false);   // 방금 다시 풀기를 낸 결과 — «처음엔 왜 틀렸어?» 를 띄운다
   const [bookId, setBookId] = useState(() => { try { return localStorage.getItem("climath_hw_book") || ""; } catch (e) { return ""; } });
   const [past, setPast] = useState(null);
   const [again, setAgain] = useState(0);
@@ -4566,8 +4679,8 @@ function HwTab({ cls, me, home, onChanged }) {
 
   const runBook = running ? (mxLoad(K) || {}).bookId : null;
   const runPrev = runBook ? [...new Set((past || []).filter((l) => l.bookId === runBook).flatMap((l) => l.nums || []))] : [];
-  if (running) return <HwRun cls={cls} me={me} prevNums={runPrev} onDone={(log) => { setRunning(false); setView(log); setAgain((x) => x + 1); onChanged && onChanged(); }} onAbandon={() => setRunning(false)} />;
-  if (view) return <HwResult log={view} book={(books || []).find((b) => b.id === view.bookId)} onRetry={retry} canSelf onBack={() => { setView(null); setAgain((x) => x + 1); onChanged && onChanged(); }} />;
+  if (running) return <HwRun cls={cls} me={me} prevNums={runPrev} onDone={(log, re) => { setRunning(false); setView(log); setFresh(!!re); setAgain((x) => x + 1); onChanged && onChanged(); }} onAbandon={() => setRunning(false)} />;
+  if (view) return <HwResult log={view} book={(books || []).find((b) => b.id === view.bookId)} onRetry={retry} canSelf fresh={fresh} onBack={() => { setView(null); setFresh(false); setAgain((x) => x + 1); onChanged && onChanged(); }} />;
 
   const sums = (books || []).map((b) => ({ b, s: hwSum((past || []).filter((l) => l.bookId === b.id)) })).filter((x) => x.s.n);
   return (<>
