@@ -1439,10 +1439,13 @@ export default async function handler(req, res) {
             && out.why.code === 200 && out.whySeen.code === 400 && out.whyBad.code === 400 && out.whyHw.code === 200
             && q1.tries.length === 2 && q1.fin === true && q1.why === "copy" && q1.rushed === true && q1.answer === 5 && q1.auto === false
             && q2.tries[0].seen === true && !q2.why && e.score === 0 && h.questions[0].why === "cond";
-          res.status(200).json({ ok, codes: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.code || 200])), exam: e.questions, score: e.score, hw: h.questions });
+          out.result = { ok, codes: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.code || 200])), exam: e.questions, score: e.score, hw: h.questions };
         } finally {
-          await deleteDoc(ep).catch(() => {}); await deleteDoc(hp).catch(() => {}); await deleteDoc("examKeys/" + kid).catch(() => {});
+          // ⚠ 응답을 보낸 뒤에 지우면 Vercel 이 함수를 멈춰 안 지워질 수 있다 — 먼저 지우고, 정말 없어졌는지 다시 읽은 뒤 답한다
+          await deleteDoc(ep); await deleteDoc(hp); await deleteDoc("examKeys/" + kid);
         }
+        const left = (await Promise.all([ep, hp, "examKeys/" + kid].map((x) => getDoc(x).catch(() => null)))).filter(Boolean).length;
+        res.status(200).json({ ...(out.result || { ok: false }), ok: !!(out.result && out.result.ok) && left === 0, left });
         return;
       }
       // 조각 운영 — PC 도구(tools/pieces.mjs). op: get(설정 · 반별 장부) · event(오늘만 이벤트, pcEventSet 과 같음) · items(상품표) · resetLedger(장부 지우기 — 도구가 먼저 받아 둔다)
