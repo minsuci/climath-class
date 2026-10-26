@@ -13,7 +13,7 @@
 // 단원 꼬리표: 과제 교재는 교재의 units · 문항 u. 실전 시험은 꼬리표 파일(TAGS 아래)이 있으면 붙인다.
 // 빼는 것: 선생님 모드로 낸 것 · «이 제출 취소» 된 것.
 // 다시 풀기(10/26~): 실전도 끝난 뒤 틀린 문제를 다시 푼다(문항 줄 tries[] · fin). first 는 처음 채점 그대로, final · retries 는 다시 푼 결과.
-//   why 코드: calc 계산·옮겨 적기 · misread 문제를 잘못 읽음 · ask 묻는 것 착각 · case 경우·끝값 빠뜨림 · method 방법이 안 떠오름 · stuck 손 못 댐
+//   why 코드: calc 계산 실수 · copy 옮겨 적기 · cond 조건을 잘못 이해함 · ask 묻는 것 착각 · case 케이스 빠뜨림 · method 방법이 안 떠오름
 // 매일 밤 작업 스케줄러가 돌린다(«클래스앱 학습기록», 23:40). 기록 ~\.climath\learn-data\log.txt
 import fs from "fs";
 import os from "os";

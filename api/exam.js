@@ -1221,7 +1221,7 @@ async function examRetry(res, claims, b) {
 // ───────────── «처음엔 왜 틀렸어?» — 다시 풀어 맞힌 문항에만 (10/26) ─────────────
 // 다시 맞힘 = «알았다» 는 증거 → 그때만 실수 종류를 묻는다. 못 고친 것은 몰라서 틀린 것이라 안 묻는다.
 // 과제(hw)는 why 만 · 실전(exam)은 why + rushed(시간에 쫓겼어 — 시험 상황에서만 뜻이 있다). why 는 null 이면 지움
-const WHY = ["calc", "misread", "ask", "case", "method", "stuck"];
+const WHY = ["calc", "copy", "cond", "ask", "case", "method"];   // 화면 WHY_LIST 와 같게
 async function whyMark(res, claims, b) {
   const kind = b.kind === "exam" ? "exam" : "hw";
   const cid = String(b.cid || ""), date = String(b.date || ""), rid = String(b.rid || ""), n = Number(b.n);

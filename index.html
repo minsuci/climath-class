@@ -3861,7 +3861,9 @@ const hwFirst = (q) => (q.answer == null ? "–" : q.auto === null ? "?" : q.aut
 const hwWrong = (q) => q.auto === false && q.fin !== true && !q.self;   // 아직 못 맞힌 것 (안 적은 것 포함). 스스로 채점한 것은 다시 풀기에서 뺀다
 // «처음엔 왜 틀렸어?» (10/26) — 다시 풀어 맞힌 **그 순간에만** 묻는다(맞힘 = 알았다는 증거, 못 고친 건 몰라서 틀림).
 // 키는 서버 WHY 와 같게. 하나만 고르고 다시 누르면 지움 · 안 눌러도 된다. rushed(시간에 쫓겼어)는 실전에만 — 집 과제는 시간 제한이 없다
-const WHY_LIST = [["calc", "계산 · 옮겨 적기"], ["misread", "문제를 잘못 읽음"], ["ask", "묻는 것 착각"], ["case", "경우 · 끝값 빠뜨림"], ["method", "방법이 안 떠오름"], ["stuck", "손 못 댐"]];
+// 10/26 마왕님: 계산과 옮겨 적기는 처방이 달라 나눔 · «손 못 댐» 은 다시 풀어 맞힌 뒤엔 «방법이 안 떠오름» 과 같아 합침 ·
+//   «문제를 잘못 읽음» 은 묻는 것 착각까지 덮어서 «조건을 잘못 이해함» 으로 · «경우 · 끝값» → «케이스»
+const WHY_LIST = [["calc", "계산 실수"], ["copy", "옮겨 적기"], ["cond", "조건을 잘못 이해함"], ["ask", "묻는 것 착각"], ["case", "케이스 빠뜨림"], ["method", "방법이 안 떠오름"]];
 const whyText = (k) => (WHY_LIST.find((x) => x[0] === k) || [])[1] || "";
 function WhyPick({ kind, log, n, onLog }) {
   const row = (log.questions || []).find((q) => q.n === n) || {};
