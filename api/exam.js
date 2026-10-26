@@ -1412,6 +1412,39 @@ export default async function handler(req, res) {
         await deleteDoc(p);
         res.status(200).json({ ok: out.create === true && out.createAgain === false && out.update === true && out.stale === false && out.final && out.final.n === 2, ...out }); return;
       }
+      // 다시 풀기 · 이유 시험(10/26) — 진짜 Firestore 에 쓰고 읽어 본다. 버리는 시험지 · 기록(2000-01-01)을 만들고 끝나면 지운다.
+      // 가짜 서버는 «응답 200» 만 보고 기록 문서는 안 봤다(10/10 사고) — 여기선 문서를 다시 읽어 칸이 생겼는지 본다
+      if (body.action === "retrySelfTest") {
+        const cid = String(body.cid || ""); if (!cid) { res.status(400).json({ error: "cid 가 필요해요" }); return; }
+        const kid = "_selftest-retry", rid = "selftest" + Date.now().toString(36), date = "2000-01-01";
+        const ep = "classes/" + cid + "/days/" + date + "/examLogs/" + rid, hp = "classes/" + cid + "/days/" + date + "/hwLogs/" + rid;
+        const T = { role: "owner", tid: "tool" }, out = {};
+        const run = async (fn, b) => { const o = {}; await fn({ status(c) { o.code = c; return this; }, json(j) { o.body = j; } }, T, { cid, date, rid, ...b }); return o; };
+        try {
+          await patchDoc("examKeys/" + kid, { title: "selftest", questions: [{ n: 1, type: "mc", ans: 2 }, { n: 2, type: "short", ans: "3/4" }] });
+          await patchDoc(ep, { rid, cid, sid: "_selftest", examId: kid, date, override: {}, score: 0, teacher: true,
+            questions: [{ n: 1, type: "mc", answer: 5, auto: false }, { n: 2, type: "short", answer: "1", auto: false }] });
+          await patchDoc(hp, { rid, cid, sid: "_selftest", bookId: kid, date, teacher: true,
+            questions: [{ n: 1, type: "mc", answer: 5, auto: false, tries: [{ a: 2, ok: true, at: 1 }], fin: true }] });
+          out.wrong = await run(examRetry, { n: 1, answer: 3, sec: 5 });
+          out.right = await run(examRetry, { n: 1, answer: 2, sec: 4 });
+          out.again = await run(examRetry, { n: 1, answer: 2 });                       // 이미 맞힘 — 400
+          out.seen = await run(examRetry, { n: 2, answer: "0.75", seen: true });
+          out.why = await run(whyMark, { kind: "exam", n: 1, why: "copy", rushed: true });
+          out.whySeen = await run(whyMark, { kind: "exam", n: 2, why: "calc" });        // 보고 푼 것 — 400
+          out.whyBad = await run(whyMark, { kind: "exam", n: 1, why: "misread" });       // 옛 코드 — 400
+          out.whyHw = await run(whyMark, { kind: "hw", n: 1, why: "cond" });
+          const e = await getDoc(ep), h = await getDoc(hp), q1 = e.questions[0], q2 = e.questions[1];
+          const ok = out.wrong.body.right === false && out.right.body.right === true && out.again.code === 400 && out.seen.body.right === true
+            && out.why.code === 200 && out.whySeen.code === 400 && out.whyBad.code === 400 && out.whyHw.code === 200
+            && q1.tries.length === 2 && q1.fin === true && q1.why === "copy" && q1.rushed === true && q1.answer === 5 && q1.auto === false
+            && q2.tries[0].seen === true && !q2.why && e.score === 0 && h.questions[0].why === "cond";
+          res.status(200).json({ ok, codes: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.code || 200])), exam: e.questions, score: e.score, hw: h.questions });
+        } finally {
+          await deleteDoc(ep).catch(() => {}); await deleteDoc(hp).catch(() => {}); await deleteDoc("examKeys/" + kid).catch(() => {});
+        }
+        return;
+      }
       // 조각 운영 — PC 도구(tools/pieces.mjs). op: get(설정 · 반별 장부) · event(오늘만 이벤트, pcEventSet 과 같음) · items(상품표) · resetLedger(장부 지우기 — 도구가 먼저 받아 둔다)
       if (body.action === "pcAdmin") {
         const TOOL = { role: "owner", tid: "tool" };
