@@ -284,6 +284,7 @@ html,body{margin:0; padding:0;}
 .mx-lchips span.mx{background:#fde8e8; border-color:#d64545; color:#b42318; font-weight:700;}
 .mx-lchips span.mh, .mx-lchips span.mp{background:#fff6d6; border-color:#d9a400; color:#8a6400; font-weight:700;}
 .mx-lchips span.cur{border-color:var(--navy); background:var(--navy); color:#fff;}
+.mx-sol{display:inline-block; text-align:left; font-size:13px; line-height:1.55; max-width:260px; white-space:normal;}
 .mx-lkey{display:inline-block; padding:0 5px; border-radius:4px; border:1.5px solid; font-weight:700;}
 .mx-lkey.o{background:#e3f4e8; border-color:#2e9d5b; color:#1f7a44;}
 .mx-lkey.x{background:#fde8e8; border-color:#d64545; color:#b42318;}
@@ -2632,10 +2633,30 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
 // canMarkSub — 답 고정(lock) 시험에서도 학생이 **주관식(단답·서술)만** O/X 를 직접 고친다(10/15 마왕님).
 //   객관식은 그대로 잠금. 학생이 고친 칸은 selfOv 에 적어 두고 «스스로» 표시 — 선생님이 보고 다시 고칠 수 있다
 // canRetry — 학생이 끝난 뒤 틀린 문제를 다시 푼다(10/26). 점수 · 점수 칸 · 순위는 처음 낸 답 그대로, 다시 푼 것은 문항 줄 tries[] 에만(서버 examRetry)
+// 서술형 정답 글 (10/26) — «$…$» 만 KaTeX 로. katex 가 아직 안 왔으면 조금 뒤 다시 그린다
+function MxTex({ s }) {
+  const [, setK] = useState(0);
+  useEffect(() => { if (window.katex) return; const t = setTimeout(() => setK((k) => k + 1), 800); return () => clearTimeout(t); });
+  const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const html = String(s || "").split(/(\$[^$]+\$)/).map((p) => {
+    const m = /^\$([^$]+)\$$/.exec(p);
+    if (m && window.katex) { try { return window.katex.renderToString(m[1], { throwOnError: false }); } catch (e) {} }
+    return esc(m ? m[1] : p);
+  }).join("");
+  return <span className="mx-sol" dangerouslySetInnerHTML={{ __html: html }} />;
+}
 function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, canRetry, onBack }) {
   const [L, setL] = useState(log);
   const [saving, setSaving] = useState(false);
   useEffect(() => { setL(log); }, [log]);
+  // 서술형 정답 글 — 기록에 없으면(10/26 전에 낸 것) 서버에서 받는다. 낸 학생 · 선생님만 받는다
+  const [sols, setSols] = useState({});
+  useEffect(() => {
+    if (!log || !(log.questions || []).some((q) => q.type === "essay" && !q.sol)) return;
+    let gone = false;
+    pcApi({ action: "essaySol", cid: log.cid, date: log.date, rid: log.rid }).then((j) => { if (!gone) setSols(j.sols || {}); }).catch(() => {});
+    return () => { gone = true; };
+  }, [log && log.rid]);
   // 제출 취소 · 복원 — 잘못 낸 것(두 번 냄 등)을 점수에서 뺀다. 기록은 지우지 않는다.
   // 취소: 점수 칸(scores) 사본을 기록에 먼저 남기고 → 점수 칸을 지운다 (순서가 바뀌면 사본 없이 지워질 수 있다)
   // 복원: 사본(없으면 기록에서 다시 만든 것)을 점수 칸에 되돌리고 → 취소 표시를 지운다
@@ -2799,7 +2820,7 @@ function MockExamResult({ log, canMark, canMarkSub, canVoid, canFix, canRetry, o
   const half = Math.ceil(N / 2);
   const firstHalf = A.rows.slice(0, half).reduce((a, r) => a + r.sec, 0);
   const shown = mxAnsText;
-  const keyShown = mxKeyText;
+  const keyShown = (q) => { const s = q.type === "essay" ? q.sol || sols[q.n] : null; return s ? <MxTex s={s} /> : mxKeyText(q); };
   // 꼬리문제 칸을 한 줄씩
   const anyRt = !!canRetry || L.questions.some((q) => (q.tries || []).length);
   const lines = (q, f) => <div className="mx-plines">{q.parts.map((p, j) => <span key={j}><small>{p.label}</small>{f(j)}</span>)}</div>;

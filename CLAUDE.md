@@ -767,6 +767,14 @@ Vercel 환경변수 **`GEMINI_API_KEY`**. 답을 주지 않고 힌트만 주도�
 - examLive 문서에 `av`(답 바뀐 횟수)를 더 적는다. 선생님 판은 av 가 바뀌면 3초 뒤, 그리고 30초마다 `liveMarks` 로 받는다. rid 가 다른(지난) O/X 는 안 칠한다
 - 미리보기(make-preview.mjs)에도 같은 흉내가 있다(정답 ①·1)
 
+### 실전 시험 서술형 정답 글 (`sol` · `MxTex` · api `essaySol`/`examSol`, 2026-10-26)
+학생이 **낸 뒤** 결과표 «정답» 칸에 서술형 정답 글이 보인다 — 보고 스스로 O/X 한다(lock 시험도 학생이 단답·서술은 고친다, canMarkSub).
+- examKeys 서술형 문항에 `sol`(글 + `$LaTeX$`). 목록(examList)에는 안 실린다(rebuildList 가 고른 칸만). 시험 중엔 어디에도 안 보인다
+- 낸 기록 문항 줄에 `sol` 이 같이 들어간다(gradeRows). 그 전에 낸 기록은 결과표가 `essaySol`(낸 학생 · 선생님만)로 받아 채운다
+- 넣기: `node tools/exam-push.mjs --sol <파일>` → 도구 `examSol`(서술형 번호만, 이미 연 시험지도 이 칸만). examPut 도 sol 을 지우지 않고 싣는다
+- 기출백서 기말 원본: `변형교재\_기출백서기말_exam\서술형_정답.json` (gb_full.txt [정답] 을 LaTeX 로. 02 는 인쇄본 순서라 14=원본 22 · 22=원본 21)
+- 화면 `MxTex` — `$…$` 만 KaTeX, 나머지는 글자 그대로(이스케이프). katex 가 늦게 오면 0.8초 뒤 다시 그린다
+
 ---
 
 ## 과거에 겪은 버그와 원인

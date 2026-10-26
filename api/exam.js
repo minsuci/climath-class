@@ -267,6 +267,7 @@ function gradeRows(key, answers, ev, limitSec, overSec) {
     const mine = normAns(q, answers[q.n]), g = gradeQ(q, mine);
     const row = { n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}), ...(q.label ? { label: q.label } : {}),
                   key: q.type === "essay" || hasParts(q) ? null : q.ans, answer: mine, auto: g.auto,
+                  ...(q.type === "essay" && q.sol ? { sol: q.sol } : {}),   // 서술형 정답 글 — 낸 뒤 학생이 보고 스스로 O/X (10/26)
                   ...(hasParts(q) ? { parts: q.parts.map((p) => ({ label: p.label, key: p.ans, ...(p.pt != null ? { pt: p.pt } : {}), ...(p.g != null ? { g: p.g } : {}) })), pa: g.pa, ...(q.any ? { any: true } : {}) } : {}),
                   ...(isMulti(q) ? { multi: true } : {}) };
     // 시간이 끝난 뒤 답이 바뀌었으면 끝난 순간의 답을 따로 둔다. 그때 비어 있었으면 시간 안에는 틀림
@@ -1255,6 +1256,20 @@ async function examRetry(res, claims, b) {
   res.status(200).json({ ok: true, right: ok, log: { ...log, questions, retried: now } });
 }
 
+// ───────────── 서술형 정답 글 — 이미 낸 기록 (10/26) ─────────────
+// sol 칸이 생기기 전에 낸 기록은 기록에 정답 글이 없다. 그 기록을 낸 학생(또는 선생님)에게만 시험지의 서술형 정답 글을 준다
+async function essaySol(res, claims, b) {
+  const cid = String(b.cid || ""), date = String(b.date || ""), rid = String(b.rid || "");
+  if (!cid || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^[A-Za-z0-9_-]{6,40}$/.test(rid)) { res.status(400).json({ error: "빠진 값이 있어요" }); return; }
+  const log = await getDoc("classes/" + cid + "/days/" + date + "/examLogs/" + rid).catch(() => null);
+  if (!log) { res.status(404).json({ error: "그 기록이 없어요" }); return; }
+  const who = await hwWho(res, claims, cid, log.sid); if (!who) return;
+  const key = await getDoc("examKeys/" + log.examId).catch(() => null);
+  const sols = {};
+  for (const q of (key && key.questions) || []) if (q.type === "essay" && q.sol) sols[q.n] = q.sol;
+  res.status(200).json({ ok: true, sols });
+}
+
 // ───────────── «처음엔 왜 틀렸어?» — 다시 풀어 맞힌 문항에만 (10/26) ─────────────
 // 다시 맞힘 = «알았다» 는 증거 → 그때만 실수 종류를 묻는다. 못 고친 것은 몰라서 틀린 것이라 안 묻는다.
 // 과제(hw)는 why 만 · 실전(exam)은 why + rushed(시간에 쫓겼어 — 시험 상황에서만 뜻이 있다). why 는 null 이면 지움
@@ -1308,7 +1323,8 @@ export default async function handler(req, res) {
                                                ...(q.pt != null ? { pt: q.pt } : {}),
                                                ...(q.u != null ? { u: q.u } : {}), ...(q.p != null ? { p: q.p } : {}),
                                                ...(q.parts ? { parts: q.parts.map((p) => ({ label: String(p.label).trim(), ans: p.ans, ...(p.pt != null ? { pt: p.pt } : {}), ...(p.g != null ? { g: String(p.g) } : {}) })) } : {}),
-                                               ...(q.any ? { any: true } : {}) })),
+                                               ...(q.any ? { any: true } : {}),
+                                               ...(q.type === "essay" && q.sol ? { sol: String(q.sol).slice(0, 400) } : {}) })),
           cids: Array.isArray(e.cids) ? e.cids.map(String) : [], sids, names, test: !!e.test, lock: !!e.lock, free: !!e.free,   // free = 시험용 과제 교재 — 답을 적으면 다 정답(조각 흐름 시험, 10/12) hkEmpty: !!e.hkEmpty,   // hkEmpty = 학결모 «걸어 둘 학생 없이 숨겨 둔» 시험지 (학생을 걸면 열린다)
           order: Number(e.order) || 0, updated: Date.now(),
         });
@@ -1316,6 +1332,17 @@ export default async function handler(req, res) {
         res.status(200).json({ ok: true, id: e.id, listed: n }); return;
       }
       // 올라가 있는 시험지의 sids 를 지금 명단으로 다시 맞춘다 (10/8 «반ID/자리ID» 로 바꾼 뒤 한 번 · 몇 번 돌려도 같다)
+      // 서술형 정답 글 넣기 (10/26) — {id, sols: {번호: 글}}. 이미 연 시험지에도 이 칸만 더한다(채점 · 목록은 그대로, 목록엔 안 실린다)
+      if (body.action === "examSol") {
+        const id = String(body.id || ""), sols = body.sols && typeof body.sols === "object" ? body.sols : {};
+        const key = await getDoc("examKeys/" + id).catch(() => null);
+        if (!key) { res.status(404).json({ error: "그 시험지가 없어요: " + id }); return; }
+        const bad = Object.keys(sols).filter((n) => { const q = (key.questions || []).find((x) => String(x.n) === n); return !q || q.type !== "essay"; });
+        if (bad.length) { res.status(400).json({ error: id + " — 서술형이 아닌 번호: " + bad.join(", ") }); return; }
+        const questions = key.questions.map((q) => (q.type === "essay" && String(q.n) in sols ? { ...q, sol: String(sols[q.n]).slice(0, 400) } : q));
+        await patchDoc("examKeys/" + id, { questions, updated: Date.now() });
+        res.status(200).json({ ok: true, id, n: Object.keys(sols).length }); return;
+      }
       if (body.action === "examResids") {
         const all = await listDocs("examKeys").catch(() => []);
         const done = [];
@@ -1597,6 +1624,7 @@ export default async function handler(req, res) {
     if (body.action === "hwRetry") return await hwRetry(res, claims, body);
     if (body.action === "hwSelf") return await hwSelf(res, claims, body);
     if (body.action === "examRetry") return await examRetry(res, claims, body);
+    if (body.action === "essaySol") return await essaySol(res, claims, body);
     if (body.action === "whyMark") return await whyMark(res, claims, body);
     if (body.action === "pcMe") return await pcMe(res, claims, body);
     if (body.action === "pcOpen") return await pcOpen(res, claims, body);

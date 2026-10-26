@@ -5,6 +5,8 @@
 //   node tools/exam-push.mjs --list                                     올라가 있는 것
 //   node tools/exam-push.mjs --del <id>                                 빼기
 //   node tools/exam-push.mjs --classes [이름 일부]                      반 ID 와 명단 (cids·names 적을 때)
+//   node tools/exam-push.mjs --sol <서술형_정답.json>                  서술형 정답 글 넣기(10/26 · 낸 뒤 학생 결과표에 보임 · 이미 연 시험지에도)
+//     파일: { "<시험지id>": { "번호": "글 $LaTeX$" }, "_같은 답": { "<다른 id>": "<위 id>" } }
 //
 // 파일은 바탕화면 원형과 같은 모양이다 — `window.EXAMS = [ … ]` (exams.js) 또는 JSON 배열.
 // 분기 시작에 기출백서 답지로 이 파일을 한 번에 만들고, 이 도구로 한 번에 올린다.
@@ -117,6 +119,16 @@ function summary(e) {
     logs.forEach((l) => console.log(`${l.date}  ${l.name}  「${l.title}」 ${l.score}점 · ${l.correct}/${l.n}`
       + ` · ${Math.floor(l.endT / 60)}분${l.pending ? " · 미채점 " + l.pending : ""}${l.teacher ? "  (선생님)" : ""}`));
     console.log("\n" + logs.length + "건 → " + out);
+    return;
+  }
+  if (has("--sol")) {
+    const J = JSON.parse(fs.readFileSync(arg("--sol"), "utf8")), same = J["_같은 답"] || {};
+    const ids = Object.keys(J).filter((k) => !k.startsWith("_")).map((k) => [k, J[k]]).concat(Object.entries(same).map(([k, v]) => [k, J[v]]));
+    for (const [id, sols] of ids) {
+      if (has("--dry")) { console.log("  " + id + "  " + Object.keys(sols).join(",")); continue; }
+      const r = await call({ action: "examSol", id, sols });
+      console.log("  " + id + "  서술형 " + r.n + "개");
+    }
     return;
   }
   // 반의 기본 시험지 — 학생 화면에서 먼저 골라져 있다 (10/22). id 를 비우면 기본을 푼다

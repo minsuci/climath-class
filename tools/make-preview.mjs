@@ -417,6 +417,8 @@ const STUB = `
       var mm = {}; mx.questions.forEach(function(q){ var v = (b.answers || {})[q.n]; if (v == null || v === "") return; mm[q.n] = q.type === "essay" ? "p" : hwOk(q, v) ? "o" : "x"; });
       store["examLiveMarks/" + b.cid + "__" + b.date + "__" + b.sid] = { rid: b.rid, m: mm }; return ok({ ok: true });
     }
+    /* 서술형 정답 글 (10/26) — 서버 essaySol 흉내. 미리보기 시험지 10번 */
+    if (b.action === "essaySol") return ok({ ok: true, sols: { 10: "(1) $\\\\dfrac{3}{4}<k\\\\le\\\\dfrac{7}{4}$  (2) $a=b=2$" } });
     if (b.action === "liveMarks") {
       if (!tch) return bad("선생님만 볼 수 있어요", 403);
       var out = {}; (b.sids || []).forEach(function(sid){ var d = store["examLiveMarks/" + b.cid + "__" + b.date + "__" + sid]; if (d) out[sid] = d; });
@@ -435,7 +437,7 @@ const STUB = `
   store["appConfig/examList"] = { exams: [{ id: "pv-hw", kind: "hw", title: "교재A (미리보기 · 정답 ①)", link: "교재A", units: ["1단원", "2단원"], cids: ["c-reg"],
     questions: Array.from({ length: 100 }, function(_, i){ var n = i + 1; return { n: n, type: n === 25 ? "essay" : n % 10 === 0 ? "short" : "mc", u: n <= 50 ? 0 : 1 }; }) },
     { id: "pv-mx", title: "실전 미리보기 (정답 ① · 단답 1)", minutes: 20, cids: ["c-reg"],
-      questions: Array.from({ length: 10 }, function(_, i){ return { n: i + 1, type: i >= 8 ? "short" : "mc" }; }) },
+      questions: Array.from({ length: 10 }, function(_, i){ return { n: i + 1, type: i === 9 ? "essay" : i >= 8 ? "short" : "mc" }; }) },   // 10번 서술형(10/26 정답 글 보기)
     { id: "pc-test", kind: "hw", free: true, title: "조각 시험 (아무 답이나 정답)", link: "", units: [], cids: ["c-reg"],
       questions: Array.from({ length: 20 }, function(_, i){ return { n: i + 1, type: "mc" }; }) }] };
   store["appConfig/pieces"] = { cids: ["c-reg"], items: [
