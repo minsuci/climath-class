@@ -229,7 +229,10 @@ function shelfCompact(qs) {
     const last = l[l.length - 1];
     if (m && !(last && last[1] === m[1] && last[2] + (i - last[0]) === Number(m[2]))) l.push([i, m[1], Number(m[2])]);
   });
-  return { t, ...(u.length ? { u } : {}), ...(l.length ? { l } : {}) };
+  // Firestore 는 배열 안 배열을 못 받는다(10/27 «invalid nested entity» — 시험지 목록이 통째 안 만들어짐).
+  // 구간 하나를 {"0":…, "1":…} 맵으로 — 화면 hwExpand 는 r[0] · r[1] 로 읽으니 그대로 맞는다
+  const m = (rs) => rs.map((r) => Object.assign({}, r));
+  return { t, ...(u.length ? { u: m(u) } : {}), ...(l.length ? { l: m(l) } : {}) };
 }
 
 async function rebuildList() {
