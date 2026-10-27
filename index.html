@@ -2230,6 +2230,7 @@ function mxKeyText(q) {
 }
 // O/X 글자 — 꼬리문제는 칸마다(«OX»)
 const mxOxText = (q, ov) => (mxHasParts(q) ? mxPartOks(q, ov).map((o) => (o ? "O" : "X")).join("") : (() => { const ok = mxQOk(q, ov); return ok === null ? "?" : ok ? "O" : "X"; })());
+// 번호판 √ 키(10/27 — 기출백서 4회 19번 «1:1:√2» 를 칸으로 받으려고). 정답은 «√2» 글자 그대로 맞춘다
 // 답을 적으면 다음 «안 푼» 문제로 — 앞에서부터 차례로 풀면 n+1 과 같다.
 // 앞 문제로 돌아가 답을 고쳤으면 그 바로 뒤가 아니라 **아직 안 푼 곳**으로 간다.
 function mxNextOpen(S, n) {
@@ -2525,7 +2526,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
       {q.any ? <div className="cm-hint" style={{marginBottom: 6}}>칸 순서는 상관없어요.</div>
         : q.parts.some((p) => p.g != null) ? <div className="cm-hint" style={{marginBottom: 6}}>{[...new Set(q.parts.filter((p) => p.g != null).map((p) => p.g))].map((g) => q.parts.filter((p) => p.g === g).map((p) => p.label).join(" · ")).join(" / ")} 칸끼리는 순서 상관없어요.</div> : null}
       <div className="mx-pad">
-        {["7", "8", "9", "-", "⌫", "4", "5", "6", "/", "C", "1", "2", "3", ".", "0"].map((k) => (
+        {["7", "8", "9", "-", "⌫", "4", "5", "6", "/", "C", "1", "2", "3", ".", "0", "√"].map((k) => (
           <button key={k} onClick={() => padKey(k)}>{k}</button>
         ))}
         <button className="ok" onClick={padOk}>{q.parts.some((_, j) => j !== pi && !a[j]) ? q.parts[pi].label + " 적기" : "답 적기"}</button>
@@ -2543,7 +2544,7 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
     body = (<>
       <div className={"mx-disp" + (mxAnswered(S, q.n) && buf === String(mine) ? " saved" : "")}>{buf || "\u00a0"}</div>
       <div className="mx-pad">
-        {["7", "8", "9", "-", "⌫", "4", "5", "6", "/", "C", "1", "2", "3", ".", "0"].map((k) => (
+        {["7", "8", "9", "-", "⌫", "4", "5", "6", "/", "C", "1", "2", "3", ".", "0", "√"].map((k) => (
           <button key={k} onClick={() => padKey(k)}>{k}</button>
         ))}
         <button className="ok" onClick={padOk}>답 적기</button>
