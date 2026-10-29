@@ -14,6 +14,7 @@
 //   { id, title, minutes, questions: [{ n, type: "mc"|"short"|"essay", ans, pt }],
 //     꼬리문제(10/19~): { n, type: "short", pt, parts: [{ label: "(1)", ans }, { label: "(2)", ans }], any?: true(칸 순서 무관) }
 //     모두 고르기: { n, type: "mc", ans: [2, 5] } — 고른 것이 똑같아야 맞음
+//     범위 답(10/29~): { n, type: "short", ans: ["3/4<k≤7/4"], iv: "k" } — 번호판에 < ≤ > ≥ k 그리고 또는. 같은 범위면 맞음
 //     cids?: [반ID…]  (없으면 모든 반)
 //     names?: [학생 이름…]  (그 학생만 본다. cids 필요. 명단 표기 그대로 — 동명이인은 A·B·C 까지)
 //     test?: true      (선생님 모드에서만 보인다 — 올려서 확인할 때)
