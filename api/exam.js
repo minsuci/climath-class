@@ -58,11 +58,53 @@ function sameShort(mine, key) {
   const x = numVal(a), y = numVal(b);
   return !isNaN(x) && !isNaN(y) && Math.abs(x - y) < 1e-9;
 }
+// 범위 답(iv = 문자 이름, 10/29 기출백서 5회 21번) — «3/4<k≤7/4» «k<-1 또는 k≥2» «k>3/4 그리고 k≤7/4» 를
+// 구간 모음으로 바꿔 **같은 범위인지** 본다(쓴 꼴이 달라도 같은 범위면 맞음). 못 읽으면 null → 틀림
+function ivParse(raw, v) {
+  const s = String(raw).replace(/\s/g, "").replace(/[−–]/g, "-").replace(/<=|=</g, "≤").replace(/>=|=>/g, "≥")
+    .replace(/이고|and|,/gi, "그리고").replace(/이거나|or/gi, "또는");
+  if (!s) return null;
+  const out = [];
+  for (const cl of s.split("또는")) {
+    let I = { a: -Infinity, ai: false, b: Infinity, bi: false };
+    for (const at of cl.split("그리고")) {
+      const t = at.split(/([<≤>≥=])/);
+      if (t.length < 3 || t.length % 2 === 0) return null;
+      for (let i = 1; i < t.length; i += 2) {
+        const L = t[i - 1], op = t[i], R = t[i + 1];
+        let num, rel;
+        if (L === v && R !== v) { num = numVal(R); rel = op; }
+        else if (R === v && L !== v) { num = numVal(L); rel = { "<": ">", "≤": "≥", ">": "<", "≥": "≤", "=": "=" }[op]; }   // a<k 는 k>a
+        else return null;
+        if (isNaN(num)) return null;
+        if (rel === "<" || rel === "≤" || rel === "=") if (num < I.b || (num === I.b && I.bi && rel !== "<")) I = { ...I, b: num, bi: rel !== "<" };
+        else if (num === I.b && rel === "<") I = { ...I, bi: false };
+        if (rel === ">" || rel === "≥" || rel === "=") if (num > I.a || (num === I.a && I.ai && rel !== ">")) I = { ...I, a: num, ai: rel !== ">" };
+        else if (num === I.a && rel === ">") I = { ...I, ai: false };
+      }
+    }
+    if (I.a < I.b || (I.a === I.b && I.ai && I.bi)) out.push(I);
+  }
+  out.sort((x, y) => x.a - y.a || (y.ai ? 1 : 0) - (x.ai ? 1 : 0));
+  const m = [];
+  for (const I of out) {
+    const p = m[m.length - 1];
+    if (p && (I.a < p.b || (I.a === p.b && (p.bi || I.ai)))) { if (I.b > p.b || (I.b === p.b && I.bi)) { p.b = I.b; p.bi = I.bi; } }
+    else m.push({ ...I });
+  }
+  return m;
+}
+function ivSame(mine, key, v) {
+  const x = ivParse(mine, v), y = ivParse(key, v), eq = (p, q) => p === q || Math.abs(p - q) < 1e-9;
+  return !!x && !!y && x.length === y.length && x.every((I, i) => { const J = y[i];
+    return eq(I.a, J.a) && eq(I.b, J.b) && (I.a === -Infinity || I.ai === J.ai) && (I.b === Infinity || I.bi === J.bi); });
+}
 // true / false / null(서술형 — 사람이 채점)
 function autoCorrect(q, mine) {
   if (q.type === "essay") return null;
   if (mine == null || mine === "") return false;
   if (q.type === "mc") return Number(mine) === Number(q.ans);
+  if (q.iv) return [].concat(q.ans).some((k) => ivSame(mine, k, q.iv));
   return [].concat(q.ans).some((k) => sameShort(mine, k));
 }
 // 꼬리문제(parts) — 한 번호에 답 칸이 (1)(2)… 여럿. 칸마다 채점하고 배점을 나눠 준다(10/19 마왕님).
@@ -181,6 +223,11 @@ function checkExam(e) {
       const ks = [].concat(q.ans);
       if (!ks.length || ks.some((k) => !String(k == null ? "" : k).trim())) return q.n + "번 단답형 답이 없어요";
     }
+    if (q.iv != null) {   // 범위 답
+      if (q.type !== "short" || q.parts != null) return q.n + "번 iv(범위 답)는 칸 없는 단답형에만";
+      if (!/^[a-zA-Z]$/.test(String(q.iv))) return q.n + "번 iv 는 문자 하나(k · x …)";
+      if ([].concat(q.ans).some((k) => !ivParse(k, q.iv))) return q.n + "번 범위 답을 못 읽어요: " + q.ans;
+    }
     if (q.pt != null && !(typeof q.pt === "number" && q.pt > 0)) return q.n + "번 배점이 이상해요";
     if (q.o != null && !(typeof q.o === "string" && q.o.trim() && q.o.length <= 40)) return q.n + "번 o(원래 문항 «교재:번호:종류»)는 40자 안 글자";
     if (q.label != null && !(typeof q.label === "string" && q.label.trim() && q.label.length <= 16)) return q.n + "번 이름(label)이 이상해요";
@@ -245,6 +292,7 @@ async function rebuildList() {
     ...(e.shelf ? {} : { questions: (e.questions || []).map((q) => ({ n: q.n, type: q.type, ...(q.pt != null ? { pt: q.pt } : {}),
                                                  ...(q.label ? { label: q.label } : {}), ...(q.u != null ? { u: q.u } : {}),
                                                  ...(hasParts(q) ? { parts: q.parts.map((p) => ({ label: p.label, ...(p.g != null ? { g: p.g } : {}) })), ...(q.any ? { any: true } : {}) } : {}),
+                                                 ...(q.iv ? { iv: q.iv } : {}),
                                                  ...(isMulti(q) ? { multi: true } : {}) })) }),
   })).sort((a, b) => (a.order - b.order) || String(a.title).localeCompare(String(b.title), "ko"));
   await patchDoc(LIST_PATH, { exams, updated: Date.now() });
@@ -265,7 +313,7 @@ function normAns(q, raw) {
     const s = [...new Set(a.map(Number).filter((x) => Number.isInteger(x) && x >= 1 && x <= 5))].sort((x, y) => x - y);
     return s.length ? s : null;
   }
-  return q.type === "mc" ? Number(raw) : String(raw).slice(0, 20);
+  return q.type === "mc" ? Number(raw) : String(raw).slice(0, q.iv ? 60 : 20);
 }
 function gradeRows(key, answers, ev, limitSec, overSec) {
   const inAns = overSec > 0 ? answersAt(ev, limitSec) : null;
@@ -1331,6 +1379,7 @@ export default async function handler(req, res) {
                                                ...(q.u != null ? { u: q.u } : {}), ...(q.p != null ? { p: q.p } : {}),
                                                ...(q.parts ? { parts: q.parts.map((p) => ({ label: String(p.label).trim(), ans: p.ans, ...(p.pt != null ? { pt: p.pt } : {}), ...(p.g != null ? { g: String(p.g) } : {}) })) } : {}),
                                                ...(q.any ? { any: true } : {}),
+                                               ...(q.iv ? { iv: String(q.iv).trim().slice(0, 3) } : {}),   // 범위 답 — 문자 이름(10/29)
                                                ...(q.o ? { o: String(q.o).trim() } : {}),   // 오답 과제 — 원래 문항(교재:번호:원본|숫자|묻는 말). 학습기록이 잇는다
                                                ...(q.type === "essay" && q.sol ? { sol: String(q.sol).slice(0, 400) } : {}) })),
           cids: Array.isArray(e.cids) ? e.cids.map(String) : [], sids, names, test: !!e.test, lock: !!e.lock, free: !!e.free,   // free = 시험용 과제 교재 — 답을 적으면 다 정답(조각 흐름 시험, 10/12) hkEmpty: !!e.hkEmpty,   // hkEmpty = 학결모 «걸어 둘 학생 없이 숨겨 둔» 시험지 (학생을 걸면 열린다)

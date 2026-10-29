@@ -2478,7 +2478,8 @@ function MockExamRun({ cls, me, onDone, onAbandon }) {
   const early = !frozen && nowT(S) < 120 && S.ev.every((e) => e.k === "go");
   // 넘어가는 0.4초 동안은 번호판을 안 받는다. 받으면 숫자는 들어가는데 «답 적기» 는
   // 막혀 있어서, 다음 문제 칸에 앞 문제에서 친 숫자가 붙어 있게 된다 (-3 뒤에 0.5 → «-30.5»)
-  const padKey = (k) => { if (busy.current) return; setBuf((b) => (k === "⌫" ? b.slice(0, -1) : k === "C" ? "" : b.length < 12 ? b + k : b)); };
+  // 범위 답(q.iv)은 «그리고 · 또는» 이 낱말이라 지우기도 낱말째, 길이도 넉넉히
+  const padKey = (k) => { if (busy.current) return; setBuf((b) => (k === "⌫" ? (q.iv && / (그리고|또는) $/.test(b) ? b.replace(/ (그리고|또는) $/, "") : b.slice(0, -1)) : k === "C" ? "" : b.length < (q.iv ? 50 : 12) ? b + (k === "그리고" || k === "또는" ? " " + k + " " : k) : b)); };
   // 꼬리문제 칸 배열(칸 수만큼, 빈 칸 "")
   const partArr = () => { const v = (sRef.current || S).answers[q.n], a = Array.isArray(v) ? v : []; return q.parts.map((_, j) => String(a[j] || "")); };
   const padOk = () => {
@@ -4595,7 +4596,14 @@ function HwRun({ cls, me, prevNums, onDone, onAbandon }) {
     );
   } else if (q.type === "short") {
     body = (<>
-      <div className={"mx-disp" + (mxAnswered(S, q.n) && buf === String(mine) ? " saved" : "")}>{buf || " "}</div>
+      <div className={"mx-disp" + (mxAnswered(S, q.n) && buf === String(mine) ? " saved" : "")} style={q.iv ? {fontSize: 22} : null}>{buf || " "}</div>
+      {q.iv ? (<>
+        <div className="cm-hint" style={{margin: "0 0 6px"}}>범위로 적어요 — 예: <b>1/2 &lt; {q.iv} ≤ 3</b> · <b>{q.iv} &lt; -1 또는 {q.iv} ≥ 2</b></div>
+        <div className="mx-pad" style={{marginBottom: 8}}>
+          {["<", "≤", ">", "≥", q.iv].map((k) => <button key={k} onClick={() => padKey(k)}>{k}</button>)}
+          {["그리고", "또는"].map((k) => <button key={k} style={{gridColumn: "span 2", fontSize: 17}} onClick={() => padKey(k)}>{k}</button>)}
+        </div>
+      </>) : null}
       <div className="mx-pad">
         {["7", "8", "9", "-", "⌫", "4", "5", "6", "/", "C", "1", "2", "3", ".", "0"].map((k) => (
           <button key={k} onClick={() => padKey(k)}>{k}</button>
