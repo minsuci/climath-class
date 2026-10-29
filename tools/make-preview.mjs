@@ -437,7 +437,7 @@ const STUB = `
   store["appConfig/examList"] = { exams: [{ id: "pv-hw", kind: "hw", title: "교재A (미리보기 · 정답 ①)", link: "교재A", units: ["1단원", "2단원"], cids: ["c-reg"],
     questions: Array.from({ length: 100 }, function(_, i){ var n = i + 1; return { n: n, type: n === 25 ? "essay" : n % 10 === 0 ? "short" : "mc", u: n <= 50 ? 0 : 1 }; }) },
     { id: "pv-mx", title: "실전 미리보기 (정답 ① · 단답 1)", minutes: 20, cids: ["c-reg"],
-      questions: Array.from({ length: 10 }, function(_, i){ return { n: i + 1, type: i === 9 ? "essay" : i >= 8 ? "short" : "mc" }; }) },   // 10번 서술형(10/26 정답 글 보기)
+      questions: Array.from({ length: 10 }, function(_, i){ return { n: i + 1, type: i === 9 ? "essay" : i >= 8 ? "short" : "mc", ...(i === 8 ? { iv: "k" } : {}) }; }) },   // 9번 범위 답(10/29) · 10번 서술형(10/26 정답 글 보기)
     { id: "pc-test", kind: "hw", free: true, title: "조각 시험 (아무 답이나 정답)", link: "", units: [], cids: ["c-reg"],
       questions: Array.from({ length: 20 }, function(_, i){ return { n: i + 1, type: "mc" }; }) },
     /* 오답 과제(10/26) — 임서윤 한 명에게. 정답은 교재A 처럼 ①·1 */
