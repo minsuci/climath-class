@@ -682,6 +682,7 @@ const PC = {
   awayMin: 5,      // 이만큼(초) 이하로 떠난 건 안 센다
   awayEvery: 3,    // 하루에 이탈 3번째마다
   awayPen: 10,     // 조각 −10 (0에서 멈춤)
+  pity: 10,        // 꽝 10개가 모이면 작은 간식 확정(10/30) — 연속 아니고 누적, 받으면 0부터
 };
 const pcPath = (cid, sid) => "classes/" + cid + "/pieces/" + sid;
 const PC_LOG = 150, PC_AWAY = 300;
@@ -850,16 +851,46 @@ const pcSwapOk = (cfg, p) => {
   const list = p.ev ? ((cfg.doc.event || {}).items || []) : cfg.items, x = list.find((y) => y.id === p.id);
   return !!x && (x.stock == null || x.stock > 0);
 };
-const pcRules = () => ({ cost: PC.cost, streak: PC.streak, awayMin: PC.awayMin, awayEvery: PC.awayEvery, awayPen: PC.awayPen });
+const pcRules = () => ({ cost: PC.cost, streak: PC.streak, awayMin: PC.awayMin, awayEvery: PC.awayEvery, awayPen: PC.awayPen, pity: PC.pity });
+// 꽝 모음(10/30) — 장부에 blanks 가 없으면(이 기능 전 장부) 지난 꽝을 장부 기록에서 센다. 지난 꽝은 그대로 하나씩(마왕님 «원래 있던 거 10개로»)
+const pcBlanks = (d) => (d.blanks != null ? d.blanks : (d.log || []).filter((l) => l.k === "open" && l.prize === "꽝").length);
+// 확정 상품 = 평소 상품표의 «작은 간식». 없으면 첫 칸
+const pcPityItem = (cfg) => cfg.items.find((x) => /^작은 간식/.test(x.name)) || cfg.items[0] || null;
+// 확정 상품 하나를 상품 꼴로 — 재고를 잡고(없으면 교환권). null = 상품표가 그새 바뀜
+async function pcPityPrize(cfg, now) {
+  const it = pcPityItem(cfg); if (!it) return { none: true };
+  const got = it.stock == null ? true : it.stock > 0 ? await pcStockMove(it.id, -1, false) : false;
+  if (got === null) return null;
+  const pid = now.toString(36) + Math.random().toString(36).slice(2, 6);
+  const prize = got ? { pid, id: it.id, name: it.name, at: now, given: false, pity: true }
+                    : { pid, id: it.id, name: pcVoucherName(it), of: it.name, price: Number(it.price) || 0, voucher: true, at: now, given: false, pity: true };
+  return { prize, held: got && it.stock != null, it };
+}
+// 기능 전에 꽝이 이미 10개 넘게 모인 학생 — 앱을 열면(pcMe) 그 자리에서 하나 준다
+async function pcPityCatchUp(cid, sid, cfg) {
+  for (let i = 0; i < 4; i++) {
+    const { doc, v } = await getDocV(pcPath(cid, sid)); const d = doc || {};
+    if (pcBlanks(d) < PC.pity) return d;
+    const now = Date.now(), r = await pcPityPrize(cfg, now);
+    if (r === null) continue;
+    if (r.none) return d;
+    const next = { blanks: pcBlanks(d) - PC.pity, prizes: [...(d.prizes || []), r.prize].slice(-200),
+                   log: [...(d.log || []), { t: now, k: "pity", d: 0, prize: r.prize.name }].slice(-PC_LOG) };
+    if (await patchDocIf(pcPath(cid, sid), next, Object.keys(next), v)) return { ...d, ...next, pityNew: r.prize };
+    if (r.held) await pcStockMove(r.it.id, +1, false).catch(() => null);
+  }
+  return (await getDoc(pcPath(cid, sid)).catch(() => null)) || {};
+}
 async function pcMe(res, claims, b) {
   const cid = String(b.cid || ""), sid = String(b.sid || "");
   const who = await hwWho(res, claims, cid, sid); if (!who) return;
   const cfg = await pcCfg();
   if (!cfg.cids.includes(cid)) { res.status(200).json({ ok: true, on: false }); return; }
-  const d = (await getDoc(pcPath(cid, sid)).catch(() => null)) || {};
+  let d = (await getDoc(pcPath(cid, sid)).catch(() => null)) || {};
+  if (!who.teacher && pcBlanks(d) >= PC.pity) d = await pcPityCatchUp(cid, sid, cfg);
   const td = pcToday(d), ev = pcEvt(cfg);
   res.status(200).json({ ok: true, on: true, teacher: !!who.teacher, bal: d.bal || 0, earned: d.earned || 0, opened: d.opened || 0,
-    awayN: td.n, awayTot: td.tot, rules: pcRules(), lect: await hwLectGet(cid), held: d.held || 0, books: cfg.books,
+    awayN: td.n, awayTot: td.tot, rules: pcRules(), blanks: pcBlanks(d), pityName: (pcPityItem(cfg) || {}).name || "", pityNew: d.pityNew || null, lect: await hwLectGet(cid), held: d.held || 0, books: cfg.books,
     prizes: (d.prizes || []).slice(-60).map((p) => (p.voucher && !p.given ? { ...p, canSwap: pcSwapOk(cfg, p) } : p)),
     hasItems: cfg.items.length > 0 || !!ev,   // 확률표는 학생에게 안 보인다(10/12)
     event: ev ? { title: ev.title || "", cap: ev.cap || 1, won: pcEvWon(d, ev), names: ev.items.map((x) => x.name),
@@ -910,7 +941,13 @@ async function pcOpen(res, claims, b) {
     if (ev && won >= cap) { res.status(400).json({ error: "오늘은 한 사람에 " + cap + "개까지예요 — 남은 구슬은 내일 열 수 있어요", capped: true }); return; }
     let r = Math.random() * 100, pick = null;
     for (const x of pool) { r -= Number(x.pct) || 0; if (r < 0) { pick = x; break; } }
-    let held = false, voucher = false;
+    let held = false, voucher = false, pity = null;
+    const blanks0 = pcBlanks(d);
+    if (!pick && blanks0 + 1 >= PC.pity) {        // 꽝 10개째 — 꽝 대신 확정 상품
+      const r2 = await pcPityPrize(cfg, Date.now());
+      if (r2 === null) continue;
+      if (!r2.none) pity = r2;
+    }
     if (pick && pick.stock != null) {
       const got = pick.stock > 0 ? await pcStockMove(pick.id, -1, !!ev) : false;
       if (got === null) continue;                 // 그새 상품표가 바뀜 — 다시 뽑는다
@@ -918,16 +955,18 @@ async function pcOpen(res, claims, b) {
     }
     const now = Date.now();
     const pid = now.toString(36) + Math.random().toString(36).slice(2, 6), tag = ev ? { ev: ev.day } : {};
-    const prize = voucher ? { pid, id: pick.id, name: pcVoucherName(pick), of: pick.name, price: Number(pick.price) || 0, voucher: true, at: now, given: false, ...tag }
+    const prize = pity ? pity.prize : voucher ? { pid, id: pick.id, name: pcVoucherName(pick), of: pick.name, price: Number(pick.price) || 0, voucher: true, at: now, given: false, ...tag }
                 : pick ? { pid, id: pick.id, name: pick.name, at: now, given: false, ...tag }
                        : { pid, id: "blank", name: "꽝", at: now, blank: true };
-    const next = { name: who.name, bal: d.bal - PC.cost, opened: (d.opened || 0) + 1, ...(pick ? { prizes: [...(d.prizes || []), prize].slice(-200) } : {}),
+    const next = { name: who.name, bal: d.bal - PC.cost, opened: (d.opened || 0) + 1, blanks: pity ? blanks0 + 1 - PC.pity : pick ? blanks0 : blanks0 + 1,
+                   ...(pick || pity ? { prizes: [...(d.prizes || []), prize].slice(-200) } : {}),
                    ...(ev && pick ? { evDay: ev.day, evWins: won + 1 } : {}),
                    log: [...(d.log || []), { t: now, k: "open", d: -PC.cost, prize: prize.name }].slice(-PC_LOG) };
     if (await patchDocIf(pcPath(cid, sid), next, Object.keys(next), v)) {
       res.status(200).json({ ok: true, prize, bal: next.bal, ...(ev ? { event: { cap, won: won + (pick ? 1 : 0) } } : {}) }); return;
     }
     if (held) await pcStockMove(pick.id, +1, !!ev).catch(() => null);   // 장부를 못 썼다 — 잡은 재고를 돌려놓는다
+    if (pity && pity.held) await pcStockMove(pity.it.id, +1, false).catch(() => null);
   }
   res.status(409).json({ error: "잠깐 뒤에 다시 눌러 주세요" });
 }

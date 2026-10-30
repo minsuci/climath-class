@@ -211,7 +211,8 @@ const STUB = `
     var cfg = store["appConfig/pieces"] || { cids: [], items: [] }, on = (cfg.cids || []).indexOf(b.cid) >= 0;
     var cls = store["classes/" + b.cid] || {};
     var rowOf = function(sid){ return (cls.roster || []).filter(function(r){ return r.id === sid; })[0] || {}; };
-    var rules = function(){ return { cost: PCF.cost, streak: PCF.streak, awayMin: PCF.awayMin, awayEvery: PCF.awayEvery, awayPen: PCF.awayPen }; };
+    var rules = function(){ return { cost: PCF.cost, streak: PCF.streak, awayMin: PCF.awayMin, awayEvery: PCF.awayEvery, awayPen: PCF.awayPen, pity: 10 }; };
+    var pityIt = function(){ return (cfg.items || []).filter(function(x){ return /^작은 간식/.test(x.name); })[0] || (cfg.items || [])[0] || null; };
     var add = function(sid, n, k){ if (!n) return; var d = ledger(b.cid, sid); d.name = rowOf(sid).name; d.bal += n; d.earned += n; d.log.push({ t: Date.now(), k: k, d: n }); };
     var book = ((store["appConfig/examList"] || {}).exams || []).filter(function(e){ return e.id === b.bookId; })[0];
     if (book && book.qc) book = Object.assign({}, book, { questions: Array.from(book.qc.t, function(c, i){ return { n: i + 1, type: c === "m" ? "mc" : c === "s" ? "short" : "essay" }; }) });   // 창고 교재 — 목록엔 짧게(qc)
@@ -297,7 +298,10 @@ const STUB = `
     if (b.action === "pcMe") {
       if (!on) return ok({ ok: true, on: false });
       var d = ledger(b.cid, b.sid), ta = todayAw(d), sum = 0; (cfg.items || []).forEach(function(x){ sum += x.pct; });
+      var pn = null, pi = pityIt();
+      if (!rowOf(b.sid).teacher && (d.blanks || 0) >= 10 && pi) { pn = { pid: "y" + Date.now(), id: pi.id, name: pi.name, at: Date.now(), given: false, pity: true }; d.prizes.push(pn); d.blanks -= 10; if (pi.stock != null) pi.stock--; }
       return ok({ ok: true, on: true, bal: d.bal, earned: d.earned, opened: d.opened, awayN: ta.n, awayTot: ta.tot, rules: rules(), lect: lectOf(b.cid),
+        blanks: d.blanks || 0, pityName: pi ? pi.name : "", pityNew: pn,
         prizes: d.prizes.map(function(p){ var it = p.voucher && !p.given ? itemOf(p) : null; return p.voucher && !p.given ? Object.assign({}, p, { canSwap: !!it && (it.stock == null || it.stock > 0) }) : p; }),
         hasItems: (cfg.items || []).length > 0 || !!evNow,
         event: evNow ? { title: evNow.title, cap: evNow.cap, won: evWon(d), names: evNow.items.map(function(x){ return x.name; }),
@@ -325,6 +329,9 @@ const STUB = `
       var tag = evNow ? { ev: evNow.day } : {};
       var prize = vo ? Object.assign({ pid: "v" + Date.now(), id: pick.id, name: (Number(pick.price) > 0 ? Number(pick.price).toLocaleString("ko-KR") + "원" : pick.name) + " 교환권", of: pick.name, price: pick.price, voucher: true, at: Date.now(), given: false }, tag)
         : pick ? Object.assign({ pid: "p" + Date.now(), id: pick.id, name: pick.name, at: Date.now(), given: false }, tag) : { pid: "b" + Date.now(), id: "blank", name: "꽝", blank: true };
+      var pi3 = pityIt();
+      if (!pick && (d3.blanks || 0) + 1 >= 10 && pi3) { prize = { pid: "y" + Date.now(), id: pi3.id, name: pi3.name, at: Date.now(), given: false, pity: true }; if (pi3.stock != null) pi3.stock--; d3.blanks = (d3.blanks || 0) + 1 - 10; d3.prizes.push(prize); }
+      else if (!pick) d3.blanks = (d3.blanks || 0) + 1;
       d3.bal -= PCF.cost; d3.opened++; if (pick) d3.prizes.push(prize);
       if (evNow && pick) { d3.evDay = evNow.day; d3.evWins = w3 + 1; }
       return ok({ ok: true, prize: prize, bal: d3.bal });
@@ -445,9 +452,10 @@ const STUB = `
       questions: [["퀀텀 3번 원본","mc"],["퀀텀 3번 숫자","mc"],["퀀텀 3번 묻는 말","mc"],["퀀텀 6번 원본","short"],["기출01 15번 원본","mc"],["기출01 20번 원본","short"]]
         .map(function(x, i){ return { n: i + 1, type: x[1], label: x[0] }; }) }] };
   store["appConfig/pieces"] = { cids: ["c-reg"], items: [
-    { id: "g1", name: "1,000원 기프티콘", price: 1000, pct: 30, stock: 95 }, { id: "g2", name: "2,000원 기프티콘", price: 2000, pct: 6, stock: 20 },
-    { id: "g3", name: "3,000원 기프티콘", price: 3000, pct: 3, stock: 10 }, { id: "g4", name: "4,500원 기프티콘", price: 4500, pct: 1.2, stock: 4 },
-    { id: "g5", name: "6,000원 기프티콘", price: 6000, pct: 0.8, stock: 2 }] };
+    { id: "t1", name: "작은 간식 (고래밥·초코송이)", pct: 15, stock: 16 }, { id: "t2", name: "간식 (칸쵸·꼬북칩·바나나우유·빼빼로)", pct: 20, stock: 20 },
+    { id: "t3", name: "음료·초콜릿 (스무디·초코라떼·에이드·페레로로쉐)", pct: 12.5, stock: 13 }, { id: "t4", name: "투썸 떠먹는 아박", pct: 2.5, stock: 3 }] };
+  /* 꽝 모음 미리보기(10/30) — 임서윤 꽝 8개 · 조각 100(구슬 5개) */
+  store["classes/c-reg/pieces/s2"] = { bal: 100, earned: 100, opened: 8, blanks: 8, prizes: [], aways: [], log: [] };
 
   /* 미리보기 창고 — 단원 둘, 단원마다 1번부터(«01단원 n번»). 정답은 위 교재A 와 같게 ①·1 */
   var pvBook = function(key, title, subj, series, seriesName, vol, order, n){

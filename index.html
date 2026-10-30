@@ -4304,7 +4304,7 @@ function PieceCard({ cls, me, ver }) {
   const [busy, setBusy] = useState(false);
   const [got, setGot] = useState(null);    // {rolling} · {prize}
   const [coupon, setCoupon] = useState(null);   // {name, img} — 기프티콘 바코드 사진(서버가 주인 확인 뒤에만 준다)
-  const load = () => pcApi({ action: "pcMe", cid: cls.id, sid: me.id }).then((j) => { setD(j); setErr(""); }).catch((e) => setErr(e.message));
+  const load = () => pcApi({ action: "pcMe", cid: cls.id, sid: me.id }).then((j) => { setD(j); setErr(""); if (j.pityNew) setGot({ prize: j.pityNew }); }).catch((e) => setErr(e.message));
   useEffect(() => { pcAwayFlush(cls.id, me.id).finally(load); }, [cls.id, me.id, ver]);
   async function open() {
     if (busy) return;
@@ -4340,7 +4340,7 @@ function PieceCard({ cls, me, ver }) {
       <div className="pc-head">
         <div>
           <div className="pc-big">🧩 조각 <b>{d.bal}</b>개 <span className="pc-sep">·</span> 🔮 구슬 <b>{marbles}</b>개</div>
-          <div className="cm-hint">다음 구슬까지 조각 {R.cost - left}개 · 지금까지 연 구슬 {d.opened}개{d.held ? <> · <b>보류 {d.held}개</b>(수업 풀이 — 선생님이 풀면 들어와요)</> : null}</div>
+          <div className="cm-hint">다음 구슬까지 조각 {R.cost - left}개 · 지금까지 연 구슬 {d.opened}개{R.pity && d.pityName ? <> · 💨 꽝 <b>{d.blanks || 0} / {R.pity}</b></> : null}{d.held ? <> · <b>보류 {d.held}개</b>(수업 풀이 — 선생님이 풀면 들어와요)</> : null}</div>
         </div>
         <button className="cm-btn cm-btn-primary pc-open" disabled={busy || marbles < 1 || capped} onClick={open}>{capped ? "오늘은 다 받았어요" : "구슬 열기"}<small>{capped ? "남은 구슬은 내일" : "조각 " + R.cost + "개"}</small></button>
       </div>
@@ -4354,7 +4354,7 @@ function PieceCard({ cls, me, ver }) {
           ? <button key={p.pid} className="pc-chip swap" disabled={busy} onClick={() => swap(p)} title="재고가 채워졌어요">{p.name} → 바꾸기</button>
           : <span key={p.pid} className="pc-chip" title={p.voucher ? "재고가 채워지면 여기서 바꿀 수 있어요" : ""}>{p.name}</span>))} <span className="cm-hint">{waitV.some((p) => !p.canSwap) ? "교환권은 재고가 채워지면 «바꾸기» 가 떠요" : ""}</span></div>}
       <div className="cm-hint" style={{lineHeight: 1.7, marginTop: 8}}>
-        처음에 맞히면 조각 <b>1개</b> · 틀린 문제를 다시 풀어 맞혀도 <b>1개</b> · 번호 순서로 <b>{R.streak}문제 연속</b> 맞히면 <b>+1</b>. 조각 {R.cost}개가 모이면 구슬 하나 — 열면 기프티콘이 나올 수도 있어요.
+        처음에 맞히면 조각 <b>1개</b> · 틀린 문제를 다시 풀어 맞혀도 <b>1개</b> · 번호 순서로 <b>{R.streak}문제 연속</b> 맞히면 <b>+1</b>. 조각 {R.cost}개가 모이면 구슬 하나 — 열면 기프티콘이 나올 수도 있어요.{R.pity && d.pityName ? <> 꽝이 <b>{R.pity}개</b> 모이면 «{d.pityName.replace(/ \(.*\)$/, "")}» 하나는 확정이에요.</> : null}
         풀기 화면을 떠나면(다른 앱 · 홈 · 전원 버튼 — 손대지 않아 화면이 저절로 꺼진 건 안 셈) 기록돼요. {R.awayMin}초까지는 괜찮고, 하루에 {R.awayEvery}번째마다 조각 {R.awayPen}개가 빠져요.
       </div>
       {got && (
@@ -4363,16 +4363,18 @@ function PieceCard({ cls, me, ver }) {
             : got.prize.voucher ? (<>
               <div className="pc-roll done">🎟️</div>
               <h4 style={{margin: "6px 0 4px"}}>{got.prize.name}</h4>
+              {got.prize.pity && <div className="cm-hint"><b>꽝 {R.pity}개 모음 — 확정 보상!</b></div>}
               <div className="cm-hint">«{got.prize.of}» 이 나왔는데 지금 재고가 없어서 교환권으로 드려요.<br />재고가 채워지면 여기 «받을 상품» 에 «바꾸기» 가 떠요.</div>
               <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => setGot(null)}>확인</button>
             </>) : got.prize.blank ? (<>
               <div className="pc-roll done">💨</div>
               <h4 style={{margin: "6px 0 4px"}}>꽝</h4>
-              <div className="cm-hint">다음 구슬엔 나올 거예요</div>
+              <div className="cm-hint">{R.pity && d.pityName ? <>꽝 <b>{d.blanks || 0} / {R.pity}</b> — {R.pity}개 모이면 «{d.pityName.replace(/ \(.*\)$/, "")}» 확정이에요</> : "다음 구슬엔 나올 거예요"}</div>
               <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => setGot(null)}>확인</button>
             </>) : (<>
               <div className="pc-roll done">🎉</div>
               <h4 style={{margin: "6px 0 4px"}}>{got.prize.name}</h4>
+              {got.prize.pity && <div className="cm-hint" style={{marginBottom: 4}}><b>꽝 {R.pity}개 모음 — 확정 보상!</b></div>}
               <div className="cm-hint">{got.prize.swappedAt ? "교환권을 바꿨어요 — " : ""}아래에서 바코드를 바로 볼 수 있어요</div>
               <button className="mx-btn primary" style={{marginTop: 16}} onClick={() => { const p = got.prize; setGot(null); view(p); }}>🎫 바코드 보기</button>
               <div><button className="cm-link" style={{marginTop: 10}} onClick={() => setGot(null)}>나중에 볼게요</button></div>
